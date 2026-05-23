@@ -1,0 +1,452 @@
+"""
+All 30 active + 3 deprecated tool handlers for Seluj.
+Mirrors Jules' complete tool surface extracted from Gemini 4 Pro.
+"""
+
+import os
+import json
+import subprocess
+import shutil
+import shlex
+import tempfile
+from pathlib import Path
+from src.tool_base import register_tool, ToolParam
+
+REPO_ROOT = None
+
+def _run_bash(command: str, cwd: str = None) -> dict:
+    """Run a bash command and return structured output."""
+    try:
+        result = subprocess.run(
+            ["bash", "-c", command],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=cwd or REPO_ROOT or os.getcwd()
+        )
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"stdout": "", "stderr": "Command timed out after 300s", "exit_code": -1}
+    except Exception as e:
+        return {"stdout": "", "stderr": str(e), "exit_code": -1}
+
+
+@register_tool("list_files", "Lists all files and directories under the given directory (defaults to repo root).", [
+    ToolParam("path", "STRING", "The directory path to list files from. Defaults to the root of the repo."),
+])
+def tool_list_files(path: str = None, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    target = os.path.join(cwd, path) if path else cwd
+    if not os.path.isdir(target):
+        return {"error": f"Directory not found: {path or '(root)'}"}
+    
+    result = _run_bash(f"ls -a -1F --group-directories-first {shlex.quote(target)}")
+    return {
+        "files": result["stdout"].splitlines(),
+        "path": path or "(root)",
+        "total": len(result["stdout"].splitlines()),
+    }
+
+
+@register_tool("read_file", "Reads the content of the specified file in the repo.", [
+    ToolParam("filepath", "STRING", "The path of the file to read, relative to the repo root.", required=True),
+])
+def tool_read_file(filepath: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    full_path = os.path.join(cwd, filepath)
+    if not os.path.isfile(full_path):
+        return {"error": f"File does not exist: {filepath}"}
+    try:
+        with open(full_path, "r") as f:
+            content = f.read()
+        return {"content": content, "filepath": filepath, "size": len(content)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@register_tool("write_file", "Use this to create a new file or overwrite an existing file.", [
+    ToolParam("filepath", "STRING", "The path of the file to create or overwrite.", required=True),
+    ToolParam("content", "STRING", "The content to write to the file.", required=True),
+])
+def tool_write_file(filepath: str, content: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    full_path = os.path.join(cwd, filepath)
+    os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
+    try:
+        with open(full_path, "w") as f:
+            f.write(content)
+        return {"result": "File written successfully", "filepath": filepath, "size": len(content)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@register_tool("replace_with_git_merge_diff", "Perform a targeted search-and-replace using Git merge diff format.", [
+    ToolParam("filepath", "STRING", "The path of the file to modify.", required=True),
+    ToolParam("merge_diff", "STRING", "The diff to apply to the file.", required=True),
+])
+def tool_replace_with_git_merge_diff(filepath: str, merge_diff: str, context: dict = None):
+    """Parse SEARCH/REPLACE blocks and apply them."""
+    cwd = context.get("repo_root") if context else os.getcwd()
+    full_path = os.path.join(cwd, filepath)
+    if not os.path.isfile(full_path):
+        return {"error": f"File does not exist: {filepath}"}
+    
+    with open(full_path, "r") as f:
+        content = f.read()
+    
+    # Parse SEARCH/REPLACE blocks
+    blocks = merge_diff.split("<<<<<<< SEARCH")
+    if len(blocks) < 2:
+        return {"error": "No SEARCH blocks found. Use <<<<<<< SEARCH / ======= / >>>>>>> REPLACE format."}
+    
+    modified = content
+    changes = 0
+    
+    for block in blocks[1:]:
+        if "=======" not in block:
+            continue
+        if ">>>>>>> REPLACE" not in block:
+            continue
+        
+        search_part = block.split("=======")[0].strip()
+        replace_part = block.split("=======")[1].split(">>>>>>> REPLACE")[0].strip()
+        
+        if search_part in modified:
+            modified = modified.replace(search_part, replace_part, 1)
+            changes += 1
+        else:
+            return {"error": f"SEARCH block not found in file:\n{search_part[:200]}"}
+    
+    if changes == 0:
+        return {"error": "No changes applied. Check SEARCH/REPLACE format."}
+    
+    with open(full_path, "w") as f:
+        f.write(modified)
+    
+    return {"result": f"Applied {changes} change(s)", "filepath": filepath}
+
+
+@register_tool("delete_file", "Deletes the specified file.", [
+    ToolParam("filepath", "STRING", "The path of the file to delete.", required=True),
+])
+def tool_delete_file(filepath: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    full_path = os.path.join(cwd, filepath)
+    if not os.path.isfile(full_path):
+        return {"error": f"File does not exist: {filepath}"}
+    try:
+        os.remove(full_path)
+        return {"result": f"Deleted: {filepath}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@register_tool("rename_file", "Renames and/or moves files and directories.", [
+    ToolParam("filepath", "STRING", "The original path of the file or directory.", required=True),
+    ToolParam("new_filepath", "STRING", "The new path for the file or directory.", required=True),
+])
+def tool_rename_file(filepath: str, new_filepath: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    src = os.path.join(cwd, filepath)
+    dst = os.path.join(cwd, new_filepath)
+    if not os.path.exists(src):
+        return {"error": f"Source does not exist: {filepath}"}
+    if os.path.exists(dst):
+        return {"error": f"Target already exists: {new_filepath}"}
+    try:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.rename(src, dst)
+        return {"result": f"Renamed {filepath} → {new_filepath}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@register_tool("reset_all", "Resets the entire codebase to its original state. Use to undo all changes.")
+def tool_reset_all(context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    result = _run_bash("git reset --hard HEAD && git clean -fd", cwd)
+    return {"result": "Codebase reset to original state", "output": result["stdout"]}
+
+
+@register_tool("restore_file", "Restores the given file to its original state.", [
+    ToolParam("filepath", "STRING", "The path of the file to restore.", required=True),
+])
+def tool_restore_file(filepath: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    result = _run_bash(f"git checkout -- {shlex.quote(filepath)}", cwd)
+    return {"result": f"Restored: {filepath}", "output": result["stdout"]}
+
+
+@register_tool("run_in_bash_session", "Runs a bash command in the sandbox.", [
+    ToolParam("command", "STRING", "The bash command to run.", required=True),
+])
+def tool_run_in_bash_session(command: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    result = _run_bash(command, cwd)
+    return {
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
+        "exit_code": result["exit_code"],
+    }
+
+
+@register_tool("google_search", "Online Google search to retrieve up-to-date information.", [
+    ToolParam("query", "STRING", "The query to search for.", required=True),
+])
+def tool_google_search(query: str, context: dict = None):
+    """Uses the configured search tool."""
+    from web_tools import web_search
+    try:
+        result = web_search(query=query, limit=5)
+        return result
+    except ImportError:
+        return {"error": "web_search not available. Install web_tools or configure a search provider."}
+
+
+@register_tool("view_text_website", "Fetches website content as plain text.", [
+    ToolParam("url", "STRING", "The URL of the website to fetch.", required=True),
+])
+def tool_view_text_website(url: str, context: dict = None):
+    try:
+        import requests
+        r = requests.get(url, timeout=15, headers={"User-Agent": "Seluj/1.0"})
+        return {"url": url, "content": r.text[:50000], "status": r.status_code}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@register_tool("set_plan", "Use after initial exploration to set the first plan.", [
+    ToolParam("plan", "STRING", "The plan to solve the issue, in Markdown format.", required=True),
+])
+def tool_set_plan(plan: str, context: dict = None):
+    plan_file = os.path.join(context.get("repo_root", os.getcwd()), ".seluj", "plan.md")
+    os.makedirs(os.path.dirname(plan_file), exist_ok=True)
+    with open(plan_file, "w") as f:
+        f.write(plan)
+    return {"result": "Plan set", "plan": plan}
+
+
+@register_tool("plan_step_complete", "Marks the current plan step as complete.", [
+    ToolParam("message", "STRING", "Description of what was accomplished.", required=True),
+])
+def tool_plan_step_complete(message: str, context: dict = None):
+    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".seluj")
+    steps_file = os.path.join(plan_dir, "steps.json")
+    os.makedirs(plan_dir, exist_ok=True)
+    
+    steps = []
+    if os.path.exists(steps_file):
+        with open(steps_file) as f:
+            steps = json.load(f)
+    
+    steps.append({
+        "message": message,
+        "timestamp": str(__import__("datetime").datetime.now()),
+    })
+    
+    with open(steps_file, "w") as f:
+        json.dump(steps, f, indent=2)
+    
+    return {"result": "Step marked complete", "message": message}
+
+
+@register_tool("record_user_approval_for_plan", "Records the user's approval for the plan.")
+def tool_record_user_approval_for_plan(context: dict = None):
+    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".seluj")
+    os.makedirs(plan_dir, exist_ok=True)
+    with open(os.path.join(plan_dir, "approved"), "w") as f:
+        f.write("approved")
+    return {"result": "Plan approved"}
+
+
+@register_tool("message_user", "Send a message to the user.", [
+    ToolParam("message", "STRING", "The message to send.", required=True),
+    ToolParam("continue_working", "BOOLEAN", "Whether to continue working after sending."),
+])
+def tool_message_user(message: str, continue_working: bool = True, context: dict = None):
+    print(f"\n[SELUJ] {message}")
+    return {"sent": True, "message": message, "continue_working": continue_working}
+
+
+@register_tool("request_user_input", "Asks the user a question and waits for a response.", [
+    ToolParam("message", "STRING", "The question or prompt for the user.", required=True),
+])
+def tool_request_user_input(message: str, context: dict = None):
+    response = input(f"\n[SELUJ ASKS] {message}\n> ")
+    return {"response": response}
+
+
+@register_tool("pre_commit_instructions", "Get pre-commit steps. Call before submit.")
+def tool_pre_commit_instructions(context: dict = None):
+    instructions = """Pre-commit steps:
+1. Run all tests: python -m pytest tests/ or npm test
+2. Run linter: ruff check . or eslint .
+3. Type check: mypy . or tsc --noEmit
+4. Verify no debug code left behind
+5. Review diff: git diff
+"""
+    return {"instructions": instructions}
+
+
+@register_tool("submit", "Commits code and requests user approval to push.", [
+    ToolParam("branch_name", "STRING", "The branch name.", required=True),
+    ToolParam("commit_message", "STRING", "The commit message.", required=True),
+    ToolParam("title", "STRING", "The title of the submission.", required=True),
+    ToolParam("description", "STRING", "The description of the submission.", required=True),
+])
+def tool_submit(branch_name: str, commit_message: str, title: str, description: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    
+    # Create branch
+    _run_bash(f"git checkout -b {shlex.quote(branch_name)}", cwd)
+    
+    # Add and commit
+    _run_bash("git add -A", cwd)
+    commit_result = _run_bash(f"git commit -m {shlex.quote(commit_message)}", cwd)
+    
+    return {
+        "branch": branch_name,
+        "commit_message": commit_message,
+        "title": title,
+        "description": description,
+        "commit_output": commit_result["stdout"] or commit_result["stderr"],
+    }
+
+
+@register_tool("request_code_review", "Request a code review for the current change.")
+def tool_request_code_review(context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    diff_result = _run_bash("git diff HEAD~1 --stat", cwd)
+    return {
+        "result": "Code review requested",
+        "changes": diff_result["stdout"],
+        "message": "Please review the changes above.",
+    }
+
+
+@register_tool("read_pr_comments", "Reads any pending pull request comments.")
+def tool_read_pr_comments(context: dict = None):
+    return {"comments": [], "message": "No pending PR comments."}
+
+
+@register_tool("reply_to_pr_comments", "Reply to PR comments.", [
+    ToolParam("replies", "STRING", "JSON string: [{\"comment_id\": \"...\", \"reply\": \"...\"}]", required=True),
+])
+def tool_reply_to_pr_comments(replies: str, context: dict = None):
+    try:
+        parsed = json.loads(replies)
+        return {"result": f"Replied to {len(parsed)} comments", "replies": parsed}
+    except json.JSONDecodeError:
+        return {"error": "Invalid JSON in replies parameter"}
+
+
+@register_tool("initiate_memory_recording", "Start recording info for future tasks.")
+def tool_initiate_memory_recording(context: dict = None):
+    return {"result": "Memory recording initiated"}
+
+
+@register_tool("view_image", "Loads an image from URL for analysis.", [
+    ToolParam("url", "STRING", "The URL of the image to view.", required=True),
+])
+def tool_view_image(url: str, context: dict = None):
+    return {"url": url, "result": "Image loaded. Use vision_analyze to examine it."}
+
+
+@register_tool("read_image_file", "Reads an image file from the machine.", [
+    ToolParam("filepath", "STRING", "The path of the image file.", required=True),
+])
+def tool_read_image_file(filepath: str, context: dict = None):
+    return {"filepath": filepath, "result": "Image loaded. Use vision_analyze to examine it."}
+
+
+@register_tool("read_media_file", "Reads a media file (image/video) from the machine.", [
+    ToolParam("filepath", "STRING", "The path of the media file.", required=True),
+])
+def tool_read_media_file(filepath: str, context: dict = None):
+    return {"filepath": filepath, "result": "Media loaded."}
+
+
+@register_tool("frontend_verification_instructions", "Returns Playwright instructions for frontend verification.")
+def tool_frontend_verification_instructions(context: dict = None):
+    return {
+        "instructions": """To verify frontend changes:
+1. Install Playwright: npm init playwright@latest
+2. Write a test script that:
+   - Starts the dev server
+   - Takes screenshots of changed pages
+   - Verifies key elements exist
+3. Run: npx playwright test
+4. Use frontend_verification_complete with the screenshot path"""
+    }
+
+
+@register_tool("frontend_verification_complete", "Indicate frontend changes have been verified.", [
+    ToolParam("screenshot_path", "STRING", "Path to the screenshot.", required=True),
+    ToolParam("additional_media_paths", "ARRAY", "Additional media files to include."),
+])
+def tool_frontend_verification_complete(screenshot_path: str, additional_media_paths: list = None, context: dict = None):
+    return {
+        "result": "Frontend verified",
+        "screenshot": screenshot_path,
+        "additional_media": additional_media_paths or [],
+    }
+
+
+@register_tool("start_live_preview_instructions", "Returns instructions for starting a live preview server.")
+def tool_start_live_preview_instructions(context: dict = None):
+    return {
+        "instructions": "Run the dev server in the background: npm run dev & or python -m http.server 8000 &"
+    }
+
+
+@register_tool("call_hello_world_agent", "Calls the Hello World Agency agent.", [
+    ToolParam("message", "STRING", "Message to send to the agent.", required=True),
+])
+def tool_call_hello_world_agent(message: str, context: dict = None):
+    return {
+        "result": f"Hello World agent received: {message}",
+        "response": f"Echo: {message}",
+    }
+
+
+@register_tool("done", "Subagent completion signal.", [
+    ToolParam("summary", "STRING", "Summary of what was accomplished.", required=True),
+])
+def tool_done(summary: str, context: dict = None):
+    return {"result": "Task completed", "summary": summary}
+
+
+# Deprecated tools
+@register_tool("grep", "DEPRECATED - use grep with run_in_bash_session instead.", [
+    ToolParam("pattern", "STRING", "The pattern to search for.", required=True),
+])
+def tool_grep(pattern: str, context: dict = None):
+    cwd = context.get("repo_root") if context else os.getcwd()
+    result = _run_bash(f"grep -r {shlex.quote(pattern)} --include='*.py' --include='*.js' --include='*.ts' --include='*.rs' --include='*.go' .", cwd)
+    return {"matches": result["stdout"].splitlines(), "total": len(result["stdout"].splitlines())}
+
+
+@register_tool("create_file_with_block", "DEPRECATED - use write_file instead.", [
+    ToolParam("filepath", "STRING", "The path of the file to create.", required=True),
+    ToolParam("content", "STRING", "The content to write.", required=True),
+])
+def tool_create_file_with_block(filepath: str, content: str, context: dict = None):
+    return tool_write_file(filepath, content, context)
+
+
+@register_tool("overwrite_file_with_block", "DEPRECATED - use write_file instead.", [
+    ToolParam("filepath", "STRING", "The path of the file to overwrite.", required=True),
+    ToolParam("content", "STRING", "The new content for the file.", required=True),
+])
+def tool_overwrite_file_with_block(filepath: str, content: str, context: dict = None):
+    return tool_write_file(filepath, content, context)
+
+
+def init(repo_root: str = None):
+    """Initialize Seluj tools with a repo root."""
+    global REPO_ROOT
+    REPO_ROOT = repo_root or os.getcwd()
