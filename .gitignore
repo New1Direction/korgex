@@ -1,8 +1,41 @@
+# Python
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*.pyo
 *.egg-info/
 dist/
 build/
+*.egg
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environment
+.env
+.env.*
+*.key
+*.pem
+*.crt
+credentials*
+secrets*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Seluj
 .seluj/
+*.log
 node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
