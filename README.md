@@ -15,9 +15,21 @@
 KorgKode integrates with your repositories, understands your entire codebase, and works autonomously to fix bugs, write tests, build features, and refactor code. You describe what needs to be done — KorgKode handles the rest.
 
 ```bash
-pip install -r requirements.txt
-export KORGKODE_API_KEY="sk-..."
-./korgkode.sh "Add unit tests for the authentication module"
+# One-shot install
+pip install korgkode
+
+# Launch the editor
+korgkode
+```
+
+**Or from source:**
+
+```bash
+git clone https://github.com/New1Direction/KorgKode.git
+cd KorgKode
+pip install -e .
+korgkode init          # install deps + compile VS Code extension
+korgkode               # launch backend + VS Code sidecar
 ```
 
 ---
@@ -33,6 +45,30 @@ export KORGKODE_API_KEY="sk-..."
 - [Why KorgKode?](#-why-korgkode)
 - [Documentation](#-documentation)
 - [License](#-license)
+
+---
+
+## 📟 CLI & VS Code Extension
+
+The `korgkode` CLI is the primary entry point:
+
+| Command | What it does |
+|---|---|
+| `korgkode` | Starts the FastAPI backend + opens VS Code with the sidecar |
+| `korgkode init` | One-shot setup: installs Python deps, compiles the extension |
+| `korgkode dashboard` | Opens the web dashboard on port 8090 |
+| `korgkode status` | Checks if the backend is running |
+| `korgkode stop` | Stops the background backend server |
+| `korgkode install-extension` | Installs the `.vsix` into VS Code |
+
+**VS Code commands** (Cmd+Shift+P after installing the sidecar):
+
+| Command | Action |
+|---|---|
+| `KorgKode: Refactor Current File` | Sends the active file to the KorgKode swarm |
+| `KorgKode: Run TDD Healer on Current File` | Prompts for a test command, runs the healer |
+| `KorgKode: Profile Test Suite` | Runs cProfile via the performance profiler |
+| `KorgKode: Open the Swarm Dashboard` | Opens `http://localhost:8090/dashboard` in your browser |
 
 ---
 
