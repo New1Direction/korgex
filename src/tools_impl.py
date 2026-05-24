@@ -751,6 +751,45 @@ def tool_memory_list(mem_type: str = None, context: dict = None):
     return {"memories": list_memories(mem_type)}
 
 
+# ─── Mode & Strict Pairing Tools ──────────────────────────────────────
+
+@register_tool("enter_plan_mode", "Enter plan mode: read-only analysis with no file modifications. Write plan to plan file, then use exit_plan_mode to return.", [
+    ToolParam("plan_file", "STRING", "Path to write the plan file to.", required=True),
+])
+def tool_enter_plan_mode(plan_file: str, context: dict = None):
+    from src.mode_schemas import ModeStateMachine
+    machine = ModeStateMachine("execute")
+    result = machine.enter_mode("plan")
+    return {
+        "mode": "plan",
+        "description": "Read-only analysis mode. Use Read, Glob, Grep, Agent(plan), AskUserQuestion. NO writing, editing, or bash.",
+        "plan_file": plan_file,
+        "instructions": "Write your analysis to the plan file. When ready, call exit_plan_mode for approval."
+    }
+
+
+@register_tool("exit_plan_mode", "Exit plan mode and return to execute mode. Call this when your plan is written and you need approval.", [
+    ToolParam("plan_file", "STRING", "Path to the plan file you wrote.", required=True),
+])
+def tool_exit_plan_mode(plan_file: str, context: dict = None):
+    from src.mode_schemas import ModeStateMachine
+    machine = ModeStateMachine("plan")
+    result = machine.exit_mode()
+    return {
+        "mode": "execute",
+        "description": "Full execution mode. All tools available.",
+        "plan_file": plan_file,
+        "instructions": "Request user approval of the written plan before proceeding."
+    }
+
+
+@register_tool("tool_use_status", "Check the status of tool result pairing. Shows pending and completed tool calls with their IDs.", [])
+def tool_tool_use_status(context: dict = None):
+    from src.strict_pairing import get_context
+    ctx = get_context()
+    return ctx.to_dict()
+
+
 def init(repo_root: str = None, sandbox_mode: str = None):
     """Initialize KorgKode tools with a repo root and optional sandbox."""
     global REPO_ROOT, SANDBOX
