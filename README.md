@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 KorgKode
+# 🧠 Korgex
 
 **Autonomous AI Software Engineer** — 33 tools · Plan-first · Async PR pipeline · Model agnostic · Open source
 
@@ -12,24 +12,24 @@
 
 </div>
 
-KorgKode integrates with your repositories, understands your entire codebase, and works autonomously to fix bugs, write tests, build features, and refactor code. You describe what needs to be done — KorgKode handles the rest.
+Korgex integrates with your repositories, understands your entire codebase, and works autonomously to fix bugs, write tests, build features, and refactor code. You describe what needs to be done — Korgex handles the rest.
 
 ```bash
 # One-shot install
-pip install korgkode
+pip install korgex
 
 # Launch the editor
-korgkode
+korgex
 ```
 
 **Or from source:**
 
 ```bash
-git clone https://github.com/New1Direction/KorgKode.git
-cd KorgKode
+git clone https://github.com/New1Direction/Korgex.git
+cd Korgex
 pip install -e .
-korgkode init          # install deps + compile VS Code extension
-korgkode               # launch backend + VS Code sidecar
+korgex init          # install deps + compile VS Code extension
+korgex               # launch backend + VS Code sidecar
 ```
 
 ---
@@ -42,7 +42,7 @@ korgkode               # launch backend + VS Code sidecar
 - [33 Tools](#-33-tools)
 - [Demo Ideas](#-demo-ideas)
 - [Git Workflow](#-git-workflow)
-- [Why KorgKode?](#-why-korgkode)
+- [Why Korgex?](#-why-korgex)
 - [Enterprise: Zero-Hallucination](#-enterprise-zero-hallucination)
 - [Documentation](#-documentation)
 - [License](#-license)
@@ -51,25 +51,25 @@ korgkode               # launch backend + VS Code sidecar
 
 ## 📟 CLI & VS Code Extension
 
-The `korgkode` CLI is the primary entry point:
+The `korgex` CLI is the primary entry point:
 
 | Command | What it does |
 |---|---|
-| `korgkode` | Starts the FastAPI backend + opens VS Code with the sidecar |
-| `korgkode init` | One-shot setup: installs Python deps, compiles the extension |
-| `korgkode dashboard` | Opens the web dashboard on port 8090 |
-| `korgkode status` | Checks if the backend is running |
-| `korgkode stop` | Stops the background backend server |
-| `korgkode install-extension` | Installs the `.vsix` into VS Code |
+| `korgex` | Starts the FastAPI backend + opens VS Code with the sidecar |
+| `korgex init` | One-shot setup: installs Python deps, compiles the extension |
+| `korgex dashboard` | Opens the web dashboard on port 8090 |
+| `korgex status` | Checks if the backend is running |
+| `korgex stop` | Stops the background backend server |
+| `korgex install-extension` | Installs the `.vsix` into VS Code |
 
 **VS Code commands** (Cmd+Shift+P after installing the sidecar):
 
 | Command | Action |
 |---|---|
-| `KorgKode: Refactor Current File` | Sends the active file to the KorgKode swarm |
-| `KorgKode: Run TDD Healer on Current File` | Prompts for a test command, runs the healer |
-| `KorgKode: Profile Test Suite` | Runs cProfile via the performance profiler |
-| `KorgKode: Open the Swarm Dashboard` | Opens `http://localhost:8090/dashboard` in your browser |
+| `Korgex: Refactor Current File` | Sends the active file to the Korgex swarm |
+| `Korgex: Run TDD Healer on Current File` | Prompts for a test command, runs the healer |
+| `Korgex: Profile Test Suite` | Runs cProfile via the performance profiler |
+| `Korgex: Open the Swarm Dashboard` | Opens `http://localhost:8090/dashboard` in your browser |
 
 ---
 
@@ -77,10 +77,10 @@ The `korgkode` CLI is the primary entry point:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        KORGKODE AGENT LOOP                            │
+│                        KORGEX AGENT LOOP                            │
 │                                                                     │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────────┐ │
-│  │  USER     │   │  KORGKODE   │   │  PLAN    │   │   APPROVAL       │ │
+│  │  USER     │   │  KORGEX   │   │  PLAN    │   │   APPROVAL       │ │
 │  │  PROMPT   │──▶│ EXPLORES │──▶│  SET     │──▶│   RECORDED       │ │
 │  │           │   │ codebase │   │ markdown │   │                  │ │
 │  └──────────┘   └──────────┘   └──────────┘   └──────────────────┘ │
@@ -111,27 +111,27 @@ The `korgkode` CLI is the primary entry point:
 
 ```bash
 # 1. Clone
-git clone https://github.com/New1Direction/KorgKode.git
-cd KorgKode
+git clone https://github.com/New1Direction/Korgex.git
+cd Korgex
 pip install -r requirements.txt
 
 # 2. Set API key (any LLM provider)
-export KORGKODE_API_KEY="sk-your-key-here"
-export KORGKODE_MODEL="gpt-4o"          # or claude, deepseek, llama, etc.
+export KORGEX_API_KEY="sk-your-key-here"
+export KORGEX_MODEL="gpt-4o"          # or claude, deepseek, llama, etc.
 
 # 3. Initialize in your project
 cd /path/to/your/project
-/path/to/KorgKode/korgkode.sh --init
+/path/to/Korgex/korgex.sh --init
 
 # 4. Run a task
-/path/to/KorgKode/korgkode.sh "Add tests for the user authentication flow"
+/path/to/Korgex/korgex.sh "Add tests for the user authentication flow"
 ```
 
 ---
 
 ## 🎯 Capabilities
 
-| Category | What KorgKode Can Do | Example Prompt |
+| Category | What Korgex Can Do | Example Prompt |
 |----------|------------------|----------------|
 | 🐛 **Bug Fixing** | Diagnose errors, find root cause, apply fix across files | `Fix the 500 error on the checkout page` |
 | 🧪 **Test Writing** | Generate unit tests, integration tests, edge cases | `Add pytest tests for the payment processor` |
@@ -195,69 +195,69 @@ cd /path/to/your/project
 
 ## 🎬 Demo Ideas
 
-Try these out of the box. Each demo showcases a different KorgKode capability.
+Try these out of the box. Each demo showcases a different Korgex capability.
 
 ### Demo 1: Bug Fix (5 minutes)
 ```bash
 git clone https://github.com/your-test-repo.git
 cd your-test-repo
-korgkode.sh "Fix the login redirect bug — users are redirected to /home instead of /dashboard after login"
+korgex.sh "Fix the login redirect bug — users are redirected to /home instead of /dashboard after login"
 ```
-**What you'll see:** KorgKode reads the auth flow, finds the redirect logic, patches it, runs tests, submits.
+**What you'll see:** Korgex reads the auth flow, finds the redirect logic, patches it, runs tests, submits.
 
 ### Demo 2: Feature Addition (10 minutes)
 ```bash
-korgkode.sh "Add a /healthz endpoint that returns JSON {status: 'ok'} with a 200 status code"
+korgex.sh "Add a /healthz endpoint that returns JSON {status: 'ok'} with a 200 status code"
 ```
-**What you'll see:** KorgKode explores the project structure, picks the right framework file, writes the endpoint, adds a test, verifies it passes.
+**What you'll see:** Korgex explores the project structure, picks the right framework file, writes the endpoint, adds a test, verifies it passes.
 
 ### Demo 3: Test Generation (5 minutes)
 ```bash
-korgkode.sh "Write pytest tests for the stripe payment module — cover success, failure, and timeout cases"
+korgex.sh "Write pytest tests for the stripe payment module — cover success, failure, and timeout cases"
 ```
-**What you'll see:** KorgKode reads the module, identifies all code paths, generates test cases, runs them, fixes any failures.
+**What you'll see:** Korgex reads the module, identifies all code paths, generates test cases, runs them, fixes any failures.
 
 ### Demo 4: Dependency Migration (15 minutes)
 ```bash
-korgkode.sh "Upgrade all outdated npm packages to their latest versions and fix any breaking changes"
+korgex.sh "Upgrade all outdated npm packages to their latest versions and fix any breaking changes"
 ```
-**What you'll see:** KorgKode reads package.json, detects outdated deps, updates versions, handles breaking changes across files, runs the build.
+**What you'll see:** Korgex reads package.json, detects outdated deps, updates versions, handles breaking changes across files, runs the build.
 
 ### Demo 5: Full Project Scaffold (10 minutes)
 ```bash
 mkdir my-new-api && cd my-new-api
 git init
-korgkode.sh "Create a FastAPI project with user authentication, a health endpoint, and pytest test suite"
+korgex.sh "Create a FastAPI project with user authentication, a health endpoint, and pytest test suite"
 ```
-**What you'll see:** KorgKode builds a complete project from scratch — directory structure, config files, source code, tests, README.
+**What you'll see:** Korgex builds a complete project from scratch — directory structure, config files, source code, tests, README.
 
 ### Demo 6: Code Review Pipeline (10 minutes)
 ```bash
 # Create a PR with some issues, then:
-korgkode.sh "Review the open PR, check for security issues, and reply to any pending comments"
+korgex.sh "Review the open PR, check for security issues, and reply to any pending comments"
 ```
-**What you'll see:** KorgKode reads PR comments, analyzes the diff, replies to feedback, pushes fixes.
+**What you'll see:** Korgex reads PR comments, analyzes the diff, replies to feedback, pushes fixes.
 
 ### Demo 7: Async Multi-Agent (15 minutes)
 ```bash
 # Fire off multiple tasks in parallel
-korgkode.sh "Write tests for the auth module" --async &
-korgkode.sh "Add input validation to the API layer" --async &
-korgkode.sh "Update the README with API documentation" --async &
+korgex.sh "Write tests for the auth module" --async &
+korgex.sh "Add input validation to the API layer" --async &
+korgex.sh "Update the README with API documentation" --async &
 ```
-**What you'll see:** Three KorgKode agents work in parallel, each in their own sandbox. Results appear as they complete.
+**What you'll see:** Three Korgex agents work in parallel, each in their own sandbox. Results appear as they complete.
 
 ---
 
 ## 🔄 Git Workflow
 
-KorgKode follows a structured git workflow inspired by industry best practices:
+Korgex follows a structured git workflow inspired by industry best practices:
 
 ```
 main ──▶ feature/user-auth ──▶ commit ──▶ push ──▶ PR ready
          ▲                    ▲          ▲
          │                    │          │
-    KorgKode creates       KorgKode commits   User approves
+    Korgex creates       Korgex commits   User approves
     branch from main    with meaningful  push to remote
                         message
 ```
@@ -273,7 +273,7 @@ chore/description      — Maintenance
 ```
 
 ### Commit Messages
-KorgKode generates descriptive commit messages:
+Korgex generates descriptive commit messages:
 
 ```
 ✅ Good: "fix: correct redirect URL after login — was pointing to /home, now points to /dashboard"
@@ -283,7 +283,7 @@ KorgKode generates descriptive commit messages:
 ```
 
 ### Pre-Commit Checks
-Before every commit, KorgKode runs:
+Before every commit, Korgex runs:
 1. ✅ Test suite
 2. ✅ Linter
 3. ✅ Type checker
@@ -292,9 +292,9 @@ Before every commit, KorgKode runs:
 
 ---
 
-## 📊 Why KorgKode?
+## 📊 Why Korgex?
 
-| Capability | KorgKode | GitHub Copilot | Cursor AI | Cody | Claude Code |
+| Capability | Korgex | GitHub Copilot | Cursor AI | Cody | Claude Code |
 |-----------|-------|---------------|-----------|------|-------------|
 | **Autonomous execution** | ✅ Full async agent | ❌ Suggestions only | ⚠️ Limited | ✅ Basic | ⚠️ Interactive |
 | **Plan-first workflow** | ✅ Required | ❌ | ❌ | ❌ | ⚠️ Optional |
@@ -311,7 +311,7 @@ Before every commit, KorgKode runs:
 
 ## 🔒 Enterprise: Zero-Hallucination Runtime
 
-KorgKode is the **first auditable, deterministic agentic runtime**. Every tool call is cryptographically bound to its result.
+Korgex is the **first auditable, deterministic agentic runtime**. Every tool call is cryptographically bound to its result.
 
 ### The problem
 
@@ -336,7 +336,7 @@ Every other coding agent (Claude Code, Cursor, Copilot, Windsurf) has a fundamen
 
 ### Why enterprise security teams care
 
-| Requirement | KorgKode | Other agents |
+| Requirement | Korgex | Other agents |
 |---|---|---|
 | **Tamper-evident tool execution** | SHA256 binding between call and result | No binding — model can fabricate |
 | **Audit trail** | Every tool call logged with ID, timestamp, duration | Limited or no per-call logging |
@@ -347,7 +347,7 @@ Every other coding agent (Claude Code, Cursor, Copilot, Windsurf) has a fundamen
 
 ### Compliance-ready
 
-KorgKode's strict pairing directly addresses requirements emerging from:
+Korgex's strict pairing directly addresses requirements emerging from:
 - **EU AI Act** — auditable AI decision chains
 - **SEC/FINRA** — tamper-evident record keeping
 - **SOX** — change management and access controls
@@ -357,7 +357,7 @@ The `validate_prompt_history()` function provides a machine-readable compliance 
 
 ```bash
 # Generate compliance report for any conversation
-korgkode audit --session last
+korgex audit --session last
 # → {"valid": true, "total_results": 47, "violations": []}
 ```
 
@@ -373,7 +373,7 @@ korgkode audit --session last
 | [Reviewing Plans & Feedback](docs/review-plan.md) | Plan approval, mid-task steering |
 | [CLI Reference](docs/cli-reference.md) | Commands, flags, env variables |
 | [Tools Reference](docs/tools-reference.md) | All 33 tools with parameters |
-| [KorgKode vs The Rest](docs/comparison.md) | Competitive comparison |
+| [Korgex vs The Rest](docs/comparison.md) | Competitive comparison |
 
 ---
 

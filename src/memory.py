@@ -1,5 +1,5 @@
 """
-KorgKode Memory System — file-based persistent memory inspired by Claude Code.
+Korgex Memory System — file-based persistent memory inspired by Claude Code.
 
 Architecture:
   memory_dir/
@@ -41,9 +41,9 @@ def init_memory(project_root: str = None):
     """Initialize the memory directory structure."""
     global MEMORY_DIR
     if project_root:
-        MEMORY_DIR = os.path.join(project_root, ".korgkode", "memory")
+        MEMORY_DIR = os.path.join(project_root, ".korgex", "memory")
     else:
-        MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".korgkode", "memory")
+        MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".korgex", "memory")
     
     os.makedirs(MEMORY_DIR, exist_ok=True)
     

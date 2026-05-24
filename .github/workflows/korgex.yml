@@ -1,0 +1,94 @@
+# Korgex CI/CD — GitHub Action
+#
+# Runs Korgex autonomously when:
+# - An issue is labeled "korgex"
+# - A PR is opened or receives a review comment
+#
+# Install this file at: .github/workflows/korgex.yml
+
+name: Korgex Autonomous Agent
+
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [opened, synchronize, labeled]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  korgex:
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'korgex') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '/korgex')) ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'korgex')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '/korgex'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      checks: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install Korgex
+        run: |
+          git clone https://github.com/New1Direction/Korgex.git /opt/korgex
+          pip install -r /opt/korgex/requirements.txt
+      
+      - name: Setup GitHub Token
+        run: |
+          echo "KORGEX_GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
+          echo "KORGEX_API_KEY=${{ secrets.KORGEX_API_KEY }}" >> $GITHUB_ENV
+          echo "KORGEX_MODEL=${{ secrets.KORGEX_MODEL }}" >> $GITHUB_ENV
+      
+      - name: Run Korgex on Issue
+        if: github.event_name == 'issues' && github.event.label.name == 'korgex'
+        run: |
+          /opt/korgex/korgex.sh \
+            "Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+             ${{ github.event.issue.body }}"
+        env:
+          KORGEX_SANDBOX: docker
+      
+      - name: Run Korgex on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          /opt/korgex/korgex.sh \
+            "PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+             ${{ github.event.pull_request.body }}"
+        env:
+          KORGEX_SANDBOX: docker
+      
+      - name: Run Korgex on Comment
+        if: contains(github.event.comment.body, '/korgex')
+        run: |
+          /opt/korgex/korgex.sh \
+            "Address feedback: ${{ github.event.comment.body }}"
+        env:
+          KORGEX_SANDBOX: docker
+      
+      - name: Create Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('/tmp/korgex-summary.md', 'utf8').catch(() => 'Task completed by Korgex.');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🤖 Korgex Complete\n\n${summary}\n\n---\n*Powered by [Korgex](https://github.com/New1Direction/Korgex)*`
+            });

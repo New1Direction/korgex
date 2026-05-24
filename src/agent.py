@@ -1,8 +1,13 @@
 """
-KorgKode — Core Agent Loop.
+Korgex — Core Agent Loop (provider-agnostic).
 
-Orchestrates the full Jules workflow:
-Explore → Plan → Approve → Execute → Verify → Pre-commit → Submit
+Pipeline:
+    user prompt
+      → LLM (tools = model-facing schemas from USER_TOOLS)
+      → tool_use blocks
+      → route_tool_call → internal handlers (internal tool_* in tools_impl)
+      → tool_result back to LLM
+      → loop until LLM stops calling tools, or max_iterations
 """
 
 import json
@@ -11,189 +16,451 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from src.tool_base import (
-    get_tool_schemas, dispatch_tool, get_context,
-    TOOL_REGISTRY
-)
-import src.tools_impl as tools_impl
+from src.tool_abstraction import USER_TOOLS, route_tool_call
+# tools_impl must be imported so its @register_tool decorators populate the registry
+import src.tools_impl  # noqa: F401
 
-SYSTEM_PROMPT = """You are KorgKode, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks, such as solving bugs, implementing features, and writing tests.
+
+SYSTEM_PROMPT = """You are Korgex, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks: solving bugs, implementing features, writing tests, and refactoring code.
 
 CORE DIRECTIVES:
-1. PLAN FIRST: Explore the codebase. Read AGENTS.md, README.md. Formulate a plan with set_plan.
-2. VERIFY WORK: After every modification, confirm success with read_file or list_files.
-3. EDIT SOURCE, NOT ARTIFACTS: Never modify build artifacts (dist/, build/, node_modules/).
-4. PROACTIVE TESTING: Find and run tests. Include testing in plans.
-5. DIAGNOSE BEFORE CHANGING: Read error logs before installing packages.
-6. SOLVE AUTONOMOUSLY: Ask only if ambiguous, stuck, or scope-changing.
+1. PLAN FIRST: Explore the codebase before acting. Read README.md and any AGENTS.md. Understand context before proposing changes.
+2. VERIFY WORK: After every modification, read the file back to confirm the change applied correctly.
+3. EDIT SOURCE, NOT ARTIFACTS: Never modify build artifacts (dist/, build/, node_modules/, __pycache__/, .next/). Trace back to the source file.
+4. PROACTIVE TESTING: Locate relevant tests, run them, and include testing in your plan.
+5. DIAGNOSE BEFORE CHANGING: Read error logs and configs before installing new packages or making structural changes.
+6. SOLVE AUTONOMOUSLY: Ask the user only when the task is genuinely ambiguous, you are stuck after several attempts, or the scope appears to be changing.
 
-Each response must contain at least one tool call.
-Before finishing: call pre_commit_instructions, then submit.
-Use SEARCH/REPLACE format (<<<<<<< SEARCH / ======= / >>>>>>> REPLACE) for edits.
+TOOL USE:
+- Prefer Read/Edit/Write/Grep/Glob over shelling out to cat/sed/grep/find.
+- Use Edit for surgical changes to existing files; use Write only to create new files or for full rewrites.
+- When in doubt, Read first. Always Read a file before Editing it.
 """
 
 
-class KorgKodeAgent:
-    """The KorgKode agent loop."""
-    
-    def __init__(self, repo_root: str = None, model: str = None):
-        self.repo_root = repo_root or os.getcwd()
-        self.model = model or os.environ.get("KORGKODE_MODEL", "deepseek/deepseek-v4-flash")
-        self.provider = os.environ.get("KORGKODE_PROVIDER", "nous")
-        self.context = get_context()
-        self.context["repo_root"] = self.repo_root
-        self.conversation_history = []
-        
-        # Initialize tools
-        tools_impl.init(self.repo_root)
-        
-    def get_system_message(self) -> dict:
-        """Build the system message with prompt + tool schemas."""
-        tool_schemas = get_tool_schemas()
-        tools_json = json.dumps(tool_schemas, indent=2)
-        
-        return {
-            "role": "system",
-            "content": f"{SYSTEM_PROMPT}\n\nAvailable Tools:\n{tools_json}"
-        }
-    
-    def run_task(self, task_description: str) -> dict:
-        """Run a full agent task: explore → plan → execute → submit."""
-        messages = [self.get_system_message()]
-        
-        # Step 1: User prompt
-        messages.append({"role": "user", "content": task_description})
-        
-        # Step 2: Agent exploration loop (limited iterations)
-        max_iterations = int(os.environ.get("KORGKODE_MAX_ITERATIONS", "50"))
-        
-        for iteration in range(max_iterations):
-            # Call the LLM
-            response = self._call_llm(messages)
-            
-            # Check for tool calls
-            tool_calls = response.get("tool_calls", [])
-            
-            if not tool_calls:
-                # No tools means final response
-                assistant_msg = {
-                    "role": "assistant",
-                    "content": response.get("content", "")
-                }
-                messages.append(assistant_msg)
-                
-                # Check if done
-                if response.get("content", "").strip():
-                    return {
-                        "result": response["content"],
-                        "iterations": iteration + 1,
-                        "messages": messages,
-                    }
-                continue
-            
-            # Process tool calls
-            for tool_call in tool_calls:
-                tool_name = tool_call.get("name", "")
-                tool_args = json.loads(tool_call.get("arguments", "{}")) if isinstance(tool_call.get("arguments"), str) else tool_call.get("arguments", {})
-                
-                # Execute tool
-                tool_result = dispatch_tool(tool_name, tool_args, self.context)
-                
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": tool_call.get("id", f"call_{iteration}_{tool_name}"),
-                        "type": "function",
-                        "function": {
-                            "name": tool_name,
-                            "arguments": json.dumps(tool_args),
-                        }
-                    }]
-                })
-                
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.get("id", f"call_{iteration}_{tool_name}"),
-                    "content": json.dumps(tool_result, default=str),
-                })
-        
-        return {
-            "result": "Max iterations reached",
-            "iterations": max_iterations,
-            "messages": messages,
-        }
-    
-    def _call_llm(self, messages: list) -> dict:
-        """Call the configured LLM. Falls back to mock mode if no API available."""
+def _looks_anthropic(model_id: str) -> bool:
+    """True for any Claude model — direct Anthropic, OpenRouter (anthropic/claude-...), etc."""
+    m = (model_id or "").lower()
+    return "claude" in m or m.startswith("anthropic/")
+
+
+def _resolve_model(model: str, mode: str) -> str:
+    """Pick the active model.
+
+    Precedence: explicit --model wins, then --mode → MODE_MODEL_MAP,
+    then KORGEX_MODEL env, then default Sonnet 4.6.
+    """
+    if model:
+        return model
+    if mode:
         try:
-            from openai import OpenAI
-            
-            client = OpenAI(
-                base_url=os.environ.get(
-                    "KORGKODE_API_URL",
-                    "https://inference-api.provider.com/v1"
-                ),
-                api_key=os.environ.get("KORGKODE_API_KEY", ""),
-            )
-            
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=[],
-                max_tokens=4096,
-                temperature=0.7,
-            )
-            
-            choice = response.choices[0]
-            msg = choice.message
-            
-            result = {"content": msg.content or ""}
-            
-            if msg.tool_calls:
-                result["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    }
-                    for tc in msg.tool_calls
-                ]
-            
-            return result
-            
+            from src.model_router import MODE_MODEL_MAP, DEFAULT_MODELS
+            key = MODE_MODEL_MAP.get(mode)
+            if key and key in DEFAULT_MODELS:
+                return DEFAULT_MODELS[key].model_id
+        except Exception:
+            pass  # fall through to env/default
+    return os.environ.get("KORGEX_MODEL", "claude-sonnet-4-6")
+
+
+class KorgexAgent:
+    """Provider-agnostic agent loop. Speaks both Anthropic and OpenAI tool-use shapes."""
+
+    def __init__(self, model: str = None, repo_root: str = None,
+                 mode: str = None, interactive: bool = None,
+                 load_mcp: bool = None, **_ignored):
+        # **_ignored absorbs legacy kwargs (model_override, resume_session, etc.)
+        self.mode = mode
+        self.model = _resolve_model(model, mode)
+        self.repo_root = repo_root or os.getcwd()
+        self.provider = "anthropic" if _looks_anthropic(self.model) else "openai"
+
+        # Interactive (streaming TUI) on by default when stdout is a TTY,
+        # off when redirected (so tests and pipes get clean stdout).
+        if interactive is None:
+            interactive = sys.stdout.isatty()
+        self.interactive = interactive
+
+        # MCP loading opt-in: env var or explicit kwarg. Default off because
+        # mcp.json may reference servers (npx, GITHUB_TOKEN) that aren't ready.
+        if load_mcp is None:
+            load_mcp = os.environ.get("KORGEX_MCP", "").strip().lower() in ("1", "true", "yes")
+        if load_mcp:
+            self._load_mcp_servers()
+
+        # Lazy: only construct the session when actually streaming
+        self._session = None
+
+    def _get_session(self):
+        """Create the InteractiveSession on demand (avoids Rich import in non-TTY runs)."""
+        if self._session is None and self.interactive:
+            from src.interactive import InteractiveSession
+            self._session = InteractiveSession()
+        return self._session
+
+    def _load_mcp_servers(self) -> int:
+        """Boot every MCP server in mcp.json and register their tools into USER_TOOLS.
+
+        Failures are logged but never crash agent startup.
+        Returns the number of tools registered.
+        """
+        try:
+            from src.mcp_client import load_mcp_config, get_manager
+            from src.tool_abstraction import register_mcp_tool
         except Exception as e:
-            # Mock mode for testing without API
-            return self._mock_llm(messages)
-    
-    def _mock_llm(self, messages: list) -> dict:
-        """Mock LLM for testing without API credentials."""
-        last_msg = messages[-1]["content"] if messages else ""
-        
-        # Simple mock: just say hi and suggest exploring
+            print(f"[mcp] client unavailable: {e}", file=sys.stderr)
+            return 0
+
+        configs = load_mcp_config()
+        if not configs:
+            return 0
+
+        manager = get_manager()
+        registered = 0
+        for name, cfg in configs.items():
+            result = manager.add_server(cfg)
+            if "error" in result:
+                print(f"[mcp] skipping {name}: {result['error']}", file=sys.stderr)
+                continue
+            for tool in manager.get_all_tools():
+                if tool.server_name == name:
+                    register_mcp_tool(tool)
+                    registered += 1
+        if self.interactive and registered:
+            print(f"[mcp] loaded {registered} tool(s) from {len(configs)} server(s)", file=sys.stderr)
+        return registered
+
+    # ── Tool schema translation ──────────────────────────────────────────
+
+    def _get_provider_tools(self) -> list[dict]:
+        """Translate USER_TOOLS into the schema shape the provider expects."""
+        if self.provider == "anthropic":
+            return [{
+                "name": t["name"],
+                "description": t["description"],
+                "input_schema": t["input_schema"],
+            } for t in USER_TOOLS.values()]
+
+        # OpenAI-compatible: openai, openrouter, ollama, deepseek, etc.
+        return [{
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        } for t in USER_TOOLS.values()]
+
+    # ── Client wiring ────────────────────────────────────────────────────
+
+    def _get_client(self):
+        if self.provider == "anthropic":
+            key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("KORGEX_API_KEY")
+            if not key:
+                raise RuntimeError(
+                    "No API key found. Set ANTHROPIC_API_KEY (preferred) or KORGEX_API_KEY."
+                )
+            from anthropic import Anthropic
+            return Anthropic(api_key=key)
+
+        key = os.environ.get("OPENAI_API_KEY") or os.environ.get("KORGEX_API_KEY")
+        if not key:
+            raise RuntimeError(
+                "No API key found. Set OPENAI_API_KEY (preferred) or KORGEX_API_KEY."
+            )
+        from openai import OpenAI
+        return OpenAI(
+            api_key=key,
+            base_url=os.environ.get("KORGEX_API_URL", "https://api.openai.com/v1"),
+        )
+
+    def _call(self, client, messages: list, tools: list) -> object:
+        # Interactive streaming paths
+        if self.interactive and self.provider == "anthropic":
+            return self._call_anthropic_streaming(client, messages, tools)
+        if self.interactive and self.provider == "openai":
+            return self._call_openai_streaming(client, messages, tools)
+
+        # Non-streaming
+        if self.provider == "anthropic":
+            return client.messages.create(
+                model=self.model, system=SYSTEM_PROMPT,
+                messages=messages, tools=tools, max_tokens=4096,
+            )
+        return client.chat.completions.create(
+            model=self.model, messages=messages,
+            tools=tools, max_tokens=4096,
+        )
+
+    def _call_anthropic_streaming(self, client, messages: list, tools: list):
+        """Stream Anthropic messages through the InteractiveSession renderer."""
+        from src.interactive import SSEMessage, SSEEvent
+        session = self._get_session()
+
+        with client.messages.stream(
+            model=self.model, system=SYSTEM_PROMPT,
+            messages=messages, tools=tools, max_tokens=4096,
+        ) as stream:
+            for event in stream:
+                ev_type = getattr(event, "type", None)
+                if not ev_type:
+                    continue
+                try:
+                    sse_event = SSEEvent(ev_type)
+                except ValueError:
+                    continue  # unknown event type — skip rather than crash render
+                try:
+                    data = event.model_dump() if hasattr(event, "model_dump") else {}
+                except Exception:
+                    data = {}
+                if session.stream_event(SSEMessage(event=sse_event, data=data)):
+                    break  # user interrupted
+
+            # get_final_message gives us the same shape as messages.create()
+            return stream.get_final_message()
+
+    def _call_openai_streaming(self, client, messages: list, tools: list):
+        """Stream OpenAI/OpenRouter chunks; render text live; accumulate tool calls.
+
+        Returns a stub object shaped like a non-streamed ChatCompletion so the
+        rest of the loop (_extract_tool_calls, _assistant_turn) works unchanged.
+        """
+        from src.interactive import SSEMessage, SSEEvent
+        session = self._get_session()
+
+        # Pump-through state
+        full_text = ""
+        # idx → {"id", "name", "args_str"}
+        partials: dict[int, dict] = {}
+
+        stream = client.chat.completions.create(
+            model=self.model, messages=messages,
+            tools=tools, max_tokens=4096, stream=True,
+        )
+
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            # Text token → synthesize an Anthropic-style text_delta event for the renderer
+            text_piece = getattr(delta, "content", None) or ""
+            if text_piece:
+                full_text += text_piece
+                sse = SSEMessage(
+                    event=SSEEvent.CONTENT_BLOCK_DELTA,
+                    data={"delta": {"type": "text_delta", "text": text_piece}},
+                )
+                if session.stream_event(sse):
+                    break
+
+            # Tool call deltas arrive as partial JSON across multiple chunks, keyed by index
+            for tc in (getattr(delta, "tool_calls", None) or []):
+                idx = tc.index
+                slot = partials.setdefault(idx, {"id": None, "name": "", "args_str": ""})
+                if tc.id:
+                    slot["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn:
+                    if fn.name:
+                        slot["name"] = fn.name
+                    if fn.arguments:
+                        slot["args_str"] += fn.arguments
+
+        # Build a fake response object shaped like a non-streamed ChatCompletion
+        return _StubOpenAIResponse(full_text, partials)
+
+    # ── Response parsing ─────────────────────────────────────────────────
+
+    def _extract_tool_calls(self, response) -> list[dict]:
+        """Return a normalized list: [{id, name, args}, ...]."""
+        if response is None:
+            return []
+
+        if self.provider == "anthropic":
+            calls = []
+            for block in response.content:
+                if getattr(block, "type", None) == "tool_use":
+                    calls.append({
+                        "id": block.id,
+                        "name": block.name,
+                        "args": block.input or {},
+                    })
+            return calls
+
+        msg = response.choices[0].message
+        calls = []
+        for tc in (msg.tool_calls or []):
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            calls.append({"id": tc.id, "name": tc.function.name, "args": args})
+        return calls
+
+    def _extract_final_text(self, response) -> str:
+        """Pull the assistant's text content for the no-tool-call return."""
+        if response is None:
+            return ""
+        if self.provider == "anthropic":
+            parts = [getattr(b, "text", "") for b in response.content
+                     if getattr(b, "type", None) == "text"]
+            return "".join(parts).strip()
+        return (response.choices[0].message.content or "").strip()
+
+    def _assistant_turn(self, response) -> dict:
+        """Convert an LLM response into a message dict suitable for re-feeding."""
+        if self.provider == "anthropic":
+            # Re-hydrate the raw content blocks so the API sees its own output verbatim
+            content = []
+            for b in response.content:
+                if hasattr(b, "model_dump"):
+                    content.append(b.model_dump())
+                elif hasattr(b, "dict"):
+                    content.append(b.dict())
+                else:
+                    content.append({"type": getattr(b, "type", "text"),
+                                    "text": getattr(b, "text", "")})
+            return {"role": "assistant", "content": content}
+
+        msg = response.choices[0].message
         return {
-            "content": "I'll start by exploring the codebase to understand the project structure.",
+            "role": "assistant",
+            "content": msg.content,
             "tool_calls": [
-                {
-                    "id": "mock_1",
-                    "name": "list_files",
-                    "arguments": json.dumps({"path": "."}),
-                }
-            ]
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in (msg.tool_calls or [])
+            ],
         }
+
+    def _tool_result_turn(self, tool_id: str, result: dict) -> dict:
+        content = json.dumps(result, default=str)
+        if self.provider == "anthropic":
+            return {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": content,
+                }],
+            }
+        return {"role": "tool", "tool_call_id": tool_id, "content": content}
+
+    # ── Main loop ────────────────────────────────────────────────────────
+
+    def run_task(self, prompt: str) -> dict:
+        tools_payload = self._get_provider_tools()
+
+        if self.provider == "anthropic":
+            messages = [{"role": "user", "content": prompt}]
+        else:
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ]
+
+        client = self._get_client()
+        max_iter = int(os.environ.get("KORGEX_MAX_ITERATIONS", "30"))
+
+        session = self._get_session()
+        if session:
+            session.start()
+
+        try:
+            for i in range(max_iter):
+                response = self._call(client, messages, tools_payload)
+                tool_calls = self._extract_tool_calls(response)
+
+                if not tool_calls:
+                    text = self._extract_final_text(response)
+                    return {
+                        "success": True,
+                        "result": text or "(no output)",
+                        "iterations": i + 1,
+                    }
+
+                messages.append(self._assistant_turn(response))
+                for call in tool_calls:
+                    if session:
+                        # Show a transient spinner while the tool runs
+                        with session.spinner(f"{call['name']}({_short_args(call['args'])})"):
+                            tool_result = route_tool_call(call["name"], call["args"])
+                    else:
+                        tool_result = route_tool_call(call["name"], call["args"])
+                    messages.append(self._tool_result_turn(call["id"], tool_result))
+
+            return {
+                "success": False,
+                "result": f"max iterations reached ({max_iter})",
+                "iterations": max_iter,
+            }
+        finally:
+            if session:
+                session.stop()
+
+
+def _short_args(args: dict) -> str:
+    """One-line, truncated arg display for spinners."""
+    if not args:
+        return ""
+    s = ", ".join(f"{k}={str(v)[:30]}" for k, v in args.items())
+    return s[:60] + ("…" if len(s) > 60 else "")
+
+
+# ── Stub response objects for OpenAI streaming ──────────────────────────
+# These mimic ChatCompletion shape so _extract_tool_calls / _assistant_turn
+# work uniformly across streamed and non-streamed OpenAI responses.
+
+class _StubOpenAIResponse:
+    def __init__(self, text: str, partials: dict[int, dict]):
+        tool_calls = []
+        for idx in sorted(partials.keys()):
+            slot = partials[idx]
+            if not slot["name"]:
+                continue
+            tool_calls.append(_StubToolCall(
+                id=slot["id"] or f"call_{idx}",
+                name=slot["name"],
+                arguments=slot["args_str"] or "{}",
+            ))
+        self.choices = [_StubChoice(_StubMessage(text or None, tool_calls))]
+
+
+class _StubChoice:
+    def __init__(self, message):
+        self.message = message
+
+
+class _StubMessage:
+    def __init__(self, content, tool_calls):
+        self.content = content
+        self.tool_calls = tool_calls
+
+
+class _StubToolCall:
+    def __init__(self, id, name, arguments):
+        self.id = id
+        self.function = _StubFunction(name, arguments)
+
+
+class _StubFunction:
+    def __init__(self, name, arguments):
+        self.name = name
+        self.arguments = arguments
 
 
 def print_tool_schemas():
-    """Print all tool schemas in Jules' array format."""
-    schemas = get_tool_schemas()
-    print(json.dumps(schemas, indent=2))
+    """Print all user-facing tool schemas in JSON."""
+    from src.tool_abstraction import get_user_tool_schemas
+    print(json.dumps(get_user_tool_schemas(), indent=2))
 
 
 def main():
     """Entry point when run as module."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="KorgKode — Autonomous AI Software Engineer")
+    parser = argparse.ArgumentParser(description="Korgex — Autonomous AI Software Engineer")
     parser.add_argument("task", nargs="?", help="Task description")
     parser.add_argument("--repo", "-r", help="Repository root path")
     parser.add_argument("--model", "-m", help="Model to use")
@@ -207,9 +474,9 @@ def main():
         return
     
     if args.init:
-        agents_content = """# KorgKode - Autonomous AI Software Engineer
+        agents_content = """# Korgex - Autonomous AI Software Engineer
 
-You are KorgKode, an extremely skilled software engineer.
+You are Korgex, an extremely skilled software engineer.
 Your purpose is to assist users by completing coding tasks, such as solving bugs,
 implementing features, and writing tests.
 
@@ -249,11 +516,11 @@ Do NOT mention tool names in plan steps.
         parser.print_help()
         return
     
-    agent = KorgKodeAgent(repo_root=args.repo, model=args.model)
+    agent = KorgexAgent(repo_root=args.repo, model=args.model)
     result = agent.run_task(args.task)
     
     print(f"\n{'='*60}")
-    print(f"KORGKODE RESULT ({result['iterations']} iterations)")
+    print(f"KORGEX RESULT ({result['iterations']} iterations)")
     print(f"{'='*60}")
     print(result["result"])
 

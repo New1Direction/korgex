@@ -1,10 +1,10 @@
-# Running Tasks with KorgKode
+# Running Tasks with Korgex
 
-Once KorgKode is installed and connected to your repository, you're ready to start coding. This guide walks through the key steps of running a task — from writing your prompt to reviewing the final diff.
+Once Korgex is installed and connected to your repository, you're ready to start coding. This guide walks through the key steps of running a task — from writing your prompt to reviewing the final diff.
 
 ## Write a Clear Prompt
 
-KorgKode works best when your prompt is specific and scoped. Use plain language — no need for perfect grammar or code.
+Korgex works best when your prompt is specific and scoped. Use plain language — no need for perfect grammar or code.
 
 **✅ Good prompts**
 
@@ -19,16 +19,16 @@ KorgKode works best when your prompt is specific and scoped. Use plain language 
 - Optimize code
 - Make this better
 
-If KorgKode needs more clarity, it will ask you for feedback before writing code.
+If Korgex needs more clarity, it will ask you for feedback before writing code.
 
-## How KorgKode Processes a Task
+## How Korgex Processes a Task
 
 ### Step 1: Exploration
 
-KorgKode reads your codebase — listing directories, examining file contents, and checking `AGENTS.md` and `README.md` for project conventions.
+Korgex reads your codebase — listing directories, examining file contents, and checking `AGENTS.md` and `README.md` for project conventions.
 
 ```bash
-# Under the hood, KorgKode runs:
+# Under the hood, Korgex runs:
 list_files(".")
 read_file("AGENTS.md")
 read_file("README.md")
@@ -37,7 +37,7 @@ read_file("package.json")
 
 ### Step 2: Planning
 
-KorgKode formulates a structured plan with numbered steps. Each step describes what will be done and what will be verified.
+Korgex formulates a structured plan with numbered steps. Each step describes what will be done and what will be verified.
 
 Example plan:
 
@@ -54,22 +54,22 @@ Example plan:
 
 ### Step 3: Approval
 
-KorgKode presents the plan and waits for approval before writing any code. This is your chance to course-correct.
+Korgex presents the plan and waits for approval before writing any code. This is your chance to course-correct.
 
 ### Step 4: Execution
 
-Once approved, KorgKode executes each step sequentially:
+Once approved, Korgex executes each step sequentially:
 
 - **Edit files** using `write_file` or `replace_with_git_merge_diff`
 - **Run commands** in a bash session (`run_in_bash_session`)
 - **Verify** each change by re-reading files
 - **Run tests** to confirm nothing is broken
 
-After every modification, KorgKode confirms the change was applied correctly before marking the step complete.
+After every modification, Korgex confirms the change was applied correctly before marking the step complete.
 
 ### Step 5: Pre-commit Checks
 
-Before submitting, KorgKode runs pre-commit verification:
+Before submitting, Korgex runs pre-commit verification:
 
 1. Run the test suite
 2. Run linters
@@ -78,30 +78,30 @@ Before submitting, KorgKode runs pre-commit verification:
 
 ### Step 6: Submission
 
-KorgKode creates a branch, commits the changes, and presents a summary:
+Korgex creates a branch, commits the changes, and presents a summary:
 
 - ✅ Files changed
 - Total lines added/removed
 - Branch name and commit message
 
-## Watching KorgKode Work
+## Watching Korgex Work
 
 You'll see a real-time activity feed as each step completes, with inline explanations of each change and a mini diff preview for each file.
 
 ## Giving Feedback Mid-Task
 
-You can send feedback to KorgKode while it's working:
+You can send feedback to Korgex while it's working:
 
-- Ask KorgKode to change its approach
+- Ask Korgex to change its approach
 - Revise specific code
 - Clarify logic
 
-KorgKode will respond and, if needed, replan or revise the task. You're in control at every step.
+Korgex will respond and, if needed, replan or revise the task. You're in control at every step.
 
 ## Starting Tasks from GitHub Issues
 
-You can trigger KorgKode from a GitHub issue by adding the label `korgkode` (case insensitive). KorgKode will comment on the issue with its plan and, upon completion, provide a link to the pull request.
+You can trigger Korgex from a GitHub issue by adding the label `korgex` (case insensitive). Korgex will comment on the issue with its plan and, upon completion, provide a link to the pull request.
 
-## Pausing KorgKode
+## Pausing Korgex
 
-You can pause KorgKode at any time. When paused, it won't do any work and will wait for your next instructions. You can prompt it again, unpause it, or cancel the task.
+You can pause Korgex at any time. When paused, it won't do any work and will wait for your next instructions. You can prompt it again, unpause it, or cancel the task.

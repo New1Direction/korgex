@@ -1,4 +1,4 @@
-# KorgKode — Next Frontier Roadmap
+# Korgex — Next Frontier Roadmap
 
 ## 1. 🔄 Test-Driven Self-Healing Loops (Inner-Loop TDD)
 
@@ -7,7 +7,7 @@
 **Dependencies:** `run_in_bash_session`, `diff_engine.py`
 
 ### The Concept
-When `run_in_bash_session` executes a test suite and returns a failure, KorgKode enters an intense, high-speed **Self-Correction Inner Loop** instead of exiting or asking the user.
+When `run_in_bash_session` executes a test suite and returns a failure, Korgex enters an intense, high-speed **Self-Correction Inner Loop** instead of exiting or asking the user.
 
 ### How It Works
 1. Agent parses the traceback error message
@@ -40,7 +40,7 @@ Test Failure → Parse Traceback → AST Diff Isolation
 **Dependencies:** `graphify` integration or custom static analysis
 
 ### The Concept
-Before editing a file, KorgKode understands the cascading impacts of its changes across the entire repository.
+Before editing a file, Korgex understands the cascading impacts of its changes across the entire repository.
 
 ### How It Works
 1. Build a lightweight static analysis compiler that indexes import hierarchies and function calls
@@ -72,7 +72,7 @@ Index Codebase (imports, function defs, call sites)
 **Dependencies:** `sandbox.py`, `cProfile`, `node --cpu-prof`
 
 ### The Concept
-KorgKode verifies that its code changes are not just correct, but highly performant.
+Korgex verifies that its code changes are not just correct, but highly performant.
 
 ### How It Works
 1. Run the test suite under CPU/memory profilers
@@ -134,7 +134,7 @@ read_file_compressed("api.py", "handle_login")
 **Dependencies:** `src/dashboard.py`, WebSocket protocol
 
 ### The Concept
-Bridge the gap between the KorgKode dashboard and the developer's IDE.
+Bridge the gap between the Korgex dashboard and the developer's IDE.
 
 ### How It Works
 1. Build a VS Code extension that syncs with the FastAPI dashboard via WebSockets
@@ -152,7 +152,7 @@ Bridge the gap between the KorgKode dashboard and the developer's IDE.
 ```
 VS Code Extension (WebSocket Client)
     ↔ FastAPI Dashboard (WebSocket Server)
-        ↔ KorgKode Agent Loop
+        ↔ Korgex Agent Loop
 ```
 
 ---

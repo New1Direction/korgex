@@ -1,6 +1,6 @@
 # Tools Reference
 
-KorgKode exposes **33 tools** across 9 categories. Each tool has a name, description, and typed parameters.
+Korgex exposes **33 tools** across 9 categories. Each tool has a name, description, and typed parameters.
 
 ## File Operations
 

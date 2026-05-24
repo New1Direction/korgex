@@ -1,5 +1,5 @@
 """
-KorgKode Tool Abstraction Layer — Claude Code-inspired tool architecture.
+Korgex Tool Abstraction Layer — Claude Code-inspired tool architecture.
 
 Maps 49 internal tools to ~12 user-facing tool names with deep descriptions
 containing usage patterns, edge cases, and anti-patterns embedded directly
@@ -246,41 +246,120 @@ def get_tool_names() -> list[str]:
 
 
 # ── Router ──────────────────────────────────────────────────────────────
+# Maps model-facing user-facing tools → internal internal handlers.
+# Three pieces:
+#   handler/module : the real function to call
+#   param_map      : rename kwargs (e.g. file_path → filepath)
+#   adapter        : when a structural transform is needed (e.g. old/new → SEARCH/REPLACE)
+# Anything not in this map returns {"error": "Unknown tool: ..."}.
+#
+# Additionally, tools registered via register_mcp_tool() route through the
+# MCP server manager instead of an in-process handler.
 
-# Maps user-facing tool names → internal handler function names
+import inspect
+
+# Track which tool names came from MCP servers (vs. native handlers)
+_MCP_TOOLS: set[str] = set()
+
+
+def register_mcp_tool(tool) -> None:
+    """Add a tool discovered from an MCP server to the user-facing registry.
+
+    `tool` is an MCPTool dataclass: {name, description, input_schema, server_name}.
+    The tool becomes visible to the LLM via USER_TOOLS, and route_tool_call
+    dispatches it back to the originating MCP server.
+    """
+    USER_TOOLS[tool.name] = {
+        "name": tool.name,
+        "description": tool.description,
+        "input_schema": tool.input_schema or {
+            "type": "object", "properties": {}, "required": [],
+        },
+        "handler_name": tool.name,
+        "aliases": [],
+        "_mcp_server": tool.server_name,
+    }
+    _MCP_TOOLS.add(tool.name)
+
+
+def unregister_mcp_tools() -> int:
+    """Remove all MCP-sourced tools (used on shutdown). Returns count removed."""
+    n = len(_MCP_TOOLS)
+    for name in list(_MCP_TOOLS):
+        USER_TOOLS.pop(name, None)
+    _MCP_TOOLS.clear()
+    return n
+
+
+def _adapter_edit(params: dict) -> dict:
+    """Claude-Code Edit (old_string/new_string) → Jules SEARCH/REPLACE merge_diff."""
+    return {
+        "filepath": params["file_path"],
+        "merge_diff": (
+            f"<<<<<<< SEARCH\n{params['old_string']}\n"
+            f"=======\n{params['new_string']}\n"
+            f">>>>>>> REPLACE"
+        ),
+    }
+
+
 _TOOL_ROUTING = {
-    "Read": {"handler": "read_file", "module": "src.tools_impl"},
-    "Write": {"handler": "write_file", "module": "src.tools_impl"},
-    "Edit": {"handler": "edit_file", "module": "src.tools_impl"},
-    "Bash": {"handler": "execute_bash", "module": "src.tools_impl"},
-    "Grep": {"handler": "search_files", "module": "src.tools_impl"},
-    "Glob": {"handler": "list_files", "module": "src.tools_impl"},
-    "Agent": {"handler": "delegate_task", "module": "src.tools_impl"},
-    "AskUserQuestion": {"handler": "ask_user", "module": "src.tools_impl"},
-    "TaskCreate": {"handler": "manage_tasks", "module": "src.tools_impl"},
-    "Skill": {"handler": "invoke_skill", "module": "src.tools_impl"},
-    "ToolSearch": {"handler": "search_tools", "module": "src.tools_impl"},
+    "Read":  {"handler": "tool_read_file",                 "module": "src.tools_impl",
+              "param_map": {"file_path": "filepath"}},
+    "Write": {"handler": "tool_write_file",                "module": "src.tools_impl",
+              "param_map": {"file_path": "filepath"}},
+    "Edit":  {"handler": "tool_replace_with_git_merge_diff", "module": "src.tools_impl",
+              "adapter": _adapter_edit},
+    "Bash":  {"handler": "tool_run_in_bash_session",       "module": "src.tools_impl",
+              "param_map": {"command": "command"}},
+    "Grep":  {"handler": "tool_grep",                      "module": "src.tools_impl",
+              "param_map": {"pattern": "pattern"}},
+    "Glob":  {"handler": "tool_list_files",                "module": "src.tools_impl",
+              "param_map": {"path": "path"}},
 }
 
 
 def route_tool_call(tool_name: str, params: dict) -> dict:
-    """Route a user-facing tool call to the appropriate internal handler."""
+    """Route a user-facing tool call to the appropriate handler.
+
+    Dispatch order:
+      1. If the tool was registered from an MCP server → call that server.
+      2. Otherwise → look up in _TOOL_ROUTING and call the native handler,
+         dropping kwargs the handler doesn't accept and injecting context.
+    """
+    if tool_name in _MCP_TOOLS:
+        try:
+            from src.mcp_client import get_manager
+            return get_manager().call_tool(tool_name, params)
+        except Exception as e:
+            return {"error": f"MCP tool {tool_name} failed: {type(e).__name__}: {e}"}
+
     route = _TOOL_ROUTING.get(tool_name)
     if not route:
         return {"error": f"Unknown tool: {tool_name}"}
-    
-    # Import and call the internal handler
+
+    if "adapter" in route:
+        mapped = route["adapter"](params)
+    else:
+        pmap = route.get("param_map", {})
+        mapped = {pmap.get(k, k): v for k, v in params.items()}
+
     import importlib
     mod = importlib.import_module(route["module"])
     handler = getattr(mod, route["handler"], None)
     if not handler:
         return {"error": f"Handler '{route['handler']}' not found"}
-    
+
+    sig = inspect.signature(handler)
+    accepted = set(sig.parameters.keys())
+    filtered = {k: v for k, v in mapped.items() if k in accepted}
+    if "context" in accepted:
+        filtered.setdefault("context", {"repo_root": os.getcwd()})
+
     try:
-        result = handler(**params)
-        return result
+        return handler(**filtered)
     except Exception as e:
-        return {"error": f"Tool {tool_name} failed: {e}"}
+        return {"error": f"Tool {tool_name} failed: {type(e).__name__}: {e}"}
 
 
 # Save schemas for the agent to use

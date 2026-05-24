@@ -1,5 +1,5 @@
 """
-KorgKode GitHub Integration — Enterprise API for PRs, Issues, Comments.
+Korgex GitHub Integration — Enterprise API for PRs, Issues, Comments.
 
 Wraps the GitHub REST API and gh CLI for full repository management.
 """
@@ -9,7 +9,7 @@ import json
 import subprocess
 from typing import Optional
 
-GITHUB_TOKEN_ENV = "KORGKODE_GITHUB_TOKEN"
+GITHUB_TOKEN_ENV = "KORGEX_GITHUB_TOKEN"
 GITHUB_API = "https://api.github.com"
 
 
@@ -18,7 +18,7 @@ def _headers() -> dict:
     token = os.environ.get(GITHUB_TOKEN_ENV) or os.environ.get("GITHUB_TOKEN", "")
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "KorgKode/1.0",
+        "User-Agent": "Korgex/1.0",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"

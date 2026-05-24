@@ -1,5 +1,5 @@
 """
-KorgKode AST Context Compressor — High-fidelity token savings.
+Korgex AST Context Compressor — High-fidelity token savings.
 
 Prunes the body implementation of unrelated functions and classes in massive
 Python files, delivering a highly compressed, semantic code skeleton.

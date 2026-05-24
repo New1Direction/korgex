@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""KorgKode CLI — the Jules clone command line interface."""
+"""Korgex CLI — the Jules clone command line interface."""
 
 import sys
 import os

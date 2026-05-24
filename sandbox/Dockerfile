@@ -1,4 +1,4 @@
-# KorgKode Sandbox — Enterprise Cloud Virtualization
+# Korgex Sandbox — Enterprise Cloud Virtualization
 #
 # Builds the Docker image with a Jules-compatible environment.
 # Preinstalled: Python 3.12, Node 22, Go, Rust, Java 21, Docker CLI, git, etc.

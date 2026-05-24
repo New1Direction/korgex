@@ -1,5 +1,5 @@
 """
-KorgKode TDD Self-Healing Engine — Relentless Test-Driven Repair.
+Korgex TDD Self-Healing Engine — Relentless Test-Driven Repair.
 
 Runs test commands inside the sandbox, captures failures, queries the configured
 LLM for precise corrections, applies them, and loops until all tests pass.
@@ -130,7 +130,7 @@ class TDDHealer:
         """Query the LLM for a SEARCH/REPLACE patch to fix the test failure."""
         
         system_prompt = (
-            "You are KorgKode's Self-Healing Compiler. Your goal is to analyze test failures "
+            "You are Korgex's Self-Healing Compiler. Your goal is to analyze test failures "
             "and output a precise SEARCH/REPLACE block to correct the code. "
             "Respond ONLY with valid JSON."
         )
@@ -169,7 +169,7 @@ class TDDHealer:
     
     def _apply_patch_in_sandbox(self, filepath: str, patch: str) -> dict:
         """Write patch to temp file in sandbox and apply via diff engine."""
-        temp_patch = ".korgkode_heal.patch"
+        temp_patch = ".korgex_heal.patch"
         
         # Write patch file to sandbox
         escaped = patch.replace("'", "'\\''")

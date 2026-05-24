@@ -1,5 +1,5 @@
 """
-All 30 active + 3 deprecated tool handlers for KorgKode.
+All 30 active + 3 deprecated tool handlers for Korgex.
 Mirrors Jules' complete tool surface extracted from Gemini 4 Pro.
 """
 
@@ -228,25 +228,25 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
     global SANDBOX
     
     if not SANDBOX:
-        return {"error": "Sandbox required for self-healing. Set KORGKODE_SANDBOX=docker or modal."}
+        return {"error": "Sandbox required for self-healing. Set KORGEX_SANDBOX=docker or modal."}
     
     # Initialize LLM client
     try:
         from openai import OpenAI
         client = OpenAI(
-            base_url=os.environ.get("KORGKODE_API_URL", "https://inference-api.provider.com/v1"),
-            api_key=os.environ.get("KORGKODE_API_KEY", ""),
+            base_url=os.environ.get("KORGEX_API_URL", "https://inference-api.provider.com/v1"),
+            api_key=os.environ.get("KORGEX_API_KEY", ""),
         )
     except ImportError:
         return {"error": "openai package required: pip install openai"}
     
-    model = os.environ.get("KORGKODE_MODEL", "deepseek/deepseek-v4-flash")
+    model = os.environ.get("KORGEX_MODEL", "deepseek/deepseek-v4-flash")
     
     healer = TDDHealer(
         sandbox=SANDBOX,
         api_client=client,
         model=model,
-        max_attempts=int(os.environ.get("KORGKODE_HEAL_MAX_ATTEMPTS", "5")),
+        max_attempts=int(os.environ.get("KORGEX_HEAL_MAX_ATTEMPTS", "5")),
     )
     
     result = healer.heal(test_command, target_file, context_files or [])
@@ -278,7 +278,7 @@ def tool_google_search(query: str, context: dict = None):
 def tool_view_text_website(url: str, context: dict = None):
     try:
         import requests
-        r = requests.get(url, timeout=15, headers={"User-Agent": "KorgKode/1.0"})
+        r = requests.get(url, timeout=15, headers={"User-Agent": "Korgex/1.0"})
         return {"url": url, "content": r.text[:50000], "status": r.status_code}
     except Exception as e:
         return {"error": str(e)}
@@ -288,7 +288,7 @@ def tool_view_text_website(url: str, context: dict = None):
     ToolParam("plan", "STRING", "The plan to solve the issue, in Markdown format.", required=True),
 ])
 def tool_set_plan(plan: str, context: dict = None):
-    plan_file = os.path.join(context.get("repo_root", os.getcwd()), ".korgkode", "plan.md")
+    plan_file = os.path.join(context.get("repo_root", os.getcwd()), ".korgex", "plan.md")
     os.makedirs(os.path.dirname(plan_file), exist_ok=True)
     with open(plan_file, "w") as f:
         f.write(plan)
@@ -299,7 +299,7 @@ def tool_set_plan(plan: str, context: dict = None):
     ToolParam("message", "STRING", "Description of what was accomplished.", required=True),
 ])
 def tool_plan_step_complete(message: str, context: dict = None):
-    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".korgkode")
+    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".korgex")
     steps_file = os.path.join(plan_dir, "steps.json")
     os.makedirs(plan_dir, exist_ok=True)
     
@@ -321,7 +321,7 @@ def tool_plan_step_complete(message: str, context: dict = None):
 
 @register_tool("record_user_approval_for_plan", "Records the user's approval for the plan.")
 def tool_record_user_approval_for_plan(context: dict = None):
-    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".korgkode")
+    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".korgex")
     os.makedirs(plan_dir, exist_ok=True)
     with open(os.path.join(plan_dir, "approved"), "w") as f:
         f.write("approved")
@@ -333,7 +333,7 @@ def tool_record_user_approval_for_plan(context: dict = None):
     ToolParam("continue_working", "BOOLEAN", "Whether to continue working after sending."),
 ])
 def tool_message_user(message: str, continue_working: bool = True, context: dict = None):
-    print(f"\n[KORGKODE] {message}")
+    print(f"\n[KORGEX] {message}")
     return {"sent": True, "message": message, "continue_working": continue_working}
 
 
@@ -341,7 +341,7 @@ def tool_message_user(message: str, continue_working: bool = True, context: dict
     ToolParam("message", "STRING", "The question or prompt for the user.", required=True),
 ])
 def tool_request_user_input(message: str, context: dict = None):
-    response = input(f"\n[KORGKODE ASKS] {message}\n> ")
+    response = input(f"\n[KORGEX ASKS] {message}\n> ")
     return {"response": response}
 
 
@@ -629,7 +629,7 @@ def tool_get_god_nodes(min_dependents: str = "3", context: dict = None):
 def tool_get_performance_profile(command: str, context: dict = None):
     global SANDBOX
     if not SANDBOX:
-        return {"error": "Sandbox required for profiling. Set KORGKODE_SANDBOX=docker or modal."}
+        return {"error": "Sandbox required for profiling. Set KORGEX_SANDBOX=docker or modal."}
     profiler = PerformanceProfiler(SANDBOX)
     try:
         report = profiler.run_profile(command)
@@ -838,7 +838,7 @@ def tool_mcp_list(context: dict = None):
 
 
 def init(repo_root: str = None, sandbox_mode: str = None):
-    """Initialize KorgKode tools with a repo root and optional sandbox."""
+    """Initialize Korgex tools with a repo root and optional sandbox."""
     global REPO_ROOT, SANDBOX
     REPO_ROOT = repo_root or os.getcwd()
     

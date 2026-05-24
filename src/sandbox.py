@@ -1,5 +1,5 @@
 """
-KorgKode Sandbox Manager — Enterprise Cloud Virtualization.
+Korgex Sandbox Manager — Enterprise Cloud Virtualization.
 
 Modes:
 1. Docker (local) — fast, free, full isolation
@@ -37,7 +37,7 @@ class SandboxBase:
 class DockerSandbox(SandboxBase):
     """Local Docker sandbox with full isolation."""
     
-    IMAGE_NAME = "korgkode-sandbox:latest"
+    IMAGE_NAME = "korgex-sandbox:latest"
     
     def __init__(self):
         self.container_id = None
@@ -54,7 +54,7 @@ class DockerSandbox(SandboxBase):
             capture_output=True, text=True, timeout=30
         )
         if not result.stdout.strip():
-            print("Building KorgKode sandbox image...")
+            print("Building Korgex sandbox image...")
             subprocess.run(
                 ["docker", "build", "-t", self.IMAGE_NAME, "-f", str(dockerfile), str(dockerfile.parent)],
                 timeout=300
@@ -123,7 +123,7 @@ class ModalSandbox(SandboxBase):
         if not MODAL_AVAILABLE:
             return
         
-        self.app = modal.App("korgkode-sandbox")
+        self.app = modal.App("korgex-sandbox")
         
         image = modal.Image.debian_slim(python_version="3.12").pip_install(
             "pytest", "ruff", "black", "mypy", "requests"
@@ -215,7 +215,7 @@ class SandboxManager:
         - None — auto-detect (modal > docker > direct)
         """
         if mode is None:
-            mode = os.environ.get("KORGKODE_SANDBOX", "auto")
+            mode = os.environ.get("KORGEX_SANDBOX", "auto")
         
         if mode == "auto":
             if MODAL_AVAILABLE:
