@@ -43,6 +43,7 @@ korgkode               # launch backend + VS Code sidecar
 - [Demo Ideas](#-demo-ideas)
 - [Git Workflow](#-git-workflow)
 - [Why KorgKode?](#-why-korgkode)
+- [Enterprise: Zero-Hallucination](#-enterprise-zero-hallucination)
 - [Documentation](#-documentation)
 - [License](#-license)
 
@@ -305,6 +306,60 @@ Before every commit, KorgKode runs:
 | **Subagent delegation** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Model agnostic** | ✅ Any LLM | ❌ OpenAI | ❌ Custom | ❌ Anthropic | ❌ Anthropic |
 | **Open source** | ✅ MIT | ❌ | ❌ | ❌ | ❌ |
+
+---
+
+## 🔒 Enterprise: Zero-Hallucination Runtime
+
+KorgKode is the **first auditable, deterministic agentic runtime**. Every tool call is cryptographically bound to its result.
+
+### The problem
+
+Every other coding agent (Claude Code, Cursor, Copilot, Windsurf) has a fundamental flaw: autoregressive models hallucinate tool results. The model "sees" a successful test run before the tests actually execute, then spirals — generating fixes for bugs that don't exist, committing code that never compiled.
+
+### The solution: Strict Tool Result Pairing
+
+```python
+[Model calls Bash("pytest")]
+  ↓ tool_use_id = "call_19e57f84191_7449e61c8a1f4120"
+[Environment executes pytest]
+  ↓ SHA256({tool_use_id}:{result_text}) = "331416869d1e1dd9"
+[Next prompt has:]
+  Tool Result (call_19e57f84191_7449e61c8a1f4120):
+  <actual test output>
+```
+
+- Every tool call gets a unique, cryptographically random ID
+- Results are paired with their originating ID using SHA256 binding
+- The prompt format makes it structurally impossible for the model to fabricate results
+- A validation layer scans the conversation and flags unpaired or hallucinated results
+
+### Why enterprise security teams care
+
+| Requirement | KorgKode | Other agents |
+|---|---|---|
+| **Tamper-evident tool execution** | SHA256 binding between call and result | No binding — model can fabricate |
+| **Audit trail** | Every tool call logged with ID, timestamp, duration | Limited or no per-call logging |
+| **Blast radius control** | Mode-gated tools — plan mode cannot write files | Mixed, depends on implementation |
+| **Deterministic routing** | Every tool has exactly one handler, one schema | Models can guess tool names |
+| **Open protocol (MCP)** | Connect any MCP server — no vendor lock-in | Plugin-walled gardens |
+| **Open source** | Full source, no binary black boxes | Closed source or partially open |
+
+### Compliance-ready
+
+KorgKode's strict pairing directly addresses requirements emerging from:
+- **EU AI Act** — auditable AI decision chains
+- **SEC/FINRA** — tamper-evident record keeping
+- **SOX** — change management and access controls
+- **HIPAA** — verifiable non-repudiation of automated actions
+
+The `validate_prompt_history()` function provides a machine-readable compliance report showing exactly which tool calls were made, what results they returned, and whether any violations were detected.
+
+```bash
+# Generate compliance report for any conversation
+korgkode audit --session last
+# → {"valid": true, "total_results": 47, "violations": []}
+```
 
 ---
 

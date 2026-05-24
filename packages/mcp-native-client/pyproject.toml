@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-native-client"
+version = "0.1.0"
+description = "Production-grade, headless MCP client for Python. Connect to any MCP server, discover tools, execute calls. Not locked to any vendor."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["mcp", "model-context-protocol", "ai", "agent", "llm", "tools"]
+
+[project.urls]
+Homepage = "https://github.com/New1Direction/KorgKode"
+Source = "https://github.com/New1Direction/KorgKode/tree/main/packages/mcp-native-client"
