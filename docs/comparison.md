@@ -4,20 +4,24 @@ The autonomous coding agent landscape is evolving rapidly. Here's how Korgex com
 
 ## At a Glance
 
-| Feature | Korgex | GitHub Copilot | Cursor AI | Cody (Sourcegraph) | Claude Code |
-|---------|-------|----------------|-----------|-------------------|-------------|
-| **Autonomous execution** | ✅ Full async agent | ❌ Suggestions only | ⚠️ Limited agent mode | ✅ Basic agent | ⚠️ Interactive only |
-| **Plan-first mode** | ✅ `--mode plan` | ❌ | ❌ | ❌ | ⚠️ Optional |
-| **Tool surface** | **~12 user-facing** | 3-5 | 8-10 | 6-8 | 10-12 |
-| **Sandbox execution** | ⚠️ Docker/Modal (opt-in) | ❌ | ❌ | ❌ | ❌ |
-| **Git/PR integration** | ✅ Create, comment, review | ❌ | ⚠️ Basic | ✅ Review only | ⚠️ Basic |
-| **Screenshot capture** | ⚠️ Headless Chrome | ❌ | ❌ | ❌ | ❌ |
-| **PR comment replies** | ✅ Get + reply | ❌ | ❌ | ✅ | ❌ |
-| **Memory (cross-session)** | ❌ Not yet implemented | ❌ | ❌ | ❌ | ❌ |
-| **Subagent delegation** | ✅ Agent tool | ❌ | ❌ | ❌ | ❌ |
-| **MCP server support** | ✅ Runtime connect/disconnect | ❌ | ❌ | ❌ | ✅ |
-| **Open source** | ✅ MIT | ❌ | ❌ | ❌ | ❌ |
-| **Model agnostic** | ✅ Any OpenAI-compatible LLM | ❌ OpenAI only | ❌ Custom only | ❌ Anthropic only | ❌ Anthropic only |
+Compared against the agents korgex actually overlaps with — closed first-party (Claude Code) and the mature open-source CLI agents (Aider, OpenCode). IDE assistants (Copilot, Cursor, Windsurf) are a different category and not included.
+
+| Feature | korgex | Claude Code | Aider | OpenCode |
+|---|---|---|---|---|
+| **License** | MIT | proprietary | Apache 2.0 | MIT |
+| **Providers** | Anthropic + any OpenAI-compat | Anthropic only | 100+ via litellm | any |
+| **Autonomous execution** | ✅ agent loop | ✅ | ⚠️ diff-approve default; `--yes-always` for autonomy | ✅ |
+| **Plan-first mode** | ✅ `--mode plan` | ✅ plan mode | ⚠️ `/architect` mode | ✅ plan/build |
+| **MCP server support** | ✅ runtime connect/disconnect | ✅ client + server | ⚠️ partial | ✅ native |
+| **Sandbox execution** | Docker / Modal (opt-in) | seatbelt / landlock | ❌ | ⚠️ optional |
+| **Git / PR integration** | ✅ create, comment, review | ✅ | ✅✅ auto-commits per change | ✅ |
+| **Cross-session memory** | ❌ (roadmap) | ✅ `CLAUDE.md` + skills | ⚠️ repo-map only | ✅ `AGENTS.md` |
+| **Session resume** | ❌ `--resume` exits 2 | ✅ `/resume` | ✅ `--restore-chat-history` | ✅ |
+| **Subagent delegation** | ✅ Agent tool | ✅ | ❌ (architect/editor split) | ✅ |
+| **Hooks / plugin ecosystem** | ❌ | ✅ rich | minimal | growing |
+| **Mode-based model routing** | ✅ `--mode {plan,execute,debug,...}` | manual `/model` | per-mode `--model` flags | ✅ |
+| **Bundled dashboard / IDE sidecar** | ✅ FastAPI + VS Code | ❌ | ❌ | ❌ |
+| **Maintainers** | 1 | Anthropic team | 1 + active community | active OSS team |
 
 ## Detailed Comparison
 
@@ -95,6 +99,18 @@ This is distinct from most agents where the tool surface is fixed — Korgex's t
 
 Korgex is fully open source under the MIT license. No paywalls, no usage caps, no vendor lock-in. You own your workflow entirely.
 
+## Where korgex lags
+
+Naming the gaps so you don't have to find them yourself. These are real and worth knowing before adopting korgex as a daily driver:
+
+- **No cross-session memory.** Claude Code reads `CLAUDE.md`, OpenCode reads `AGENTS.md` — both remember project conventions across runs. Korgex starts fresh every invocation. (Listed on the roadmap; not built.)
+- **No working `--resume`.** The flag exists but exits with code 2. If a long task is interrupted, you restart from scratch.
+- **No hooks or plugin ecosystem.** Claude Code's hooks (pre/post tool, session start, prompt submit) and skills marketplace let you automate behavior outside the model. Korgex has neither today.
+- **Python startup overhead.** ~500ms cold start vs <50ms for Rust/Go CLIs (Crush, Goose). Noise inside a multi-minute agent run; noticeable when piping `korgex --quiet "..."` in tight scripts.
+- **Single maintainer.** Aider has years of community PRs; OpenCode has a team. Korgex's bus factor is 1.
+
+These are addressable deltas. Korgex already leads on provider-agnostic routing, MCP-native tools, clean CLI+dashboard, and zero lock-in. The gaps above are where we're actively investing next.
+
 ## When to Choose Korgex
 
 **Korgex excels at:**
@@ -105,12 +121,6 @@ Korgex is fully open source under the MIT license. No paywalls, no usage caps, n
 - Code refactoring with verification
 - Automated PR comment responses
 - Async development — fire and forget
-
-**Not yet implemented (see roadmap):**
-- Cross-session memory
-- Session resume (`--resume` exits 2 today)
-- Self-healing test loop outside sandbox mode
-- Multi-agent orchestration for large features
 
 ## Summary
 
