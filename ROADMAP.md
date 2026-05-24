@@ -1,5 +1,17 @@
 # Korgex — Next Frontier Roadmap
 
+## Release Sequence
+
+| Version | Status | Scope |
+|---------|--------|-------|
+| **v0.2.x** | ✅ Shipped | MCP client, multi-model routing, streaming TUI, FastAPI dashboard, VS Code sidecar, 27 tests |
+| **v0.3.0** | 🔲 Next | korg-bridge (PyO3) — wires Korgex agent loop into Korg's Rust WAL; optional ledger log |
+| **v0.4.0** | 🔲 Planned | KorgChat alpha — first consumer chat product, built on connected korg-bridge stack from day one |
+
+v0.3.0 is the bridge work. Do not build more Python-side features until the PyO3 bindings exist — KorgChat must be designed assuming the bridge is live, never retrofitted onto a stateless loop.
+
+---
+
 ## 1. 🔄 Test-Driven Self-Healing Loops (Inner-Loop TDD)
 
 **Status:** ❌ Not started  
@@ -67,7 +79,7 @@ Index Codebase (imports, function defs, call sites)
 
 ## 3. ⚡ Automated Performance Profiling (No-Regression Guarantee)
 
-**Status:** ❌ Not started  
+**Status:** ✅ Shipped (v0.2.x) — wired via dashboard `/api/swarm/profile`  
 **Priority:** Medium  
 **Dependencies:** `sandbox.py`, `cProfile`, `node --cpu-prof`
 
@@ -129,7 +141,7 @@ read_file_compressed("api.py", "handle_login")
 
 ## 5. 🧩 VS Code / Cursor Sidecar Extension
 
-**Status:** ❌ Not started  
+**Status:** ✅ Shipped (v0.2.x) — 4 commands wired, port aligned to 8090  
 **Priority:** Low (nice-to-have)  
 **Dependencies:** `src/dashboard.py`, WebSocket protocol
 
@@ -163,9 +175,9 @@ VS Code Extension (WebSocket Client)
 |---|---------|--------|----------|-------------|
 | 1 | Self-Healing TDD Loops | 🟡 Module exists, not wired into auto-trigger | High | 1 day |
 | 2 | Dependency Graph Analysis | 🟡 Module exists, not bridged into USER_TOOLS | Medium | 2 hr |
-| 3 | Performance Profiling | ✅ Wired (dashboard `/api/swarm/profile`) | — | — |
+| 3 | Performance Profiling | ✅ Shipped v0.2.x | — | — |
 | 4 | AST Context Compression | 🟡 Module exists, not bridged into USER_TOOLS | Medium | 2 hr |
-| 5 | VS Code Sidecar Extension | ✅ 4 commands wired, port aligned to 8090 | — | — |
+| 5 | VS Code Sidecar Extension | ✅ Shipped v0.2.x | — | — |
 
 ---
 
