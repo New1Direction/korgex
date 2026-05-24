@@ -1,10 +1,10 @@
-# Running Tasks with Seluj
+# Running Tasks with KorgKode
 
-Once Seluj is installed and connected to your repository, you're ready to start coding. This guide walks through the key steps of running a task — from writing your prompt to reviewing the final diff.
+Once KorgKode is installed and connected to your repository, you're ready to start coding. This guide walks through the key steps of running a task — from writing your prompt to reviewing the final diff.
 
 ## Write a Clear Prompt
 
-Seluj works best when your prompt is specific and scoped. Use plain language — no need for perfect grammar or code.
+KorgKode works best when your prompt is specific and scoped. Use plain language — no need for perfect grammar or code.
 
 **✅ Good prompts**
 
@@ -19,16 +19,16 @@ Seluj works best when your prompt is specific and scoped. Use plain language —
 - Optimize code
 - Make this better
 
-If Seluj needs more clarity, it will ask you for feedback before writing code.
+If KorgKode needs more clarity, it will ask you for feedback before writing code.
 
-## How Seluj Processes a Task
+## How KorgKode Processes a Task
 
 ### Step 1: Exploration
 
-Seluj reads your codebase — listing directories, examining file contents, and checking `AGENTS.md` and `README.md` for project conventions.
+KorgKode reads your codebase — listing directories, examining file contents, and checking `AGENTS.md` and `README.md` for project conventions.
 
 ```bash
-# Under the hood, Seluj runs:
+# Under the hood, KorgKode runs:
 list_files(".")
 read_file("AGENTS.md")
 read_file("README.md")
@@ -37,7 +37,7 @@ read_file("package.json")
 
 ### Step 2: Planning
 
-Seluj formulates a structured plan with numbered steps. Each step describes what will be done and what will be verified.
+KorgKode formulates a structured plan with numbered steps. Each step describes what will be done and what will be verified.
 
 Example plan:
 
@@ -54,22 +54,22 @@ Example plan:
 
 ### Step 3: Approval
 
-Seluj presents the plan and waits for approval before writing any code. This is your chance to course-correct.
+KorgKode presents the plan and waits for approval before writing any code. This is your chance to course-correct.
 
 ### Step 4: Execution
 
-Once approved, Seluj executes each step sequentially:
+Once approved, KorgKode executes each step sequentially:
 
 - **Edit files** using `write_file` or `replace_with_git_merge_diff`
 - **Run commands** in a bash session (`run_in_bash_session`)
 - **Verify** each change by re-reading files
 - **Run tests** to confirm nothing is broken
 
-After every modification, Seluj confirms the change was applied correctly before marking the step complete.
+After every modification, KorgKode confirms the change was applied correctly before marking the step complete.
 
 ### Step 5: Pre-commit Checks
 
-Before submitting, Seluj runs pre-commit verification:
+Before submitting, KorgKode runs pre-commit verification:
 
 1. Run the test suite
 2. Run linters
@@ -78,30 +78,30 @@ Before submitting, Seluj runs pre-commit verification:
 
 ### Step 6: Submission
 
-Seluj creates a branch, commits the changes, and presents a summary:
+KorgKode creates a branch, commits the changes, and presents a summary:
 
 - ✅ Files changed
 - Total lines added/removed
 - Branch name and commit message
 
-## Watching Seluj Work
+## Watching KorgKode Work
 
 You'll see a real-time activity feed as each step completes, with inline explanations of each change and a mini diff preview for each file.
 
 ## Giving Feedback Mid-Task
 
-You can send feedback to Seluj while it's working:
+You can send feedback to KorgKode while it's working:
 
-- Ask Seluj to change its approach
+- Ask KorgKode to change its approach
 - Revise specific code
 - Clarify logic
 
-Seluj will respond and, if needed, replan or revise the task. You're in control at every step.
+KorgKode will respond and, if needed, replan or revise the task. You're in control at every step.
 
 ## Starting Tasks from GitHub Issues
 
-You can trigger Seluj from a GitHub issue by adding the label `seluj` (case insensitive). Seluj will comment on the issue with its plan and, upon completion, provide a link to the pull request.
+You can trigger KorgKode from a GitHub issue by adding the label `korgkode` (case insensitive). KorgKode will comment on the issue with its plan and, upon completion, provide a link to the pull request.
 
-## Pausing Seluj
+## Pausing KorgKode
 
-You can pause Seluj at any time. When paused, it won't do any work and will wait for your next instructions. You can prompt it again, unpause it, or cancel the task.
+You can pause KorgKode at any time. When paused, it won't do any work and will wait for your next instructions. You can prompt it again, unpause it, or cancel the task.

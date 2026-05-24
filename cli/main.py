@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seluj CLI — the Jules clone command line interface."""
+"""KorgKode CLI — the Jules clone command line interface."""
 
 import sys
 import os

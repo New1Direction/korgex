@@ -1,12 +1,12 @@
-# Contributing to Seluj
+# Contributing to KorgKode
 
 Thanks for your interest in contributing! Here's how to get started.
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/New1Direction/Seluj.git
-cd Seluj
+git clone https://github.com/New1Direction/KorgKode.git
+cd KorgKode
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

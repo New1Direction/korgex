@@ -1,5 +1,5 @@
 """
-All 30 active + 3 deprecated tool handlers for Seluj.
+All 30 active + 3 deprecated tool handlers for KorgKode.
 Mirrors Jules' complete tool surface extracted from Gemini 4 Pro.
 """
 
@@ -11,6 +11,15 @@ import shlex
 import tempfile
 from pathlib import Path
 from src.tool_base import register_tool, ToolParam
+from src.sandbox import SandboxManager
+from src.github_api import (
+    create_pr, list_prs, get_pr_comments, reply_to_pr_comment,
+    create_issue, label_issue, get_repo_info, init_from_cli
+)
+
+# Initialize sandbox and GitHub on import
+SANDBOX = None
+init_from_cli()
 
 REPO_ROOT = None
 
@@ -181,16 +190,25 @@ def tool_restore_file(filepath: str, context: dict = None):
     return {"result": f"Restored: {filepath}", "output": result["stdout"]}
 
 
-@register_tool("run_in_bash_session", "Runs a bash command in the sandbox.", [
+@register_tool("run_in_bash_session", "Runs a bash command in an isolated sandbox (cloud VM, Docker, or local).", [
     ToolParam("command", "STRING", "The bash command to run.", required=True),
 ])
 def tool_run_in_bash_session(command: str, context: dict = None):
-    cwd = context.get("repo_root") if context else os.getcwd()
-    result = _run_bash(command, cwd)
+    """Run command in sandbox (cloud VM > Docker > direct fallback)."""
+    global SANDBOX
+    
+    # Use sandbox if available
+    if SANDBOX:
+        result = SANDBOX.run(command)
+    else:
+        # Fallback to local execution
+        cwd = context.get("repo_root") if context else os.getcwd()
+        result = _run_bash(command, cwd)
+    
     return {
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
-        "exit_code": result["exit_code"],
+        "stdout": result.get("stdout", ""),
+        "stderr": result.get("stderr", ""),
+        "exit_code": result.get("exit_code", -1),
     }
 
 
@@ -213,7 +231,7 @@ def tool_google_search(query: str, context: dict = None):
 def tool_view_text_website(url: str, context: dict = None):
     try:
         import requests
-        r = requests.get(url, timeout=15, headers={"User-Agent": "Seluj/1.0"})
+        r = requests.get(url, timeout=15, headers={"User-Agent": "KorgKode/1.0"})
         return {"url": url, "content": r.text[:50000], "status": r.status_code}
     except Exception as e:
         return {"error": str(e)}
@@ -223,7 +241,7 @@ def tool_view_text_website(url: str, context: dict = None):
     ToolParam("plan", "STRING", "The plan to solve the issue, in Markdown format.", required=True),
 ])
 def tool_set_plan(plan: str, context: dict = None):
-    plan_file = os.path.join(context.get("repo_root", os.getcwd()), ".seluj", "plan.md")
+    plan_file = os.path.join(context.get("repo_root", os.getcwd()), ".korgkode", "plan.md")
     os.makedirs(os.path.dirname(plan_file), exist_ok=True)
     with open(plan_file, "w") as f:
         f.write(plan)
@@ -234,7 +252,7 @@ def tool_set_plan(plan: str, context: dict = None):
     ToolParam("message", "STRING", "Description of what was accomplished.", required=True),
 ])
 def tool_plan_step_complete(message: str, context: dict = None):
-    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".seluj")
+    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".korgkode")
     steps_file = os.path.join(plan_dir, "steps.json")
     os.makedirs(plan_dir, exist_ok=True)
     
@@ -256,7 +274,7 @@ def tool_plan_step_complete(message: str, context: dict = None):
 
 @register_tool("record_user_approval_for_plan", "Records the user's approval for the plan.")
 def tool_record_user_approval_for_plan(context: dict = None):
-    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".seluj")
+    plan_dir = os.path.join(context.get("repo_root", os.getcwd()), ".korgkode")
     os.makedirs(plan_dir, exist_ok=True)
     with open(os.path.join(plan_dir, "approved"), "w") as f:
         f.write("approved")
@@ -268,7 +286,7 @@ def tool_record_user_approval_for_plan(context: dict = None):
     ToolParam("continue_working", "BOOLEAN", "Whether to continue working after sending."),
 ])
 def tool_message_user(message: str, continue_working: bool = True, context: dict = None):
-    print(f"\n[SELUJ] {message}")
+    print(f"\n[KORGKODE] {message}")
     return {"sent": True, "message": message, "continue_working": continue_working}
 
 
@@ -276,7 +294,7 @@ def tool_message_user(message: str, continue_working: bool = True, context: dict
     ToolParam("message", "STRING", "The question or prompt for the user.", required=True),
 ])
 def tool_request_user_input(message: str, context: dict = None):
-    response = input(f"\n[SELUJ ASKS] {message}\n> ")
+    response = input(f"\n[KORGKODE ASKS] {message}\n> ")
     return {"response": response}
 
 
@@ -446,7 +464,111 @@ def tool_overwrite_file_with_block(filepath: str, content: str, context: dict = 
     return tool_write_file(filepath, content, context)
 
 
-def init(repo_root: str = None):
-    """Initialize Seluj tools with a repo root."""
-    global REPO_ROOT
+# ─── Enterprise GitHub Tools ─────────────────────────────────────────────
+
+@register_tool("github_create_pr", "Creates a pull request on GitHub.", [
+    ToolParam("owner", "STRING", "Repository owner.", required=True),
+    ToolParam("repo", "STRING", "Repository name.", required=True),
+    ToolParam("title", "STRING", "PR title.", required=True),
+    ToolParam("body", "STRING", "PR body/description.", required=True),
+    ToolParam("head", "STRING", "Branch name with changes.", required=True),
+    ToolParam("base", "STRING", "Target branch (default: main)."),
+])
+def tool_github_create_pr(owner: str, repo: str, title: str, body: str, head: str, base: str = "main", context: dict = None):
+    result = create_pr(owner, repo, title, body, head, base)
+    return result
+
+
+@register_tool("github_list_prs", "Lists pull requests for a repository.", [
+    ToolParam("owner", "STRING", "Repository owner.", required=True),
+    ToolParam("repo", "STRING", "Repository name.", required=True),
+    ToolParam("state", "STRING", "PR state: open, closed, all."),
+])
+def tool_github_list_prs(owner: str, repo: str, state: str = "open", context: dict = None):
+    result = list_prs(owner, repo, state)
+    return {"prs": result, "count": len(result)}
+
+
+@register_tool("github_get_pr_comments", "Gets comments on a pull request.", [
+    ToolParam("owner", "STRING", "Repository owner.", required=True),
+    ToolParam("repo", "STRING", "Repository name.", required=True),
+    ToolParam("pr_number", "STRING", "Pull request number.", required=True),
+])
+def tool_github_get_pr_comments(owner: str, repo: str, pr_number: str, context: dict = None):
+    result = get_pr_comments(owner, repo, int(pr_number))
+    return {"comments": result, "count": len(result)}
+
+
+@register_tool("github_reply_to_pr_comment", "Replies to a specific PR comment.", [
+    ToolParam("owner", "STRING", "Repository owner.", required=True),
+    ToolParam("repo", "STRING", "Repository name.", required=True),
+    ToolParam("comment_id", "STRING", "Comment ID to reply to.", required=True),
+    ToolParam("reply", "STRING", "Reply text.", required=True),
+])
+def tool_github_reply_to_pr_comment(owner: str, repo: str, comment_id: str, reply: str, context: dict = None):
+    result = reply_to_pr_comment(owner, repo, int(comment_id), reply)
+    return result
+
+
+@register_tool("github_create_issue", "Creates a GitHub issue with optional labels.", [
+    ToolParam("owner", "STRING", "Repository owner.", required=True),
+    ToolParam("repo", "STRING", "Repository name.", required=True),
+    ToolParam("title", "STRING", "Issue title.", required=True),
+    ToolParam("body", "STRING", "Issue body/description."),
+    ToolParam("labels", "STRING", "Comma-separated labels."),
+])
+def tool_github_create_issue(owner: str, repo: str, title: str, body: str = "", labels: str = "", context: dict = None):
+    label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else None
+    result = create_issue(owner, repo, title, body, label_list)
+    return result
+
+
+# ─── Enterprise Vision Tools ────────────────────────────────────────────
+
+@register_tool("capture_screenshot", "Takes a browser screenshot of a URL for visual verification.", [
+    ToolParam("url", "STRING", "URL to screenshot.", required=True),
+    ToolParam("output_path", "STRING", "Custom output path for the screenshot."),
+])
+def tool_capture_screenshot(url: str, output_path: str = None, context: dict = None):
+    try:
+        from src.vision import VisionEngine
+        result = VisionEngine.take_screenshot(url, output_path)
+        return result
+    except Exception as e:
+        return {"error": f"Screenshot failed: {e}"}
+
+
+@register_tool("analyze_image", "Analyzes an image file (screenshot, UI mockup, diagram).", [
+    ToolParam("filepath", "STRING", "Path to the image file.", required=True),
+    ToolParam("question", "STRING", "Specific question about the image."),
+])
+def tool_analyze_image(filepath: str, question: str = None, context: dict = None):
+    try:
+        from src.vision import VisionEngine
+        result = VisionEngine.analyze_image(filepath, question)
+        return result
+    except Exception as e:
+        return {"error": f"Image analysis failed: {e}"}
+
+
+# ─── Sandbox Control ──────────────────────────────────────────────────
+
+@register_tool("sandbox_status", "Returns the current sandbox mode and status.", [])
+def tool_sandbox_status(context: dict = None):
+    global SANDBOX
+    if SANDBOX:
+        return {"mode": type(SANDBOX).__name__.replace("Sandbox", ""), "status": "active"}
+    return {"mode": "none", "status": "not initialized"}
+
+
+def init(repo_root: str = None, sandbox_mode: str = None):
+    """Initialize KorgKode tools with a repo root and optional sandbox."""
+    global REPO_ROOT, SANDBOX
     REPO_ROOT = repo_root or os.getcwd()
+    
+    # Initialize sandbox (auto-detects: modal > docker > direct)
+    try:
+        SANDBOX = SandboxManager.get(sandbox_mode)
+        SANDBOX.setup(REPO_ROOT)
+    except Exception as e:
+        print(f"Sandbox init warning: {e}")

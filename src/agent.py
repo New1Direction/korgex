@@ -1,5 +1,5 @@
 """
-Seluj — Core Agent Loop.
+KorgKode — Core Agent Loop.
 
 Orchestrates the full Jules workflow:
 Explore → Plan → Approve → Execute → Verify → Pre-commit → Submit
@@ -17,7 +17,7 @@ from src.tool_base import (
 )
 import src.tools_impl as tools_impl
 
-SYSTEM_PROMPT = """You are Seluj, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks, such as solving bugs, implementing features, and writing tests.
+SYSTEM_PROMPT = """You are KorgKode, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks, such as solving bugs, implementing features, and writing tests.
 
 CORE DIRECTIVES:
 1. PLAN FIRST: Explore the codebase. Read AGENTS.md, README.md. Formulate a plan with set_plan.
@@ -33,13 +33,13 @@ Use SEARCH/REPLACE format (<<<<<<< SEARCH / ======= / >>>>>>> REPLACE) for edits
 """
 
 
-class SelujAgent:
-    """The Seluj agent loop."""
+class KorgKodeAgent:
+    """The KorgKode agent loop."""
     
     def __init__(self, repo_root: str = None, model: str = None):
         self.repo_root = repo_root or os.getcwd()
-        self.model = model or os.environ.get("SELUJ_MODEL", "deepseek/deepseek-v4-flash")
-        self.provider = os.environ.get("SELUJ_PROVIDER", "nous")
+        self.model = model or os.environ.get("KORGKODE_MODEL", "deepseek/deepseek-v4-flash")
+        self.provider = os.environ.get("KORGKODE_PROVIDER", "nous")
         self.context = get_context()
         self.context["repo_root"] = self.repo_root
         self.conversation_history = []
@@ -65,7 +65,7 @@ class SelujAgent:
         messages.append({"role": "user", "content": task_description})
         
         # Step 2: Agent exploration loop (limited iterations)
-        max_iterations = int(os.environ.get("SELUJ_MAX_ITERATIONS", "50"))
+        max_iterations = int(os.environ.get("KORGKODE_MAX_ITERATIONS", "50"))
         
         for iteration in range(max_iterations):
             # Call the LLM
@@ -131,10 +131,10 @@ class SelujAgent:
             
             client = OpenAI(
                 base_url=os.environ.get(
-                    "SELUJ_API_URL",
+                    "KORGKODE_API_URL",
                     "https://inference-api.provider.com/v1"
                 ),
-                api_key=os.environ.get("SELUJ_API_KEY", ""),
+                api_key=os.environ.get("KORGKODE_API_KEY", ""),
             )
             
             response = client.chat.completions.create(
@@ -193,7 +193,7 @@ def main():
     """Entry point when run as module."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Seluj — Autonomous AI Software Engineer")
+    parser = argparse.ArgumentParser(description="KorgKode — Autonomous AI Software Engineer")
     parser.add_argument("task", nargs="?", help="Task description")
     parser.add_argument("--repo", "-r", help="Repository root path")
     parser.add_argument("--model", "-m", help="Model to use")
@@ -207,9 +207,9 @@ def main():
         return
     
     if args.init:
-        agents_content = """# Seluj - Autonomous AI Software Engineer
+        agents_content = """# KorgKode - Autonomous AI Software Engineer
 
-You are Seluj, an extremely skilled software engineer.
+You are KorgKode, an extremely skilled software engineer.
 Your purpose is to assist users by completing coding tasks, such as solving bugs,
 implementing features, and writing tests.
 
@@ -249,11 +249,11 @@ Do NOT mention tool names in plan steps.
         parser.print_help()
         return
     
-    agent = SelujAgent(repo_root=args.repo, model=args.model)
+    agent = KorgKodeAgent(repo_root=args.repo, model=args.model)
     result = agent.run_task(args.task)
     
     print(f"\n{'='*60}")
-    print(f"SELUJ RESULT ({result['iterations']} iterations)")
+    print(f"KORGKODE RESULT ({result['iterations']} iterations)")
     print(f"{'='*60}")
     print(result["result"])
 

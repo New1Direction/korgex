@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 Seluj
+# 🧠 KorgKode
 
 **Autonomous AI Software Engineer** — 33 tools · Plan-first · Async PR pipeline · Model agnostic · Open source
 
@@ -12,12 +12,12 @@
 
 </div>
 
-Seluj integrates with your repositories, understands your entire codebase, and works autonomously to fix bugs, write tests, build features, and refactor code. You describe what needs to be done — Seluj handles the rest.
+KorgKode integrates with your repositories, understands your entire codebase, and works autonomously to fix bugs, write tests, build features, and refactor code. You describe what needs to be done — KorgKode handles the rest.
 
 ```bash
 pip install -r requirements.txt
-export SELUJ_API_KEY="sk-..."
-./seluj.sh "Add unit tests for the authentication module"
+export KORGKODE_API_KEY="sk-..."
+./korgkode.sh "Add unit tests for the authentication module"
 ```
 
 ---
@@ -30,7 +30,7 @@ export SELUJ_API_KEY="sk-..."
 - [33 Tools](#-33-tools)
 - [Demo Ideas](#-demo-ideas)
 - [Git Workflow](#-git-workflow)
-- [Why Seluj?](#-why-seluj)
+- [Why KorgKode?](#-why-korgkode)
 - [Documentation](#-documentation)
 - [License](#-license)
 
@@ -40,10 +40,10 @@ export SELUJ_API_KEY="sk-..."
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        SELUJ AGENT LOOP                            │
+│                        KORGKODE AGENT LOOP                            │
 │                                                                     │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────────┐ │
-│  │  USER     │   │  SELUJ   │   │  PLAN    │   │   APPROVAL       │ │
+│  │  USER     │   │  KORGKODE   │   │  PLAN    │   │   APPROVAL       │ │
 │  │  PROMPT   │──▶│ EXPLORES │──▶│  SET     │──▶│   RECORDED       │ │
 │  │           │   │ codebase │   │ markdown │   │                  │ │
 │  └──────────┘   └──────────┘   └──────────┘   └──────────────────┘ │
@@ -74,27 +74,27 @@ export SELUJ_API_KEY="sk-..."
 
 ```bash
 # 1. Clone
-git clone https://github.com/New1Direction/Seluj.git
-cd Seluj
+git clone https://github.com/New1Direction/KorgKode.git
+cd KorgKode
 pip install -r requirements.txt
 
 # 2. Set API key (any LLM provider)
-export SELUJ_API_KEY="sk-your-key-here"
-export SELUJ_MODEL="gpt-4o"          # or claude, deepseek, llama, etc.
+export KORGKODE_API_KEY="sk-your-key-here"
+export KORGKODE_MODEL="gpt-4o"          # or claude, deepseek, llama, etc.
 
 # 3. Initialize in your project
 cd /path/to/your/project
-/path/to/Seluj/seluj.sh --init
+/path/to/KorgKode/korgkode.sh --init
 
 # 4. Run a task
-/path/to/Seluj/seluj.sh "Add tests for the user authentication flow"
+/path/to/KorgKode/korgkode.sh "Add tests for the user authentication flow"
 ```
 
 ---
 
 ## 🎯 Capabilities
 
-| Category | What Seluj Can Do | Example Prompt |
+| Category | What KorgKode Can Do | Example Prompt |
 |----------|------------------|----------------|
 | 🐛 **Bug Fixing** | Diagnose errors, find root cause, apply fix across files | `Fix the 500 error on the checkout page` |
 | 🧪 **Test Writing** | Generate unit tests, integration tests, edge cases | `Add pytest tests for the payment processor` |
@@ -158,69 +158,69 @@ cd /path/to/your/project
 
 ## 🎬 Demo Ideas
 
-Try these out of the box. Each demo showcases a different Seluj capability.
+Try these out of the box. Each demo showcases a different KorgKode capability.
 
 ### Demo 1: Bug Fix (5 minutes)
 ```bash
 git clone https://github.com/your-test-repo.git
 cd your-test-repo
-seluj.sh "Fix the login redirect bug — users are redirected to /home instead of /dashboard after login"
+korgkode.sh "Fix the login redirect bug — users are redirected to /home instead of /dashboard after login"
 ```
-**What you'll see:** Seluj reads the auth flow, finds the redirect logic, patches it, runs tests, submits.
+**What you'll see:** KorgKode reads the auth flow, finds the redirect logic, patches it, runs tests, submits.
 
 ### Demo 2: Feature Addition (10 minutes)
 ```bash
-seluj.sh "Add a /healthz endpoint that returns JSON {status: 'ok'} with a 200 status code"
+korgkode.sh "Add a /healthz endpoint that returns JSON {status: 'ok'} with a 200 status code"
 ```
-**What you'll see:** Seluj explores the project structure, picks the right framework file, writes the endpoint, adds a test, verifies it passes.
+**What you'll see:** KorgKode explores the project structure, picks the right framework file, writes the endpoint, adds a test, verifies it passes.
 
 ### Demo 3: Test Generation (5 minutes)
 ```bash
-seluj.sh "Write pytest tests for the stripe payment module — cover success, failure, and timeout cases"
+korgkode.sh "Write pytest tests for the stripe payment module — cover success, failure, and timeout cases"
 ```
-**What you'll see:** Seluj reads the module, identifies all code paths, generates test cases, runs them, fixes any failures.
+**What you'll see:** KorgKode reads the module, identifies all code paths, generates test cases, runs them, fixes any failures.
 
 ### Demo 4: Dependency Migration (15 minutes)
 ```bash
-seluj.sh "Upgrade all outdated npm packages to their latest versions and fix any breaking changes"
+korgkode.sh "Upgrade all outdated npm packages to their latest versions and fix any breaking changes"
 ```
-**What you'll see:** Seluj reads package.json, detects outdated deps, updates versions, handles breaking changes across files, runs the build.
+**What you'll see:** KorgKode reads package.json, detects outdated deps, updates versions, handles breaking changes across files, runs the build.
 
 ### Demo 5: Full Project Scaffold (10 minutes)
 ```bash
 mkdir my-new-api && cd my-new-api
 git init
-seluj.sh "Create a FastAPI project with user authentication, a health endpoint, and pytest test suite"
+korgkode.sh "Create a FastAPI project with user authentication, a health endpoint, and pytest test suite"
 ```
-**What you'll see:** Seluj builds a complete project from scratch — directory structure, config files, source code, tests, README.
+**What you'll see:** KorgKode builds a complete project from scratch — directory structure, config files, source code, tests, README.
 
 ### Demo 6: Code Review Pipeline (10 minutes)
 ```bash
 # Create a PR with some issues, then:
-seluj.sh "Review the open PR, check for security issues, and reply to any pending comments"
+korgkode.sh "Review the open PR, check for security issues, and reply to any pending comments"
 ```
-**What you'll see:** Seluj reads PR comments, analyzes the diff, replies to feedback, pushes fixes.
+**What you'll see:** KorgKode reads PR comments, analyzes the diff, replies to feedback, pushes fixes.
 
 ### Demo 7: Async Multi-Agent (15 minutes)
 ```bash
 # Fire off multiple tasks in parallel
-seluj.sh "Write tests for the auth module" --async &
-seluj.sh "Add input validation to the API layer" --async &
-seluj.sh "Update the README with API documentation" --async &
+korgkode.sh "Write tests for the auth module" --async &
+korgkode.sh "Add input validation to the API layer" --async &
+korgkode.sh "Update the README with API documentation" --async &
 ```
-**What you'll see:** Three Seluj agents work in parallel, each in their own sandbox. Results appear as they complete.
+**What you'll see:** Three KorgKode agents work in parallel, each in their own sandbox. Results appear as they complete.
 
 ---
 
 ## 🔄 Git Workflow
 
-Seluj follows a structured git workflow inspired by industry best practices:
+KorgKode follows a structured git workflow inspired by industry best practices:
 
 ```
 main ──▶ feature/user-auth ──▶ commit ──▶ push ──▶ PR ready
          ▲                    ▲          ▲
          │                    │          │
-    Seluj creates       Seluj commits   User approves
+    KorgKode creates       KorgKode commits   User approves
     branch from main    with meaningful  push to remote
                         message
 ```
@@ -236,7 +236,7 @@ chore/description      — Maintenance
 ```
 
 ### Commit Messages
-Seluj generates descriptive commit messages:
+KorgKode generates descriptive commit messages:
 
 ```
 ✅ Good: "fix: correct redirect URL after login — was pointing to /home, now points to /dashboard"
@@ -246,7 +246,7 @@ Seluj generates descriptive commit messages:
 ```
 
 ### Pre-Commit Checks
-Before every commit, Seluj runs:
+Before every commit, KorgKode runs:
 1. ✅ Test suite
 2. ✅ Linter
 3. ✅ Type checker
@@ -255,9 +255,9 @@ Before every commit, Seluj runs:
 
 ---
 
-## 📊 Why Seluj?
+## 📊 Why KorgKode?
 
-| Capability | Seluj | GitHub Copilot | Cursor AI | Cody | Claude Code |
+| Capability | KorgKode | GitHub Copilot | Cursor AI | Cody | Claude Code |
 |-----------|-------|---------------|-----------|------|-------------|
 | **Autonomous execution** | ✅ Full async agent | ❌ Suggestions only | ⚠️ Limited | ✅ Basic | ⚠️ Interactive |
 | **Plan-first workflow** | ✅ Required | ❌ | ❌ | ❌ | ⚠️ Optional |
@@ -282,7 +282,7 @@ Before every commit, Seluj runs:
 | [Reviewing Plans & Feedback](docs/review-plan.md) | Plan approval, mid-task steering |
 | [CLI Reference](docs/cli-reference.md) | Commands, flags, env variables |
 | [Tools Reference](docs/tools-reference.md) | All 33 tools with parameters |
-| [Seluj vs The Rest](docs/comparison.md) | Competitive comparison |
+| [KorgKode vs The Rest](docs/comparison.md) | Competitive comparison |
 
 ---
 
