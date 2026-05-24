@@ -9,6 +9,7 @@ import subprocess
 import shutil
 import shlex
 import tempfile
+import threading
 from pathlib import Path
 from src.tool_base import register_tool, ToolParam
 from src.sandbox import SandboxManager
@@ -22,10 +23,29 @@ from src.self_healing import TDDHealer, extract_traceback_info
 from src.dependency_graph import DependencyAnalyzer
 from src.profiler import PerformanceProfiler
 
-# Initialize sandbox and GitHub on import
+# Lazy singletons — initialized on first use, not at import time.
+# This keeps test collection fast and avoids touching GitHub env vars on import.
 SANDBOX = None
-SWARM = AgentSwarm()
-init_from_cli()
+SWARM = None
+_github_initialized = False
+_github_init_lock = threading.Lock()
+
+
+def _get_swarm() -> AgentSwarm:
+    global SWARM
+    if SWARM is None:
+        SWARM = AgentSwarm()
+    return SWARM
+
+
+def _ensure_github():
+    """Call init_from_cli() exactly once, safely under concurrent tool calls."""
+    global _github_initialized
+    if not _github_initialized:                    # fast path, no lock
+        with _github_init_lock:
+            if not _github_initialized:            # re-check under lock
+                init_from_cli()
+                _github_initialized = True
 
 REPO_ROOT = None
 
@@ -414,25 +434,56 @@ def tool_initiate_memory_recording(context: dict = None):
     return {"result": "Memory recording initiated"}
 
 
-@register_tool("view_image", "Loads an image from URL for analysis.", [
+_MAX_IMAGE_BYTES = 25 * 1024 * 1024  # 25 MB — guard against accidental OOM
+
+
+@register_tool("view_image", "Downloads an image from a URL and returns its base64-encoded contents for multimodal analysis.", [
     ToolParam("url", "STRING", "The URL of the image to view.", required=True),
 ])
 def tool_view_image(url: str, context: dict = None):
-    return {"url": url, "result": "Image loaded. Use vision_analyze to examine it."}
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Korgex/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            length = resp.getheader("Content-Length")
+            if length and int(length) > _MAX_IMAGE_BYTES:
+                mb = int(length) // 1024 // 1024
+                return {"error": f"Image too large ({mb} MB > 25 MB limit)"}
+            data = resp.read(_MAX_IMAGE_BYTES + 1)
+        if len(data) > _MAX_IMAGE_BYTES:
+            return {"error": "Image exceeds 25 MB limit — aborting to avoid OOM"}
+
+        ext = url.split("?")[0].rsplit(".", 1)[-1][:8] if "." in url.split("?")[0] else "png"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+
+        from src.vision import VisionEngine
+        result = VisionEngine.analyze_image(tmp_path)
+        result["source_url"] = url
+        return result
+    except Exception as e:
+        return {"error": f"Failed to load image from {url}: {e}"}
 
 
-@register_tool("read_image_file", "Reads an image file from the machine.", [
+@register_tool("read_image_file", "Reads an image file from disk and returns its base64-encoded contents for multimodal analysis.", [
     ToolParam("filepath", "STRING", "The path of the image file.", required=True),
 ])
 def tool_read_image_file(filepath: str, context: dict = None):
-    return {"filepath": filepath, "result": "Image loaded. Use vision_analyze to examine it."}
+    cwd = context.get("repo_root") if context else os.getcwd()
+    full_path = os.path.join(cwd, filepath)
+    from src.vision import VisionEngine
+    return VisionEngine.analyze_local_file(full_path)
 
 
-@register_tool("read_media_file", "Reads a media file (image/video) from the machine.", [
+@register_tool("read_media_file", "Reads a media file (image/video) from disk and returns its contents for multimodal analysis.", [
     ToolParam("filepath", "STRING", "The path of the media file.", required=True),
 ])
 def tool_read_media_file(filepath: str, context: dict = None):
-    return {"filepath": filepath, "result": "Media loaded."}
+    cwd = context.get("repo_root") if context else os.getcwd()
+    full_path = os.path.join(cwd, filepath)
+    from src.vision import VisionEngine
+    return VisionEngine.analyze_local_file(full_path)
 
 
 @register_tool("frontend_verification_instructions", "Returns Playwright instructions for frontend verification.")
@@ -473,9 +524,8 @@ def tool_start_live_preview_instructions(context: dict = None):
 ])
 def tool_call_hello_world_agent(message: str, context: dict = None):
     """Now uses the real agent swarm for delegation."""
-    global SWARM
     repo_root = context.get("repo_root") if context else os.getcwd()
-    
+
     # Auto-detect agent type from the message
     msg_lower = message.lower()
     if any(w in msg_lower for w in ["test", "pytest", "unittest", "spec"]):
@@ -488,9 +538,9 @@ def tool_call_hello_world_agent(message: str, context: dict = None):
         agent_type = "refactor"
     else:
         agent_type = "test"  # default
-    
+
     task = SubTask(agent_type, message, repo_root)
-    result = SWARM.run_concurrent([task])
+    result = _get_swarm().run_concurrent([task])
     
     r = result[0] if result else None
     if r and r.success:
@@ -542,6 +592,7 @@ def tool_overwrite_file_with_block(filepath: str, content: str, context: dict = 
     ToolParam("base", "STRING", "Target branch (default: main)."),
 ])
 def tool_github_create_pr(owner: str, repo: str, title: str, body: str, head: str, base: str = "main", context: dict = None):
+    _ensure_github()
     result = create_pr(owner, repo, title, body, head, base)
     return result
 
@@ -552,6 +603,7 @@ def tool_github_create_pr(owner: str, repo: str, title: str, body: str, head: st
     ToolParam("state", "STRING", "PR state: open, closed, all."),
 ])
 def tool_github_list_prs(owner: str, repo: str, state: str = "open", context: dict = None):
+    _ensure_github()
     result = list_prs(owner, repo, state)
     return {"prs": result, "count": len(result)}
 
@@ -562,6 +614,7 @@ def tool_github_list_prs(owner: str, repo: str, state: str = "open", context: di
     ToolParam("pr_number", "STRING", "Pull request number.", required=True),
 ])
 def tool_github_get_pr_comments(owner: str, repo: str, pr_number: str, context: dict = None):
+    _ensure_github()
     result = get_pr_comments(owner, repo, int(pr_number))
     return {"comments": result, "count": len(result)}
 
@@ -573,6 +626,7 @@ def tool_github_get_pr_comments(owner: str, repo: str, pr_number: str, context: 
     ToolParam("reply", "STRING", "Reply text.", required=True),
 ])
 def tool_github_reply_to_pr_comment(owner: str, repo: str, comment_id: str, reply: str, context: dict = None):
+    _ensure_github()
     result = reply_to_pr_comment(owner, repo, int(comment_id), reply)
     return result
 
@@ -585,6 +639,7 @@ def tool_github_reply_to_pr_comment(owner: str, repo: str, comment_id: str, repl
     ToolParam("labels", "STRING", "Comma-separated labels."),
 ])
 def tool_github_create_issue(owner: str, repo: str, title: str, body: str = "", labels: str = "", context: dict = None):
+    _ensure_github()
     label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else None
     result = create_issue(owner, repo, title, body, label_list)
     return result

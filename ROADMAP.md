@@ -161,8 +161,52 @@ VS Code Extension (WebSocket Client)
 
 | # | Feature | Status | Priority | Est. Effort |
 |---|---------|--------|----------|-------------|
-| 1 | Self-Healing TDD Loops | ❌ Not started | Critical | 2-3 days |
-| 2 | Dependency Graph Analysis | ❌ Not started | High | 3-5 days |
-| 3 | Performance Profiling | ❌ Not started | Medium | 2-3 days |
-| 4 | AST Context Compression | ❌ Not started | Medium | 3-4 days |
-| 5 | VS Code Sidecar Extension | ❌ Not started | Low | 5-7 days |
+| 1 | Self-Healing TDD Loops | 🟡 Module exists, not wired into auto-trigger | High | 1 day |
+| 2 | Dependency Graph Analysis | 🟡 Module exists, not bridged into USER_TOOLS | Medium | 2 hr |
+| 3 | Performance Profiling | ✅ Wired (dashboard `/api/swarm/profile`) | — | — |
+| 4 | AST Context Compression | 🟡 Module exists, not bridged into USER_TOOLS | Medium | 2 hr |
+| 5 | VS Code Sidecar Extension | ✅ 4 commands wired, port aligned to 8090 | — | — |
+
+---
+
+## Appendix: AlphaEvolve takeaways (2026-05-24 reading)
+
+Read DeepMind's AlphaEvolve paper (44 pages). It's a **batch evolutionary coding agent** — different paradigm from korgex (interactive, single-task, latency-optimized). The two are complementary, not competing. Filtered against staying true to korgex's vision, here's what's extractable.
+
+### Validations (already aligned, no work needed)
+
+- **SEARCH/REPLACE diff format** — DeepMind picked the same format korgex uses for Edit. Document it as an industry-standard convention.
+- **Plan-first prompting + rich context** — paper's ablations show "no context" performs significantly worse. Validates our SYSTEM_PROMPT directives.
+- **Mixed-capability ensemble (Flash + Pro)** — paper uses Gemini Flash for throughput + Pro for breakthroughs. korgex's `--mode plan/execute/debug` does the same on a per-task basis.
+
+### Small wins (worth shipping — under a day each)
+
+- **`--judge MODEL` flag** — for soft criteria ("more readable", "more idiomatic"), spawn a separate scoring call. AlphaEvolve's "LLM-generated feedback" pattern. Useful for review/refactor flows.
+- **Evaluation cascade in the system prompt** — explicit directive: "verify cheapest checks first (syntax/typecheck), then linter, then unit tests, then integration." Already implicit; making it explicit improves reliability on long tasks.
+- **`--ensemble N` flag** — spawn N parallel agents on the same task, return all diffs, user picks winner. Quick win for hard problems. Cost: N× tokens per run.
+
+### Deferred (worth doing later as opt-in features, not core)
+
+- **`korgex evolve <file> --metric "<cmd>" --iterations N`** — full AlphaEvolve-lite. EVOLVE-BLOCK markers in source, fitness-function command, N iterations, best-scoring child wins. Narrow use case (perf optimization, algorithm improvement) but distinctive — neither Cursor nor Claude Code has this.
+- **Meta-prompt evolution** — let the LLM rewrite parts of its own system prompt based on what worked across runs. Research-level; revisit when we have usage data.
+- **Multi-objective scoring** — paper's counterintuitive finding: optimizing for multiple metrics improves single-metric performance, because the diverse exemplars in prompts produce more varied candidates. Worth experimenting once we have evolve mode.
+
+### Vision mismatch (do not pursue)
+
+- **Distributed asyncio pipeline** — paper optimizes throughput across an evaluation cluster. korgex optimizes single-user latency. Wrong axis.
+- **Program database / MAP-elites / island populations** — the evolutionary memory store. Only makes sense inside `korgex evolve`, not the main loop.
+- **Algorithm discovery as a goal** — AlphaEvolve found a 48-multiplication 4×4 complex matmul algorithm after 56 years of human work. That's a search problem, not a coding-task problem. korgex shouldn't try to compete here.
+
+### Strategic note
+
+AlphaEvolve and korgex sit at different points on the same axis:
+
+```
+  korgex                                         AlphaEvolve
+  ↓                                              ↓
+  one task, one shot, ship it ←———————————→ thousands of samples, search to optimum
+  interactive, low-latency                       batch, throughput-optimized
+  generic coding (most problems)                 metric-gradable problems (rare but valuable)
+```
+
+The future `korgex evolve` subcommand would slide korgex one notch toward AlphaEvolve for the narrow class of problems where it makes sense, without changing the core interactive identity. If we ever do this, the natural persistence layer is **korg's signed cognitive ledger** — that's where a real korgex+korg integration becomes interesting.

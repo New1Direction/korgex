@@ -8,8 +8,10 @@ These verify:
 3. Provider tool schemas have the right shape for Anthropic and OpenAI.
 """
 
+import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -373,3 +375,42 @@ def test_swarm_refactor_returns_clean_error_without_api_key(client, monkeypatch)
     body = r.json()
     assert body["success"] is False
     assert "API key" in body.get("error", "")
+
+
+# ── 8. MCP integration — stub server over stdio ───────────────────────────
+# This test would have caught the original bug (stdout reader never started):
+# the initialize handshake would have timed out after 60s.
+
+
+def test_mcp_connect_discover_call_against_stub_server():
+    """Full round-trip: connect → discover → call → disconnect against a real
+    subprocess MCP server. Exercises the threading wiring end-to-end."""
+    from src.mcp_client import MCPClient, MCPServerConfig
+
+    stub = Path(__file__).parent / "stub_mcp_server.py"
+    config = MCPServerConfig(
+        name="stub",
+        command=sys.executable,
+        args=[str(stub)],
+        timeout=10,
+    )
+
+    client = MCPClient(config)
+
+    result = client.connect()
+    assert result.get("status") == "connected", f"connect() failed: {result}"
+    assert client.is_connected()
+
+    tools = client.discover_tools()
+    assert len(tools) == 1
+    assert tools[0].name == "echo"
+    assert tools[0].server_name == "stub"
+
+    call_result = client.call_tool("echo", {"text": "hello korgex"})
+    assert "error" not in call_result, f"call_tool failed: {call_result}"
+    content = call_result.get("content", [])
+    echoed = json.loads(content[0]["text"])
+    assert echoed == {"text": "hello korgex"}
+
+    client.disconnect()
+    assert not client.is_connected()

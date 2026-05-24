@@ -1,52 +1,68 @@
-# Reviewing Plans & Giving Feedback
+# Reviewing and Steering the Agent
 
-Once you start a task, Korgex generates a **plan** before writing any code. This gives you visibility into Korgex's approach and lets you iterate before any changes are made.
+korgex runs autonomously — you give it a task and it works until done. This page covers how to see what it's doing, catch it going wrong, and course-correct without starting over.
 
-## Reviewing the Plan
+## Watching the TUI
 
-After exploring your codebase, Korgex presents its plan. You'll see:
+When stdout is a TTY, korgex streams its work live:
 
-- A natural language description of what Korgex intends to do
-- Step-by-step breakdowns
-- Any assumptions or setup steps
+- **Thinking** (Anthropic only) renders in dimmed italic — this is the agent's internal reasoning before tool calls
+- **Tool calls** show as transient spinners: `⠋ Edit(file_path=src/foo.py, ...)`
+- **Tool results** resolve to one-line summaries: `✓ Bash — 3 passed in 0.4s`
+- **Final text** streams character by character after all tool calls are done
 
-Each step includes:
-- What file(s) will be modified
-- What the change intends to accomplish
-- How the result will be verified
+Press **Ctrl+C** once for a graceful interrupt. The agent gets a chance to wrap up the current tool call. Press twice to force-kill.
 
-**To approve:** Signal approval when you're ready for Korgex to begin executing.
+## Quiet mode for scripts
 
-**To revise:** Provide feedback through the chat interface. Korgex will update the plan and present it again.
+```bash
+korgex --quiet "list all exported functions in src/"
+```
 
-## Giving Feedback
+Suppresses the TUI entirely. The final result text is printed to stdout on exit. Exit code is 0 on success, 1 if the agent hit max iterations without finishing, 2 for configuration errors.
 
-At any point during execution, you can provide feedback:
+## Using the dashboard
 
-- Ask Korgex to revise a step
-- Point out something it missed
-- Clarify your original request
-- Answer questions Korgex may have
+`korgex serve` starts a FastAPI dashboard at `http://localhost:8090` with:
 
-Korgex will respond and adjust its approach accordingly.
+- **Current task and plan** — what the agent is working on
+- **Live log stream** — `/ws/logs` WebSocket
+- **Approve plan** — POST `/api/approve-plan`
+- **Send feedback** — POST `/api/send-feedback` with `{"feedback": "..."}` to inject a steering message mid-task
+- **Start a new task** — POST `/api/new-task` with `{"description": "..."}`
 
-## Mid-Task Steering
+The VS Code sidecar extension uses the same API — commands like "Korgex: Refactor Current File" POST to `/api/swarm/refactor`.
 
-You can intervene mid-execution:
+## When to intervene
 
-- **Change approach:** "Use a different library for parsing"
-- **Revise code:** "Make the function async instead"
-- **Clarify logic:** "Only apply this to authenticated users"
+The agent is designed to solve tasks autonomously. But some situations benefit from a nudge:
 
-Korgex will incorporate your feedback and continue.
+**Agent is reading files that aren't relevant** — this is normal early exploration. Give it a few iterations; it usually focuses quickly. If it's still wandering after 5-10 tool calls, kill it and add more specificity to your prompt.
 
-## Summary & Review
+**Agent is about to make a change you don't want** — use Ctrl+C, check `git diff`, then re-run with a more constrained prompt: `"only change src/auth/middleware.py, don't touch the tests"`.
 
-When Korgex finishes, it provides:
+**Agent hits max iterations** — exits with code 1 and prints the partial result. Review `git diff`, see how far it got, then run again with a narrower task: `"continue from where you left off — the tests are still failing in test_auth.py"`.
 
-- ✅ Files changed
-- ⏱ Total runtime
-- ➕ Lines of code added/changed/removed
-- 🌿 The branch name and commit message
+**Agent asks a question** — it used `AskUserQuestion`. Answer in the TUI prompt and it continues.
 
-You can review the diff, make additional changes, or merge the branch.
+## Plan-first mode
+
+For architectural or design questions, use `--mode plan`:
+
+```bash
+korgex --mode plan "how should we add rate limiting to the API?"
+```
+
+This uses Opus with extended thinking. The agent does read-only analysis and writes a structured plan — it won't edit files. Use the output to inform your next `--mode execute` run.
+
+## Approving work
+
+korgex doesn't auto-commit or auto-push. After a run:
+
+```bash
+git diff          # review all changes
+git add -p        # stage selectively if needed
+git commit -m "..."
+```
+
+The agent may create files, edit existing ones, or run test commands — but it never touches your git history unless you explicitly ask it to (`korgex "commit these changes with a descriptive message"`).
