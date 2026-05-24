@@ -7,17 +7,17 @@ The autonomous coding agent landscape is evolving rapidly. Here's how Korgex com
 | Feature | Korgex | GitHub Copilot | Cursor AI | Cody (Sourcegraph) | Claude Code |
 |---------|-------|----------------|-----------|-------------------|-------------|
 | **Autonomous execution** | ✅ Full async agent | ❌ Suggestions only | ⚠️ Limited agent mode | ✅ Basic agent | ⚠️ Interactive only |
-| **Plan-first workflow** | ✅ Required | ❌ | ❌ | ❌ | ⚠️ Optional |
-| **Tool surface** | **33 tools** | 3-5 | 8-10 | 6-8 | 10-12 |
-| **Sandbox execution** | ✅ Isolated VM | ❌ | ❌ | ❌ | ❌ |
-| **Git/PR integration** | ✅ Full pipeline | ❌ | ⚠️ Basic | ✅ Review only | ⚠️ Basic |
-| **Frontend verification** | ✅ Playwright | ❌ | ❌ | ❌ | ❌ |
-| **Code review** | ✅ Request + reply to PR comments | ❌ | ❌ | ✅ | ❌ |
-| **Pre-commit checks** | ✅ Built-in | ❌ | ❌ | ❌ | ❌ |
-| **Memory (cross-session)** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Subagent delegation** | ✅ Agency-style | ❌ | ❌ | ❌ | ❌ |
+| **Plan-first mode** | ✅ `--mode plan` | ❌ | ❌ | ❌ | ⚠️ Optional |
+| **Tool surface** | **~12 user-facing** | 3-5 | 8-10 | 6-8 | 10-12 |
+| **Sandbox execution** | ⚠️ Docker/Modal (opt-in) | ❌ | ❌ | ❌ | ❌ |
+| **Git/PR integration** | ✅ Create, comment, review | ❌ | ⚠️ Basic | ✅ Review only | ⚠️ Basic |
+| **Screenshot capture** | ⚠️ Headless Chrome | ❌ | ❌ | ❌ | ❌ |
+| **PR comment replies** | ✅ Get + reply | ❌ | ❌ | ✅ | ❌ |
+| **Memory (cross-session)** | ❌ Not yet implemented | ❌ | ❌ | ❌ | ❌ |
+| **Subagent delegation** | ✅ Agent tool | ❌ | ❌ | ❌ | ❌ |
+| **MCP server support** | ✅ Runtime connect/disconnect | ❌ | ❌ | ❌ | ✅ |
 | **Open source** | ✅ MIT | ❌ | ❌ | ❌ | ❌ |
-| **Model agnostic** | ✅ Any LLM | ❌ OpenAI only | ❌ Custom only | ❌ Anthropic only | ❌ Anthropic only |
+| **Model agnostic** | ✅ Any OpenAI-compatible LLM | ❌ OpenAI only | ❌ Custom only | ❌ Anthropic only | ❌ Anthropic only |
 
 ## Detailed Comparison
 
@@ -25,57 +25,71 @@ The autonomous coding agent landscape is evolving rapidly. Here's how Korgex com
 
 Most coding assistants operate as **co-pilots** — they suggest completions while you type, or they wait for your next instruction after each action.
 
-Korgex operates as an **autonomous engineer**. You give it a task, it explores the codebase, formulates a plan, executes each step with verification, and submits the completed work. You review and approve — you don't babysit.
+Korgex operates as an **autonomous engineer**. You give it a task, it explores the codebase, executes each step with verification, and reports back. You review and approve — you don't babysit.
 
-**✅ Korgex:** "Add authentication middleware" → explores → plans → builds → tests → submits a PR
-**❌ Others:** "Add authentication middleware" → you guide every file change manually
+**✅ Korgex:** `korgex "fix the 500 error in src/api/feedback.py"` → explores → edits → verifies → reports
 
-### Plan-First Workflow
+**❌ Others:** requires you to guide every file change manually
 
-Korgex never writes code without a plan. Every task begins with codebase exploration followed by a structured markdown plan. You approve the plan before any code changes are made.
+### Plan-First Mode
 
-This means:
-- No wasted work on wrong approaches
-- Clear visibility into what Korgex intends to do
-- Ability to course-correct before code is written
+Use `--mode plan` for architectural or design tasks. Korgex uses Opus with extended thinking and does read-only analysis — it won't touch files. The output is a structured plan you can review before deciding whether to proceed with `--mode execute`.
+
+```bash
+korgex --mode plan "how should we add rate limiting to the API?"
+korgex --mode execute "add token-bucket rate limiting — see the plan we just made"
+```
+
+For `--mode execute` (the default), the agent explores and acts without a separate approval gate. Use `git diff` after a run to review changes before committing.
 
 ### Tool Surface
 
-Korgex exposes **33 tools** — the most comprehensive tool surface of any coding agent:
+Korgex exposes **~12 user-facing tools** — named and documented in Claude Code style. These map internally to 49+ handler functions via a routing layer.
 
-| Category | Tools | Purpose |
-|----------|-------|---------|
-| **File Operations** | 8 tools | Read, write, search/replace, delete, rename, restore, reset |
-| **Planning** | 3 tools | Set plan, mark step complete, record approval |
-| **Execution** | 5 tools | Bash, web search, website fetch, image viewing |
-| **User Interaction** | 2 tools | Message user, request input |
-| **Code Review** | 3 tools | Request review, read comments, reply |
-| **Frontend** | 3 tools | Playwright instructions, verification, live preview |
-| **Delivery** | 2 tools | Pre-commit checks, submit with branch & commit |
-| **Memory** | 1 tool | Cross-session recording |
-| **Subagents** | 2 tools | Delegate to sub-agents, completion signal |
+| User-facing tool | Purpose |
+|-----------------|---------|
+| **Read** | Read a file, optionally paginated |
+| **Write** | Create or overwrite a file |
+| **Edit** | Surgical string replacement (SEARCH/REPLACE internally) |
+| **Bash** | Run a shell command |
+| **Grep** | Regex search over file contents |
+| **Glob** | Find files by name pattern |
+| **Agent** | Delegate a sub-task to a specialised agent |
+| **AskUserQuestion** | Clarify ambiguity before starting work |
+| **TaskCreate** | Track multi-step work |
+| **Skill** | Invoke an installed skill by name |
+| **ToolSearch** | Discover available tools at runtime |
+
+MCP servers registered at startup add their tools to this surface automatically.
 
 ### Model Agnostic
 
-Korgex doesn't lock you into a single LLM provider. Configure any model:
+Korgex auto-detects the provider from the model name. Any model whose name contains "claude" or starts with "anthropic/" routes to the Anthropic SDK; everything else routes to the OpenAI-compatible SDK.
 
 ```bash
+# Anthropic (default)
+export ANTHROPIC_API_KEY="sk-ant-..."
+export KORGEX_MODEL="claude-sonnet-4-6"
+
 # OpenAI
-export KORGEX_API_URL="https://api.openai.com/v1"
+export OPENAI_API_KEY="sk-proj-..."
 export KORGEX_MODEL="gpt-4o"
 
-# Anthropic
-export KORGEX_API_URL="https://api.anthropic.com/v1"
-export KORGEX_MODEL="claude-sonnet-4-20250514"
-
-# OpenRouter
+# OpenRouter (any model on the platform)
+export KORGEX_API_KEY="sk-or-v1-..."
 export KORGEX_API_URL="https://openrouter.ai/api/v1"
-export KORGEX_MODEL="anthropic/claude-sonnet-4"
+export KORGEX_MODEL="anthropic/claude-opus-4"
 
 # Local (Ollama)
 export KORGEX_API_URL="http://localhost:11434/v1"
-export KORGEX_MODEL="llama3"
+export KORGEX_MODEL="llama3.2:latest"
 ```
+
+### MCP Server Support
+
+Korgex can connect to any MCP (Model Context Protocol) server at startup or at runtime. Place an `mcp.json` in your repo root and pass `--mcp` to load it. The agent can also connect, disconnect, and list servers dynamically via `tool_mcp_connect` / `tool_mcp_disconnect`.
+
+This is distinct from most agents where the tool surface is fixed — Korgex's tool surface expands with your infrastructure.
 
 ### Open Source
 
@@ -89,14 +103,15 @@ Korgex is fully open source under the MIT license. No paywalls, no usage caps, n
 - Feature implementation with full test coverage
 - Dependency updates and migration
 - Code refactoring with verification
-- Automated code review responses
+- Automated PR comment responses
 - Async development — fire and forget
 
-**Korgex is evolving toward:**
+**Not yet implemented (see roadmap):**
+- Cross-session memory
+- Session resume (`--resume` exits 2 today)
+- Self-healing test loop outside sandbox mode
 - Multi-agent orchestration for large features
-- CI/CD integration for automated PR responses
-- Real-time collaboration with human developers
 
 ## Summary
 
-Korgex occupies a unique position: the most comprehensive autonomous coding agent that's fully open source and model agnostic. It combines the autonomy of an async agent with the verification rigor of a senior engineer, backed by the largest tool surface in the category.
+Korgex is an autonomous coding agent that's open source, provider-agnostic, and extensible via MCP. Its two-layer tool architecture (12 user-facing tools routing to 49+ internal handlers) gives the LLM a clean, well-typed surface while keeping implementation flexibility in the handlers. The default model is `claude-sonnet-4-6`; `--mode plan` upgrades to Opus with extended thinking.

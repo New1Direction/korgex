@@ -1,382 +1,612 @@
-<div align="center">
+# korgex
 
-# 🧠 Korgex
+**Autonomous coding agent. Provider-agnostic. MCP-native. Plan-first.**
 
-**Autonomous AI Software Engineer** — 33 tools · Plan-first · Async PR pipeline · Model agnostic · Open source
+A terminal-native AI engineer that reads your codebase, edits files, runs commands, and ships work. Speaks both Anthropic and OpenAI tool-use protocols. Connects to any MCP server. Streams output live to your terminal. Open source, MIT-licensed, no vendor lock-in.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](requirements.txt)
-![Status](https://img.shields.io/badge/status-active-brightgreen)
+```bash
+$ korgex "add a /healthz endpoint that returns 200 with uptime"
+➤ Read(file_path=/app/routes.py)
+➤ Edit(file_path=/app/routes.py, old_string=..., new_string=...)
+➤ Bash(command=pytest tests/test_routes.py -q)
+✓ Added GET /healthz returning {"status": "ok", "uptime_seconds": ...}
+```
 
 ---
 
-</div>
+## Table of Contents
 
-Korgex integrates with your repositories, understands your entire codebase, and works autonomously to fix bugs, write tests, build features, and refactor code. You describe what needs to be done — Korgex handles the rest.
+- [Install](#install)
+- [Quickstart](#quickstart)
+- [How it works](#how-it-works)
+- [CLI reference](#cli-reference)
+- [Tools](#tools)
+- [Environment variables](#environment-variables)
+- [Multi-model routing](#multi-model-routing)
+- [MCP integration](#mcp-integration)
+- [Streaming TUI](#streaming-tui)
+- [VS Code sidecar](#vs-code-sidecar)
+- [Dashboard API](#dashboard-api)
+- [Architecture](#architecture)
+- [Project structure](#project-structure)
+- [Development](#development)
+- [Testing](#testing)
+- [Building & releasing](#building--releasing)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [License](#license)
+
+---
+
+## Install
+
+### From GitHub Release (recommended today)
 
 ```bash
-# One-shot install
-pip install korgex
-
-# Launch the editor
-korgex
+pip install https://github.com/New1Direction/korgex/releases/download/v0.2.2/korgex-0.2.2-py3-none-any.whl
 ```
 
-**Or from source:**
+### From source
 
 ```bash
-git clone https://github.com/New1Direction/Korgex.git
-cd Korgex
+git clone https://github.com/New1Direction/korgex.git
+cd korgex
 pip install -e .
-korgex init          # install deps + compile VS Code extension
-korgex               # launch backend + VS Code sidecar
+```
+
+### From `git+https` (latest `main`)
+
+```bash
+pip install git+https://github.com/New1Direction/korgex.git
+```
+
+### From PyPI
+
+Planned. Until then use one of the above.
+
+---
+
+## Quickstart
+
+```bash
+# 1. Set an API key — either provider works
+export ANTHROPIC_API_KEY="sk-ant-..."
+# or
+export OPENAI_API_KEY="sk-proj-..."
+# or via OpenRouter (OpenAI-compatible, many models)
+export KORGEX_API_KEY="sk-or-v1-..."
+export KORGEX_API_URL="https://openrouter.ai/api/v1"
+
+# 2. Run the agent on a naked prompt
+korgex "fix the failing test in tests/test_auth.py"
+
+# 3. Or pick a specific model / mode
+korgex --model claude-sonnet-4-6 "refactor src/handler.py"
+korgex --mode plan "design a rate limiter for the API"
+korgex --quiet "list the python files in src/"
 ```
 
 ---
 
-## 📋 Table of Contents
+## How it works
 
-- [Architecture](#-architecture)
-- [Quick Start](#-quick-start)
-- [Capabilities](#-capabilities)
-- [33 Tools](#-33-tools)
-- [Demo Ideas](#-demo-ideas)
-- [Git Workflow](#-git-workflow)
-- [Why Korgex?](#-why-korgex)
-- [Enterprise: Zero-Hallucination](#-enterprise-zero-hallucination)
-- [Documentation](#-documentation)
-- [License](#-license)
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     KORGEX AGENT LOOP                             │
+│                                                                  │
+│  user prompt                                                     │
+│     │                                                            │
+│     ▼                                                            │
+│  ┌─────────────────────────┐                                     │
+│  │  KorgexAgent.run_task() │                                     │
+│  └─────────────────────────┘                                     │
+│     │                                                            │
+│     ▼                                                            │
+│  ┌──────────────────────────────────────────────────────────┐    │
+│  │  for i in range(max_iter):                                │    │
+│  │    response = LLM.send(messages, tools)                   │    │
+│  │    if no tool_calls → return final text                   │    │
+│  │    for call in tool_calls:                                │    │
+│  │      result = route_tool_call(name, args)                 │    │
+│  │      messages.append(tool_result)                         │    │
+│  └──────────────────────────────────────────────────────────┘    │
+│     │                                                            │
+│     ▼                                                            │
+│  ┌─────────────────────────────────────────┐                     │
+│  │  Provider branching                      │                     │
+│  │  - "claude" in model → Anthropic SDK     │                     │
+│  │  - else → OpenAI SDK (works for          │                     │
+│  │    OpenAI, OpenRouter, Ollama, etc.)     │                     │
+│  └─────────────────────────────────────────┘                     │
+│     │                                                            │
+│     ▼                                                            │
+│  ┌─────────────────────────────────────────┐                     │
+│  │  Tool routing (src/tool_abstraction.py) │                     │
+│  │  - 12 model-facing user tools      │                     │
+│  │  - Adapter layer → internal handlers │                     │
+│  │  - MCP-sourced tools → MCP manager       │                     │
+│  └─────────────────────────────────────────┘                     │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+The agent is provider-agnostic by design: tool schemas are translated per provider (`{name, description, input_schema}` for Anthropic, `{type: "function", function: {...}}` for OpenAI), responses are normalized into a common shape, and tool results are formatted in whichever message structure the provider expects.
 
 ---
 
-## 📟 CLI & VS Code Extension
+## CLI reference
 
-The `korgex` CLI is the primary entry point:
+```
+$ korgex --help
 
-| Command | What it does |
+usage: korgex [-h] SUBCOMMAND ...
+
+korgex — autonomous coding agent. Pass a naked prompt to run the agent,
+or use a subcommand.
+
+positional arguments:
+  SUBCOMMAND
+    serve            Start dashboard + open VS Code with the sidecar.
+    dashboard        Start the web dashboard only.
+    init             Install Python deps + compile the VS Code extension.
+    status           Check if the backend is running.
+    stop             Stop the running backend.
+    install-extension
+                     Install the .vsix into VS Code.
+```
+
+### Naked-prompt invocation (the default)
+
+Any non-subcommand argument is treated as a prompt:
+
+```bash
+korgex "create a hello.txt with the text 'hi'"
+korgex --mode plan "redesign the data model"
+korgex --model gpt-4o "write the test for this fix"
+korgex --quiet "list all functions called from main()"
+```
+
+### Flags
+
+| Flag | Purpose |
 |---|---|
-| `korgex` | Starts the FastAPI backend + opens VS Code with the sidecar |
-| `korgex init` | One-shot setup: installs Python deps, compiles the extension |
-| `korgex dashboard` | Opens the web dashboard on port 8090 |
-| `korgex status` | Checks if the backend is running |
-| `korgex stop` | Stops the background backend server |
-| `korgex install-extension` | Installs the `.vsix` into VS Code |
+| `--model MODEL` | Override the model (e.g. `claude-sonnet-4-6`, `gpt-4o`, `openai/gpt-4o-mini`). Always wins over `--mode`. |
+| `--mode {plan,execute,explore,review,debug,research}` | Mode-based model selection (see [Multi-model routing](#multi-model-routing)). |
+| `--mcp` | Load MCP servers from `mcp.json` at startup. |
+| `--quiet` / `-q` | Disable the streaming TUI. Only the final result text prints. Use this in pipes, scripts, CI. |
+| `--resume` | Not yet implemented — exits with code 2 so scripts don't silently lose state. |
 
-**VS Code commands** (Cmd+Shift+P after installing the sidecar):
+### Subcommands
+
+| Subcommand | Behavior |
+|---|---|
+| `korgex serve` | Starts the FastAPI dashboard on `localhost:8090` and opens VS Code with the sidecar. |
+| `korgex dashboard` | Starts the dashboard only (no editor). |
+| `korgex init` | One-shot setup: pip-installs deps, npm-installs + compiles the VS Code extension. |
+| `korgex status` | Reports whether the background backend is running. |
+| `korgex stop` | Terminates the background backend (SIGTERM, then SIGKILL if needed). |
+| `korgex install-extension` | Installs the compiled `.vsix` into your local VS Code. |
+
+---
+
+## Tools
+
+The agent sees ~12 high-level tools (Claude-Code style), each with a deep description that includes usage guidance, edge cases, and anti-patterns:
+
+| Tool | Purpose |
+|---|---|
+| **Read** | Read a file from disk, optionally with line offset/limit. |
+| **Write** | Create a new file or overwrite an existing one with full content. |
+| **Edit** | Surgical string replacement in an existing file. Auto-converted to SEARCH/REPLACE block internally. |
+| **Bash** | Execute a shell command with timeout. |
+| **Grep** | Search file contents by regex (uses ripgrep where available). |
+| **Glob** | List files matching a pattern. |
+| **Agent** | Delegate a sub-task to a specialized sub-agent. |
+| **AskUserQuestion** | Ask the user a clarifying question with optional multiple-choice. |
+| **TaskCreate** | Track multi-step work via a task list. |
+| **Skill** | Invoke an installed skill by name. |
+| **ToolSearch** | Discover tools at runtime by keyword. |
+
+Under the hood these route to 49+ internal handlers (file ops, git, GitHub API, sandbox execution, web fetch, dependency analysis, profiler, etc.) — see `src/tools_impl.py`.
+
+---
+
+## Environment variables
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Used when the model name contains "claude" or starts with "anthropic/". | — |
+| `OPENAI_API_KEY` | Used for any non-Anthropic model. | — |
+| `KORGEX_API_KEY` | Generic fallback if a provider-specific key isn't set. Useful for OpenRouter. | — |
+| `KORGEX_API_URL` | Base URL for OpenAI-compatible endpoints (set for OpenRouter, Ollama, etc.). | `https://api.openai.com/v1` |
+| `KORGEX_MODEL` | Default model when neither `--model` nor `--mode` is given. | `claude-sonnet-4-6` |
+| `KORGEX_MAX_ITERATIONS` | Maximum agent loop iterations before giving up. | `30` |
+| `KORGEX_MCP` | Set to `1` to auto-load MCP servers from `mcp.json` (equivalent to `--mcp`). | unset |
+| `KORGEX_SANDBOX` | `modal` \| `docker` \| `direct` \| `auto`. Controls bash sandbox isolation. | `auto` |
+
+Provider-detection rule: if the model id contains `"claude"` or starts with `"anthropic/"`, the agent uses the Anthropic SDK. Otherwise it uses the OpenAI SDK (which works against OpenAI, OpenRouter, Ollama, DeepSeek, vLLM, and anything else that speaks OpenAI's chat-completions protocol).
+
+---
+
+## Multi-model routing
+
+`--mode` picks a model appropriate for the work type:
+
+| Mode | Model | Generation params |
+|---|---|---|
+| `plan` | Opus 4.7 | `max_tokens=64000`, `thinking={budget_tokens: 20000}`, `temperature=0.7` |
+| `execute` | Sonnet 4.6 | `max_tokens=64000`, `temperature=0.3` |
+| `explore` | Opus 4.7 | `max_tokens=32000`, `temperature=0.5` |
+| `review` | Sonnet 4.6 | `max_tokens=16000`, `temperature=0.3` |
+| `debug` | Haiku 4.5 | `max_tokens=16000`, `temperature=0.2` |
+| `research` | Opus 4.7 | `max_tokens=32000`, `temperature=0.7` |
+
+Explicit `--model` always wins over `--mode`. Default (neither set) is Sonnet 4.6.
+
+```bash
+korgex --mode plan "architect a multi-tenant billing system"
+korgex --mode debug "trace why this 500 is happening"
+korgex --mode execute "implement the plan we just made"
+```
+
+---
+
+## MCP integration
+
+korgex includes a native MCP (Model Context Protocol) client. Any MCP server in your `mcp.json` becomes part of the agent's tool surface.
+
+### Configure
+
+Place an `mcp.json` in your repo root (matches the VS Code convention):
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "ghp_..."
+      }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    }
+  }
+}
+```
+
+### Use
+
+```bash
+korgex --mcp "create a GitHub issue summarizing today's bug"
+```
+
+The agent discovers each server's tools at startup, registers them into the user-facing tool list, and routes calls back to the originating server. Server failures are logged and skipped — they never crash the agent.
+
+---
+
+## Streaming TUI
+
+When stdout is a TTY, the agent streams output live via [Rich](https://rich.readthedocs.io/):
+
+- **Thinking blocks** render in dimmed italic gray (Anthropic only)
+- **Text** streams character-by-character
+- **Tool calls** show a transient spinner: `⠋ Read(file_path=src/foo.py)`
+- **Diffs** for Edit/Write on critical files prompt `[y/N]` confirmation
+- **Ctrl+C** sends a graceful interrupt; double Ctrl+C force-kills
+
+Streaming auto-disables when stdout is piped (e.g. `korgex "..." | tee log`), in CI, or with `--quiet`.
+
+OpenAI/OpenRouter streaming works just like Anthropic: text deltas pipe through the same renderer, tool-call deltas are accumulated across chunks into a complete tool call.
+
+---
+
+## VS Code sidecar
+
+`korgex-vscode/` contains a TypeScript extension that adds four commands (Cmd+Shift+P → "korgex"):
 
 | Command | Action |
 |---|---|
-| `Korgex: Refactor Current File` | Sends the active file to the Korgex swarm |
-| `Korgex: Run TDD Healer on Current File` | Prompts for a test command, runs the healer |
-| `Korgex: Profile Test Suite` | Runs cProfile via the performance profiler |
-| `Korgex: Open the Swarm Dashboard` | Opens `http://localhost:8090/dashboard` in your browser |
+| `korgex: Refactor Current File` | POSTs to `/api/swarm/refactor` |
+| `korgex: Run TDD Healer on Current File` | POSTs to `/api/swarm/heal` |
+| `korgex: Profile Test Suite` | POSTs to `/api/swarm/profile` |
+| `korgex: Open the Swarm Dashboard` | Opens `http://localhost:8090/dashboard` |
+
+To install:
+
+```bash
+korgex init                # compiles the .vsix
+korgex install-extension   # installs it into your local VS Code
+```
+
+The extension connects to `http://localhost:8090` by default, which matches the dashboard port. Adjust via the VS Code setting `korgex.backendUrl` if you change the port.
 
 ---
 
-## 🏗 Architecture
+## Dashboard API
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        KORGEX AGENT LOOP                            │
-│                                                                     │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────────┐ │
-│  │  USER     │   │  KORGEX   │   │  PLAN    │   │   APPROVAL       │ │
-│  │  PROMPT   │──▶│ EXPLORES │──▶│  SET     │──▶│   RECORDED       │ │
-│  │           │   │ codebase │   │ markdown │   │                  │ │
-│  └──────────┘   └──────────┘   └──────────┘   └──────────────────┘ │
-│                                                       │             │
-│  ┌────────────────────────────────────────────────────┘             │
-│  ▼                                                                  │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────────────┐ │
-│  │ EXECUTE  │   │ VERIFY   │   │ PRE-     │   │   SUBMIT         │ │
-│  │ step 1..N│──▶│ read_file│──▶│ COMMIT   │──▶│   branch + commit │ │
-│  │ tools    │   │ run tests│   │ checks   │   │   PR ready        │ │
-│  └──────────┘   └──────────┘   └──────────┘   └──────────────────┘ │
-│                                                                     │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │              CAN RUN ASYNC (fire & forget)                   │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐ │   │
-│  │  │ Agent A  │  │ Agent B  │  │ Agent C  │  │  Notify user │ │   │
-│  │  │ (subtask)│  │ (subtask)│  │ (subtask)│  │  on complete │ │   │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────┘ │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-```
+`korgex serve` (or `korgex dashboard`) starts a FastAPI server on `:8090` with these endpoints:
 
-**Never writes code without a plan. Never marks complete without verification. Never modifies build artifacts.**
-
----
-
-## ⚡ Quick Start
-
-```bash
-# 1. Clone
-git clone https://github.com/New1Direction/Korgex.git
-cd Korgex
-pip install -r requirements.txt
-
-# 2. Set API key (any LLM provider)
-export KORGEX_API_KEY="sk-your-key-here"
-export KORGEX_MODEL="gpt-4o"          # or claude, deepseek, llama, etc.
-
-# 3. Initialize in your project
-cd /path/to/your/project
-/path/to/Korgex/korgex.sh --init
-
-# 4. Run a task
-/path/to/Korgex/korgex.sh "Add tests for the user authentication flow"
-```
-
----
-
-## 🎯 Capabilities
-
-| Category | What Korgex Can Do | Example Prompt |
-|----------|------------------|----------------|
-| 🐛 **Bug Fixing** | Diagnose errors, find root cause, apply fix across files | `Fix the 500 error on the checkout page` |
-| 🧪 **Test Writing** | Generate unit tests, integration tests, edge cases | `Add pytest tests for the payment processor` |
-| ✨ **Feature Dev** | Build new features from description | `Add a dark mode toggle to settings` |
-| 🔧 **Refactoring** | Restructure code, improve patterns | `Convert the API layer to use async/await` |
-| 📦 **Deps** | Update dependencies, migrate between versions | `Bump next.js to v15 and migrate to app directory` |
-| 📝 **Documentation** | Add JSDoc, docstrings, README updates | `Document the useCache hook with JSDoc` |
-| 🔍 **Code Review** | Review PRs, reply to comments | `Review the open PR and address feedback` |
-| 🎨 **Frontend** | Playwright verification, screenshots | `Add Playwright tests for the login form` |
-| 🧹 **Cleanup** | Remove dead code, fix lint, optimize | `Remove all console.log statements` |
-
----
-
-## 🛠 33 Tools
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│                     33 TOOLS · 9 CATEGORIES                     │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│  📁 FILE OPERATIONS (8)                                        │
-│  ┌──────┬──────┬────────┬──────┬──────┬──────┬───────┬──────┐ │
-│  │ list │ read │ write │ merge│delete│rename│restore│reset │ │
-│  └──────┴──────┴────────┴──────┴──────┴──────┴───────┴──────┘ │
-│                                                                │
-│  📋 PLANNING (3)            🖥 EXECUTION (5)                   │
-│  ┌──────┬──────┬──────┐    ┌──────┬──────┬──────┬──────┬────┐ │
-│  │ set  │ step │approv│    │ bash │search│ fetch│ image│media│ │
-│  └──────┴──────┴──────┘    └──────┴──────┴──────┴──────┴────┘ │
-│                                                                │
-│  💬 USER (2)              🔍 CODE REVIEW (3)                   │
-│  ┌──────┬──────┐          ┌──────┬──────┬──────┐               │
-│  │message│input│          │request│ read│reply│               │
-│  └──────┴──────┘          └──────┴──────┴──────┘               │
-│                                                                │
-│  🎨 FRONTEND (3)          📦 DELIVERY (2)                      │
-│  ┌──────┬──────┬──────┐  ┌──────┬──────┐                       │
-│  │instr │verify│preview│  │pre-  │submit│                       │
-│  └──────┴──────┴──────┘  │commit│      │                       │
-│                           └──────┴──────┘                       │
-│  🧠 MEMORY (1)           🤖 SUBAGENTS (2)                      │
-│  ┌──────────┐            ┌──────────┬──────────┐               │
-│  │  record  │            │  agent   │   done   │               │
-│  └──────────┘            └──────────┴──────────┘               │
-└────────────────────────────────────────────────────────────────┘
-```
-
-| Category | Tools | Parameters |
-|----------|-------|------------|
-| 📁 **File Operations** | 8 | `list_files`, `read_file`, `write_file`, `replace_with_git_merge_diff`, `delete_file`, `rename_file`, `restore_file`, `reset_all` |
-| 📋 **Planning** | 3 | `set_plan`, `plan_step_complete`, `record_user_approval_for_plan` |
-| 🖥 **Execution** | 5 | `run_in_bash_session`, `google_search`, `view_text_website`, `view_image`, `read_image_file`, `read_media_file` |
-| 💬 **User** | 2 | `message_user`, `request_user_input` |
-| 🔍 **Code Review** | 3 | `request_code_review`, `read_pr_comments`, `reply_to_pr_comments` |
-| 🎨 **Frontend** | 3 | `frontend_verification_instructions`, `frontend_verification_complete`, `start_live_preview_instructions` |
-| 📦 **Delivery** | 2 | `pre_commit_instructions`, `submit` |
-| 🧠 **Memory** | 1 | `initiate_memory_recording` |
-| 🤖 **Subagents** | 2 | `call_hello_world_agent`, `done` |
-
----
-
-## 🎬 Demo Ideas
-
-Try these out of the box. Each demo showcases a different Korgex capability.
-
-### Demo 1: Bug Fix (5 minutes)
-```bash
-git clone https://github.com/your-test-repo.git
-cd your-test-repo
-korgex.sh "Fix the login redirect bug — users are redirected to /home instead of /dashboard after login"
-```
-**What you'll see:** Korgex reads the auth flow, finds the redirect logic, patches it, runs tests, submits.
-
-### Demo 2: Feature Addition (10 minutes)
-```bash
-korgex.sh "Add a /healthz endpoint that returns JSON {status: 'ok'} with a 200 status code"
-```
-**What you'll see:** Korgex explores the project structure, picks the right framework file, writes the endpoint, adds a test, verifies it passes.
-
-### Demo 3: Test Generation (5 minutes)
-```bash
-korgex.sh "Write pytest tests for the stripe payment module — cover success, failure, and timeout cases"
-```
-**What you'll see:** Korgex reads the module, identifies all code paths, generates test cases, runs them, fixes any failures.
-
-### Demo 4: Dependency Migration (15 minutes)
-```bash
-korgex.sh "Upgrade all outdated npm packages to their latest versions and fix any breaking changes"
-```
-**What you'll see:** Korgex reads package.json, detects outdated deps, updates versions, handles breaking changes across files, runs the build.
-
-### Demo 5: Full Project Scaffold (10 minutes)
-```bash
-mkdir my-new-api && cd my-new-api
-git init
-korgex.sh "Create a FastAPI project with user authentication, a health endpoint, and pytest test suite"
-```
-**What you'll see:** Korgex builds a complete project from scratch — directory structure, config files, source code, tests, README.
-
-### Demo 6: Code Review Pipeline (10 minutes)
-```bash
-# Create a PR with some issues, then:
-korgex.sh "Review the open PR, check for security issues, and reply to any pending comments"
-```
-**What you'll see:** Korgex reads PR comments, analyzes the diff, replies to feedback, pushes fixes.
-
-### Demo 7: Async Multi-Agent (15 minutes)
-```bash
-# Fire off multiple tasks in parallel
-korgex.sh "Write tests for the auth module" --async &
-korgex.sh "Add input validation to the API layer" --async &
-korgex.sh "Update the README with API documentation" --async &
-```
-**What you'll see:** Three Korgex agents work in parallel, each in their own sandbox. Results appear as they complete.
-
----
-
-## 🔄 Git Workflow
-
-Korgex follows a structured git workflow inspired by industry best practices:
-
-```
-main ──▶ feature/user-auth ──▶ commit ──▶ push ──▶ PR ready
-         ▲                    ▲          ▲
-         │                    │          │
-    Korgex creates       Korgex commits   User approves
-    branch from main    with meaningful  push to remote
-                        message
-```
-
-### Branch Naming
-```
-fix/description        — Bug fixes
-feat/description       — New features
-test/description       — Test additions
-refactor/description   — Code restructuring
-docs/description       — Documentation
-chore/description      — Maintenance
-```
-
-### Commit Messages
-Korgex generates descriptive commit messages:
-
-```
-✅ Good: "fix: correct redirect URL after login — was pointing to /home, now points to /dashboard"
-✅ Good: "feat: add /healthz endpoint with JSON status response and test coverage"
-❌ Bad:  "fix stuff"
-❌ Bad:  "update"
-```
-
-### Pre-Commit Checks
-Before every commit, Korgex runs:
-1. ✅ Test suite
-2. ✅ Linter
-3. ✅ Type checker
-4. ✅ No debug artifacts
-5. ✅ Diff review
-
----
-
-## 📊 Why Korgex?
-
-| Capability | Korgex | GitHub Copilot | Cursor AI | Cody | Claude Code |
-|-----------|-------|---------------|-----------|------|-------------|
-| **Autonomous execution** | ✅ Full async agent | ❌ Suggestions only | ⚠️ Limited | ✅ Basic | ⚠️ Interactive |
-| **Plan-first workflow** | ✅ Required | ❌ | ❌ | ❌ | ⚠️ Optional |
-| **Tool surface** | **33 tools** | 3-5 | 8-10 | 6-8 | 10-12 |
-| **Frontend verification** | ✅ Playwright | ❌ | ❌ | ❌ | ❌ |
-| **Code review** | ✅ Full pipeline | ❌ | ❌ | ✅ Basic | ❌ |
-| **Pre-commit checks** | ✅ Built-in | ❌ | ❌ | ❌ | ❌ |
-| **Memory (cross-session)** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Subagent delegation** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Model agnostic** | ✅ Any LLM | ❌ OpenAI | ❌ Custom | ❌ Anthropic | ❌ Anthropic |
-| **Open source** | ✅ MIT | ❌ | ❌ | ❌ | ❌ |
-
----
-
-## 🔒 Enterprise: Zero-Hallucination Runtime
-
-Korgex is the **first auditable, deterministic agentic runtime**. Every tool call is cryptographically bound to its result.
-
-### The problem
-
-Every other coding agent (Claude Code, Cursor, Copilot, Windsurf) has a fundamental flaw: autoregressive models hallucinate tool results. The model "sees" a successful test run before the tests actually execute, then spirals — generating fixes for bugs that don't exist, committing code that never compiled.
-
-### The solution: Strict Tool Result Pairing
-
-```python
-[Model calls Bash("pytest")]
-  ↓ tool_use_id = "call_19e57f84191_7449e61c8a1f4120"
-[Environment executes pytest]
-  ↓ SHA256({tool_use_id}:{result_text}) = "331416869d1e1dd9"
-[Next prompt has:]
-  Tool Result (call_19e57f84191_7449e61c8a1f4120):
-  <actual test output>
-```
-
-- Every tool call gets a unique, cryptographically random ID
-- Results are paired with their originating ID using SHA256 binding
-- The prompt format makes it structurally impossible for the model to fabricate results
-- A validation layer scans the conversation and flags unpaired or hallucinated results
-
-### Why enterprise security teams care
-
-| Requirement | Korgex | Other agents |
+| Route | Method | Purpose |
 |---|---|---|
-| **Tamper-evident tool execution** | SHA256 binding between call and result | No binding — model can fabricate |
-| **Audit trail** | Every tool call logged with ID, timestamp, duration | Limited or no per-call logging |
-| **Blast radius control** | Mode-gated tools — plan mode cannot write files | Mixed, depends on implementation |
-| **Deterministic routing** | Every tool has exactly one handler, one schema | Models can guess tool names |
-| **Open protocol (MCP)** | Connect any MCP server — no vendor lock-in | Plugin-walled gardens |
-| **Open source** | Full source, no binary black boxes | Closed source or partially open |
+| `/` | GET | HTML dashboard |
+| `/health` | GET | `{status: "ok"}` for liveness checks |
+| `/api/state` | GET | Current dashboard state (current task, plan, logs) |
+| `/api/new-task` | POST `{description}` | Start a new agent task in a background thread |
+| `/api/approve-plan` | POST | Approve a pending plan |
+| `/api/send-feedback` | POST `{feedback}` | Send mid-task feedback to the agent |
+| `/api/swarm/refactor` | POST `{filepath}` | Spin a one-shot agent that refactors the given file |
+| `/api/swarm/heal` | POST `{filepath, command}` | Spin a one-shot agent that fixes failing tests |
+| `/api/swarm/profile` | POST `{command}` | Run `cProfile` via `PerformanceProfiler` and return top-N slowest functions |
+| `/ws/logs` | WebSocket | Live log stream |
 
-### Compliance-ready
+All swarm endpoints are synchronous (FastAPI thread-pools them) and return JSON: `{success, output, ...}` or `{success: false, error}` if a key is missing or the agent crashes.
 
-Korgex's strict pairing directly addresses requirements emerging from:
-- **EU AI Act** — auditable AI decision chains
-- **SEC/FINRA** — tamper-evident record keeping
-- **SOX** — change management and access controls
-- **HIPAA** — verifiable non-repudiation of automated actions
+---
 
-The `validate_prompt_history()` function provides a machine-readable compliance report showing exactly which tool calls were made, what results they returned, and whether any violations were detected.
+## Architecture
 
-```bash
-# Generate compliance report for any conversation
-korgex audit --session last
-# → {"valid": true, "total_results": 47, "violations": []}
+### Tool routing — model-facing → internal
+
+```
+User tool call (LLM-visible):     Internal handler (in src/tools_impl.py):
+─────────────────────────────     ────────────────────────────────────────
+Read(file_path=...)         →     tool_read_file(filepath=..., context=...)
+Write(file_path=..., ...)   →     tool_write_file(filepath=..., ...)
+Edit(file_path, old, new)   →     tool_replace_with_git_merge_diff(
+                                    filepath=...,
+                                    merge_diff="<<<<<<< SEARCH\n...")
+Bash(command=...)           →     tool_run_in_bash_session(command=...)
+```
+
+The router (`src/tool_abstraction.py`):
+
+- Looks up the user-facing tool name in `_TOOL_ROUTING`
+- Applies a `param_map` (rename kwargs like `file_path → filepath`)
+- Or applies a custom `adapter` for structural transforms (Edit → SEARCH/REPLACE)
+- Filters out kwargs the handler doesn't accept (so schema fields like `Read.offset` don't crash handlers that haven't grown them yet)
+- Auto-injects `context={'repo_root': cwd}`
+- Catches exceptions and returns `{"error": ...}` so a single tool failure never kills the agent loop
+
+MCP-sourced tools bypass `_TOOL_ROUTING` and dispatch through `MCPServerManager.call_tool()` instead.
+
+### Provider branching
+
+```
+KorgexAgent(model="claude-sonnet-4-6")  →  provider="anthropic"
+KorgexAgent(model="anthropic/claude-...")→  provider="anthropic"  (OpenRouter)
+KorgexAgent(model="gpt-4o")             →  provider="openai"
+KorgexAgent(model="openai/gpt-4o-mini") →  provider="openai"      (OpenRouter)
+KorgexAgent(model="llama3:8b")          →  provider="openai"      (Ollama)
+```
+
+Each provider gets:
+- Its own tool-schema shape
+- Its own request method (`messages.create` vs `chat.completions.create`)
+- Its own streaming chunk parser
+- Its own assistant/tool-result message format
+
+### Plan-first system prompt
+
+The default system prompt directs the agent to plan, verify, diagnose-before-changing, and never modify build artifacts. See `SYSTEM_PROMPT` in `src/agent.py`.
+
+---
+
+## Project structure
+
+```
+korgex/
+├── src/
+│   ├── agent.py              # KorgexAgent class — main loop, provider branching, streaming
+│   ├── cli.py                # argparse dispatch (naked-prompt + subcommands)
+│   ├── tool_abstraction.py   # USER_TOOLS registry + router + MCP integration
+│   ├── tools_impl.py         # ~49 internal handlers (tool_read_file, tool_bash, ...)
+│   ├── tool_base.py          # Legacy internal tool registry (still in use)
+│   ├── interactive.py        # Streaming TUI: Rich-based renderer, spinner, interrupt handler
+│   ├── model_router.py       # Mode → model mapping (plan/execute/debug/...)
+│   ├── mcp_client.py         # Native MCP client (stdio JSON-RPC 2.0)
+│   ├── dashboard.py          # FastAPI dashboard + /api/swarm/* endpoints
+│   ├── sandbox.py            # Docker / Modal / direct subprocess sandbox
+│   ├── swarm.py              # Multi-agent swarm orchestration
+│   ├── self_healing.py       # TDD self-healing loop
+│   ├── profiler.py           # cProfile-based perf profiler
+│   ├── dependency_graph.py   # AST-based import/symbol graph
+│   ├── context_compression.py# AST minimization for large files
+│   ├── diff_engine.py        # SEARCH/REPLACE diff parser
+│   ├── github_api.py         # GitHub PR / issue helpers
+│   ├── memory.py             # Cross-session memory (planned)
+│   ├── vision.py             # Image attachment handling
+│   └── ...
+├── korgex-vscode/            # VS Code sidecar extension (TypeScript)
+│   ├── src/extension.ts      # 4 registered commands
+│   ├── korgex-sidecar.vsix   # Compiled artifact (after `korgex init`)
+│   └── package.json
+├── tests/
+│   └── test_bridge.py        # 27 tests covering router, providers, MCP, streaming, dashboard
+├── docs/                     # CLI reference, comparison, getting-started
+├── scripts/                  # Build helpers (package-vsix.sh, MCP conformance test)
+├── packages/
+│   └── mcp-native-client/    # Standalone reusable MCP client package
+├── dist/                     # Built wheels and sdists
+├── mcp.json                  # Default MCP server config
+├── pyproject.toml            # Package metadata
+└── requirements.txt          # Pinned runtime deps
 ```
 
 ---
 
-## 📚 Documentation
+## Development
 
-| Doc | Description |
-|-----|-------------|
-| [Getting Started](docs/getting-started.md) | Setup, first task, authentication |
-| [Running Tasks](docs/running-tasks.md) | Writing prompts, monitoring, feedback |
-| [Environment Setup](docs/environment.md) | Sandbox, preinstalled tools, setup scripts |
-| [Reviewing Plans & Feedback](docs/review-plan.md) | Plan approval, mid-task steering |
-| [CLI Reference](docs/cli-reference.md) | Commands, flags, env variables |
-| [Tools Reference](docs/tools-reference.md) | All 33 tools with parameters |
-| [Korgex vs The Rest](docs/comparison.md) | Competitive comparison |
+### Setup
+
+```bash
+git clone https://github.com/New1Direction/korgex.git
+cd korgex
+
+# Create venv (uv recommended; falls back to python -m venv if you don't have uv)
+uv venv .venv
+source .venv/bin/activate
+
+# Install with dev extras (pytest, twine, build, ruff)
+uv pip install -e ".[dev]"
+
+# Or with plain pip
+pip install -e ".[dev]"
+```
+
+### Run the agent in editable mode
+
+After `pip install -e .`, `korgex` is on your PATH and reflects live source edits:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+korgex "explain what src/agent.py does"
+```
+
+### Code style
+
+The project uses [ruff](https://docs.astral.sh/ruff/):
+
+```bash
+ruff check src/
+ruff format src/
+```
 
 ---
 
-## 📄 License
+## Testing
 
-MIT — Own your workflow.
+```bash
+# Run the full test suite
+pytest tests/ -v
+
+# Run a specific test
+pytest tests/test_bridge.py::test_write_routes_to_disk -v
+
+# With coverage
+pytest tests/ --cov=src --cov-report=term-missing
+```
+
+### What the tests cover (27 cases)
+
+- **Router** (5): Read/Write/Edit route to handlers and produce filesystem effects; unknown tools return errors gracefully; the Edit adapter constructs valid SEARCH/REPLACE blocks; unsupported kwargs (Read.offset/limit) are filtered, not crashed.
+- **Provider schemas** (4): Anthropic and OpenAI tool-schema shapes are correct; OpenRouter `anthropic/...` IDs are detected; missing API keys raise `RuntimeError` cleanly.
+- **Mode routing** (5): `--mode plan` picks Opus, `--mode execute` picks Sonnet, `--mode debug` picks Haiku, explicit `--model` overrides, default falls back to Sonnet.
+- **MCP** (3): MCP tools register into `USER_TOOLS` correctly; the router dispatches them to the MCP manager; full connect→discover→call→disconnect round-trip against a real stub subprocess.
+- **Streaming** (5): Interactive mode auto-detects TTY; sessions are lazily constructed; OpenAI streaming accumulates text + multi-chunk tool calls into the right shape; text-only responses pass through.
+- **Dashboard** (5): `/health` returns ok; swarm endpoints reject missing args with 400; swarm endpoints return clean JSON errors when no API key is set.
+
+No live LLM calls in the test suite — everything is unit-tested.
+
+---
+
+## Building & releasing
+
+### Build the wheel and sdist
+
+```bash
+rm -rf dist build
+python -m build
+# → dist/korgex-X.Y.Z-py3-none-any.whl
+# → dist/korgex-X.Y.Z.tar.gz
+
+# Validate PyPI metadata
+python -m twine check dist/*
+```
+
+### Cut a GitHub Release
+
+```bash
+gh release create vX.Y.Z \
+  dist/korgex-X.Y.Z-py3-none-any.whl \
+  dist/korgex-X.Y.Z.tar.gz \
+  --title "korgex X.Y.Z" \
+  --notes "Release notes here"
+```
+
+### Publish to PyPI
+
+```bash
+python -m twine upload dist/*
+# username: __token__
+# password: pypi-... (token from https://pypi.org/manage/account/token/)
+```
+
+For the first upload of a new package, use an "Entire account" scoped token. After the package exists on PyPI, project-scoped tokens work.
+
+---
+
+## Troubleshooting
+
+### `korgex: No API key found`
+
+Set one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `KORGEX_API_KEY` (with `KORGEX_API_URL` for non-OpenAI endpoints).
+
+### `ModuleNotFoundError: No module named 'anthropic'` (or `openai`, or `rich`)
+
+The dependency wasn't installed. Either:
+
+```bash
+pip install -e .          # picks up everything from pyproject.toml
+# or
+pip install anthropic openai rich
+```
+
+### Agent loops forever on tool calls
+
+The default `KORGEX_MAX_ITERATIONS` is 30. If the agent genuinely can't finish:
+
+```bash
+export KORGEX_MAX_ITERATIONS=10   # cap it harder
+korgex --quiet "..."              # see only the final state
+```
+
+### `--mcp` takes a long time to start
+
+The MCP client connects to each server synchronously at startup and waits up to 60s per server for the handshake. If your `mcp.json` references unreachable servers (missing `GITHUB_TOKEN`, `npx` not installed, network blocked), each one times out before being skipped. Remove unreachable entries from `mcp.json`, or reduce the per-server `timeout` value.
+
+### Streaming TUI swallows my prompt's output
+
+`korgex "..."` streams to stdout. If you need machine-readable output (e.g. piping to `jq`), use `--quiet`:
+
+```bash
+korgex --quiet "..." | tee transcript.txt
+```
+
+### `403 Forbidden` from `twine upload`
+
+For a brand-new package on PyPI, you need an **"Entire account"** scoped token, not a project-scoped one. Project-scoped tokens can't create a package they don't yet own. Re-create the token at https://pypi.org/manage/account/token/ with the wider scope, upload, then narrow the token for future releases.
+
+### VS Code extension commands do nothing
+
+The extension POSTs to `http://localhost:8090/api/swarm/*` by default (matches the dashboard). Make sure:
+1. The backend is running: `korgex serve` or `korgex dashboard`
+2. The `korgex.backendUrl` setting in VS Code matches the port korgex is listening on (default `8090` on both sides)
+
+---
+
+## Known limitations
+
+These exist today; PRs welcome.
+
+- **OpenAI streaming has fewer rendered events than Anthropic.** Anthropic emits thinking blocks, content-block-start/stop, and message-delta usage events; OpenAI emits only text and tool-call chunks. The TUI renders both correctly but is richer for Anthropic.
+- **`--resume` is not yet implemented.** Exits with code 2 rather than silently starting fresh, so scripts and CI that rely on it fail loudly.
+- **Memory module is a stub.** `src/memory.py` exists but isn't wired into the agent loop.
+- **Swarm endpoints share the agent's single-context loop.** They don't actually run sub-agents in parallel sandboxes (the `swarm.py` module supports it, but the `/api/swarm/*` endpoints don't use it yet).
+- **TDD self-healing requires explicit invocation.** It's not yet triggered automatically on test failure.
+- **Dashboard authentication is not implemented.** Don't expose port 8090 publicly without putting a reverse proxy with auth in front of it.
+- **Dependency-graph and AST-compression tools (`src/dependency_graph.py`, `src/context_compression.py`) are not yet bridged into `USER_TOOLS`.** They're callable directly but not exposed to the agent.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+## Related projects
+
+- **[korg](https://github.com/New1Direction/korg)** — deterministic cognitive runtime for AI agents (Rust). Separate project, same author. korgex does not depend on korg today; the two may integrate in the future.
+- **[Model Context Protocol](https://modelcontextprotocol.io/)** — the open MCP standard korgex implements.

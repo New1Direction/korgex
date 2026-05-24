@@ -235,6 +235,15 @@ def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
     # interactive=None lets the agent auto-detect TTY; quiet forces off
     interactive = False if quiet else None
 
+    if resume:
+        print(
+            "korgex: --resume is not yet implemented. "
+            "Exiting to avoid silently ignoring your intent in scripts/CI. "
+            "(Track: https://github.com/New1Direction/Korgex/issues)",
+            file=sys.stderr,
+        )
+        return 2
+
     try:
         agent = KorgexAgent(model=model, mode=mode,
                               interactive=interactive, load_mcp=mcp)

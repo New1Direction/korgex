@@ -126,7 +126,7 @@ export function activate(context: vscode.ExtensionContext) {
         async () => {
             const config = vscode.workspace.getConfiguration('korgex');
             const baseUrl =
-                config.get<string>('backendUrl') || 'http://localhost:8000';
+                config.get<string>('backendUrl') || 'http://localhost:8090';
             const dashboardUrl = `${baseUrl}/dashboard`;
             vscode.env.openExternal(vscode.Uri.parse(dashboardUrl));
             vscode.window.showInformationMessage(
@@ -157,7 +157,7 @@ function postToBackend(
 ): Promise<BackendResponse> {
     const config = vscode.workspace.getConfiguration('korgex');
     const baseUrl: string =
-        config.get<string>('backendUrl') || 'http://localhost:8000';
+        config.get<string>('backendUrl') || 'http://localhost:8090';
 
     const url = new URL(endpoint, baseUrl);
     const isHttps = url.protocol === 'https:';

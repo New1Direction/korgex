@@ -1,96 +1,115 @@
 # CLI Reference
 
-Korgex provides a lightweight command-line interface for managing coding sessions and integrating into your development workflows.
+korgex is a single binary installed via `pip`. It has two modes: naked-prompt invocation (the default) and subcommands.
 
 ## Installation
 
 ```bash
-git clone https://github.com/New1Direction/Korgex.git
-cd Korgex
-pip install -r requirements.txt
+# From the latest GitHub Release
+pip install https://github.com/New1Direction/korgex/releases/download/v0.2.2/korgex-0.2.2-py3-none-any.whl
+
+# From source (editable, reflects live changes)
+git clone https://github.com/New1Direction/korgex.git
+cd korgex
+pip install -e .
 ```
 
-## Usage
+---
+
+## Naked-prompt invocation (primary usage)
+
+Any argument that isn't a known subcommand is treated as a prompt for the agent:
 
 ```bash
-python -m cli.main [command] [flags]
+korgex "fix the failing test in tests/test_auth.py"
+korgex "add a /healthz route to src/app.py"
+korgex --mode plan "design a rate limiter for the API"
+korgex --model gpt-4o "write the test for this fix"
+korgex --quiet "list all functions exported from src/utils.py"
 ```
 
-Or via the shell script:
-
-```bash
-./korgex.sh [command] [flags]
-```
-
-## Commands
-
-### `"<task description>"`
-
-Run a new coding task. This is the primary way to use Korgex.
-
-```bash
-./korgex.sh "Add unit tests for the authentication module"
-```
-
-### `--schemas`
-
-Print all tool schemas in JSON format. Useful for debugging or integration.
-
-```bash
-./korgex.sh --schemas
-```
-
-### `--init`
-
-Create an `AGENTS.md` file in the current directory. Korgex reads this file for project-specific instructions, build commands, and testing patterns.
-
-```bash
-./korgex.sh --init
-```
-
-### `--help`
-
-Display help information.
-
-```bash
-./korgex.sh --help
-```
-
-## Global Flags
+### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--repo` / `-r` | Repository root path. Defaults to current directory. |
-| `--model` / `-m` | LLM model to use. Overrides `KORGEX_MODEL` env var. |
-| `--schemas` | Print tool schemas and exit. |
-| `--init` | Initialize AGENTS.md in repository. |
-| `--help` | Display help. |
+| `--model MODEL` | Model to use (e.g. `claude-sonnet-4-6`, `gpt-4o`, `anthropic/claude-opus-4-7`). Always overrides `--mode` and `KORGEX_MODEL`. |
+| `--mode {plan,execute,explore,review,debug,research}` | Mode-based model selection. `plan` → Opus, `execute` → Sonnet, `debug` → Haiku. |
+| `--mcp` | Load MCP servers from `mcp.json` at startup and expose their tools to the agent. |
+| `--quiet` / `-q` | Disable the streaming TUI. Only the final result prints. Use in pipes, scripts, and CI. |
+| `--resume` | Not yet implemented. Exits with code 2 rather than silently starting fresh, so scripts fail loudly. |
 
-## Environment Variables
+---
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `KORGEX_API_KEY` | Yes | — | API key for the LLM provider |
-| `KORGEX_API_URL` | No | NousResearch API | Base URL for the LLM provider |
-| `KORGEX_MODEL` | No | `deepseek/deepseek-v4-flash` | Model name |
-| `KORGEX_PROVIDER` | No | `nous` | Provider name |
-| `KORGEX_MAX_ITERATIONS` | No | `50` | Maximum tool calls per task |
+## Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `korgex serve` | Start the FastAPI dashboard on `:8090` and open VS Code with the sidecar extension. |
+| `korgex dashboard` | Start the dashboard only (no editor). |
+| `korgex init` | One-shot setup: pip-install deps and compile the VS Code extension. |
+| `korgex status` | Report whether the background backend is running and its PID. |
+| `korgex stop` | Send SIGTERM (then SIGKILL) to the background backend. |
+| `korgex install-extension` | Install the compiled `.vsix` into your local VS Code. |
+
+---
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | — | Used when the model contains `"claude"` or starts with `"anthropic/"`. |
+| `OPENAI_API_KEY` | — | Used for any non-Anthropic model. |
+| `KORGEX_API_KEY` | — | Generic fallback if a provider-specific key isn't set. Useful for OpenRouter. |
+| `KORGEX_API_URL` | `https://api.openai.com/v1` | Base URL for OpenAI-compatible endpoints (OpenRouter, Ollama, DeepSeek, etc.). |
+| `KORGEX_MODEL` | `claude-sonnet-4-6` | Default model when neither `--model` nor `--mode` is given. |
+| `KORGEX_MAX_ITERATIONS` | `30` | Maximum agent loop iterations before the agent gives up. |
+| `KORGEX_MCP` | unset | Set to `1` to auto-load MCP servers from `mcp.json` (same effect as `--mcp`). |
+| `KORGEX_SANDBOX` | `auto` | Bash sandbox isolation: `modal`, `docker`, `direct`, or `auto`. |
+
+**Provider detection:** if the model id contains `"claude"` or starts with `"anthropic/"`, korgex uses the Anthropic SDK. Otherwise it uses the OpenAI SDK, which covers OpenAI, OpenRouter, Ollama, DeepSeek, vLLM, and any OpenAI-compatible endpoint.
+
+---
+
+## Mode → model mapping
+
+| Mode | Model | Notes |
+|------|-------|-------|
+| `plan` | `claude-opus-4-7` | Extended thinking enabled, budget 20k tokens |
+| `execute` | `claude-sonnet-4-6` | Fast, low temperature |
+| `explore` | `claude-opus-4-7` | Broad analysis |
+| `review` | `claude-sonnet-4-6` | Code review focus |
+| `debug` | `claude-haiku-4-5` | Low latency, tight temperature |
+| `research` | `claude-opus-4-7` | Web + reasoning |
+
+Explicit `--model` always wins over `--mode`.
+
+---
 
 ## Examples
 
 ```bash
-# Start a task in the current directory
-./korgex.sh "Fix the login bug"
+# Default model (Sonnet 4.6 via Anthropic)
+export ANTHROPIC_API_KEY=sk-ant-...
+korgex "explain what src/agent.py does"
 
-# Start a task in a specific repository
-./korgex.sh "Add test coverage" --repo /path/to/project
+# OpenRouter with any model
+export KORGEX_API_KEY=sk-or-v1-...
+export KORGEX_API_URL=https://openrouter.ai/api/v1
+korgex --model openai/gpt-4o "add pagination to the /users endpoint"
 
-# Use a specific model
-KORGEX_API_KEY="sk-..." KORGEX_MODEL="gpt-4o" ./korgex.sh "Refactor the API layer"
+# Opus for deep planning
+korgex --mode plan "redesign the authentication layer"
 
-# Print tool schemas
-./korgex.sh --schemas
+# Quiet mode for scripting
+result=$(korgex --quiet "list all TODO comments in src/")
+echo "$result"
 
-# Initialize AGENTS.md
-cd /path/to/project && ./korgex.sh --init
+# Load GitHub MCP server tools at runtime
+korgex --mcp "create a GitHub issue summarising today's bug"
+
+# Start the dashboard and VS Code sidecar
+korgex serve
+
+# Check backend status
+korgex status
 ```

@@ -1,107 +1,87 @@
-# Running Tasks with Korgex
+# Running Tasks
 
-Once Korgex is installed and connected to your repository, you're ready to start coding. This guide walks through the key steps of running a task — from writing your prompt to reviewing the final diff.
+Once korgex is installed and an API key is set, you're ready. This guide covers writing good prompts and understanding what the agent does with them.
 
-## Write a Clear Prompt
+## Writing a good prompt
 
-Korgex works best when your prompt is specific and scoped. Use plain language — no need for perfect grammar or code.
+Specific and scoped works best. Plain language is fine — no special syntax required.
 
-**✅ Good prompts**
-
-- Add a loading spinner while `fetchUserProfile` runs
-- Fix the 500 error when submitting the feedback form
-- Document the `useCache` hook with JSDoc
-- Bump `next` from `10.2.3` to `15.4.5` and migrate to the app directory
-
-**🚫 Avoid**
-
-- Fix everything
-- Optimize code
-- Make this better
-
-If Korgex needs more clarity, it will ask you for feedback before writing code.
-
-## How Korgex Processes a Task
-
-### Step 1: Exploration
-
-Korgex reads your codebase — listing directories, examining file contents, and checking `AGENTS.md` and `README.md` for project conventions.
+**Good prompts**
 
 ```bash
-# Under the hood, Korgex runs:
-list_files(".")
-read_file("AGENTS.md")
-read_file("README.md")
-read_file("package.json")
+korgex "fix the 500 error when submitting the feedback form in src/api/feedback.py"
+korgex "add unit tests for the parse_config function in src/config.py"
+korgex "bump requests from 2.28 to 2.32 and fix any breaking changes"
+korgex "document the useCache hook with JSDoc — include param types and return type"
 ```
 
-### Step 2: Planning
-
-Korgex formulates a structured plan with numbered steps. Each step describes what will be done and what will be verified.
-
-Example plan:
+**Avoid**
 
 ```
-1. *Add a new function `is_prime` in `lib/math.py`.*
-   - Accepts an integer, returns a boolean
-2. *Add a test for the new function in `tests/test_math.py`.*
-   - Checks prime identification and edge cases
-3. *Complete pre-commit steps*
-   - Ensure proper testing, verification, review, and reflection are done
-4. *Finalize the change.*
-   - Create a descriptive commit message
+korgex "fix everything"
+korgex "optimize the code"
+korgex "make this better"
 ```
 
-### Step 3: Approval
+Vague prompts make the agent guess scope. If it's unsure, it uses `AskUserQuestion` to ask before starting.
 
-Korgex presents the plan and waits for approval before writing any code. This is your chance to course-correct.
+## What the agent does
 
-### Step 4: Execution
+### 1. Explore
 
-Once approved, Korgex executes each step sequentially:
+The agent reads context before touching anything:
 
-- **Edit files** using `write_file` or `replace_with_git_merge_diff`
-- **Run commands** in a bash session (`run_in_bash_session`)
-- **Verify** each change by re-reading files
-- **Run tests** to confirm nothing is broken
+```
+Read(file_path=README.md)
+Read(file_path=AGENTS.md)
+Glob(pattern=src/**/*.py)
+Read(file_path=src/api/feedback.py)
+```
 
-After every modification, Korgex confirms the change was applied correctly before marking the step complete.
+### 2. Plan
 
-### Step 5: Pre-commit Checks
+The agent forms an internal plan — what files to change, what to verify, in what order. If you're watching the TUI, you'll see this as thinking output (Anthropic) or initial text before tool calls begin.
 
-Before submitting, Korgex runs pre-commit verification:
+### 3. Execute
 
-1. Run the test suite
-2. Run linters
-3. Type-check the codebase
-4. Verify no debug artifacts remain
+The agent makes changes using surgical edits:
 
-### Step 6: Submission
+```
+Edit(file_path=src/api/feedback.py, old_string="...", new_string="...")
+Bash(command="pytest tests/test_feedback.py -q")
+Read(file_path=src/api/feedback.py)   ← verifies the edit applied
+```
 
-Korgex creates a branch, commits the changes, and presents a summary:
+Every file it writes or edits, it reads back to confirm.
 
-- ✅ Files changed
-- Total lines added/removed
-- Branch name and commit message
+### 4. Report
 
-## Watching Korgex Work
+When the agent has no more tool calls to make, it returns a summary of what was done. In TUI mode this streams live; with `--quiet` it prints at the end.
 
-You'll see a real-time activity feed as each step completes, with inline explanations of each change and a mini diff preview for each file.
+## Monitoring progress
 
-## Giving Feedback Mid-Task
+The streaming TUI shows each tool call as it happens:
 
-You can send feedback to Korgex while it's working:
+```
+➤ Read(file_path=src/api/feedback.py)
+➤ Edit(file_path=src/api/feedback.py, ...)
+⠋ Bash(command=pytest tests/test_feedback.py -q)
+✓ Bash — 3 passed in 0.4s
+```
 
-- Ask Korgex to change its approach
-- Revise specific code
-- Clarify logic
+Use `--quiet` in scripts or CI to suppress the TUI and get only the final result.
 
-Korgex will respond and, if needed, replan or revise the task. You're in control at every step.
+## Steering mid-task
 
-## Starting Tasks from GitHub Issues
+The agent can be interrupted with Ctrl+C (graceful) or Ctrl+C twice (force). For mid-task feedback during dashboard use, POST to `/api/send-feedback`.
 
-You can trigger Korgex from a GitHub issue by adding the label `korgex` (case insensitive). Korgex will comment on the issue with its plan and, upon completion, provide a link to the pull request.
+## Iterating
 
-## Pausing Korgex
+If the result isn't what you wanted, run korgex again with a more specific prompt. Each invocation is a fresh session — the agent re-reads the current state of the files, so it works from whatever changes the previous run made.
 
-You can pause Korgex at any time. When paused, it won't do any work and will wait for your next instructions. You can prompt it again, unpause it, or cancel the task.
+## Task scope tips
+
+- **One concern per run** works best. The agent is good at "fix X" or "add Y" — less reliable on "fix X, add Y, and also refactor Z".
+- **Point at the file** if you know where the change lives: `"fix the auth bug in src/auth/middleware.py"` is faster than `"fix the auth bug"`.
+- **Use `--mode plan`** for architectural questions: `korgex --mode plan "how should we add multi-tenancy to the billing module?"`. Opus with extended thinking; read-only analysis.
+- **Use `--mode debug`** for tracing errors: `korgex --mode debug "why is /api/users returning 403 for valid tokens?"`. Haiku; fast and focused.

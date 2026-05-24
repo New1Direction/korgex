@@ -152,7 +152,13 @@ class MCPClient:
             target=self._read_stderr, daemon=True
         )
         self._reader_thread.start()
-        
+
+        # Start stdout reader BEFORE the first _send_request so that
+        # pending-request Events are dispatched as soon as the server responds.
+        # (Must be running when we send "initialize", not after.)
+        stdout_reader = threading.Thread(target=self.start_response_reader, daemon=True)
+        stdout_reader.start()
+
         # Send initialize request
         result = self._send_request("initialize", {
             "protocolVersion": "2025-03-26",
@@ -178,7 +184,7 @@ class MCPClient:
         self._send_notification("notifications/initialized", {})
         
         self._connected = True
-        
+
         return {
             "status": "connected",
             "server": self.config.name,
