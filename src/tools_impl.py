@@ -20,6 +20,7 @@ from src.swarm import AgentSwarm, SubTask
 from src.diff_engine import DiffEngine
 from src.self_healing import TDDHealer, extract_traceback_info
 from src.dependency_graph import DependencyAnalyzer
+from src.profiler import PerformanceProfiler
 
 # Initialize sandbox and GitHub on import
 SANDBOX = None
@@ -618,6 +619,23 @@ def tool_get_god_nodes(min_dependents: str = "3", context: dict = None):
         return {"god_nodes": nodes, "count": len(nodes)}
     except Exception as e:
         return {"error": f"God node analysis failed: {e}"}
+
+
+# ─── Performance Profiling Tools ────────────────────────────────────────
+
+@register_tool("get_performance_profile", "Runs a test or script under cProfile to find the slowest functions and detect bottlenecks.", [
+    ToolParam("command", "STRING", "The python or pytest command to profile (e.g. 'pytest tests/test_core.py').", required=True),
+])
+def tool_get_performance_profile(command: str, context: dict = None):
+    global SANDBOX
+    if not SANDBOX:
+        return {"error": "Sandbox required for profiling. Set KORGKODE_SANDBOX=docker or modal."}
+    profiler = PerformanceProfiler(SANDBOX)
+    try:
+        report = profiler.run_profile(command)
+        return report
+    except Exception as e:
+        return {"error": f"Performance profiling failed: {e}"}
 
 
 # ─── Enterprise Vision Tools ────────────────────────────────────────────
