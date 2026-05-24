@@ -33,7 +33,6 @@ secrets*
 
 # Seluj
 .seluj/
-prompt.md
 *.log
 node_modules/
 
