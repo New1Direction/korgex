@@ -18,6 +18,7 @@ from src.github_api import (
 )
 from src.swarm import AgentSwarm, SubTask
 from src.diff_engine import DiffEngine
+from src.self_healing import TDDHealer, extract_traceback_info
 
 # Initialize sandbox and GitHub on import
 SANDBOX = None
@@ -213,6 +214,47 @@ def tool_run_in_bash_session(command: str, context: dict = None):
         "stderr": result.get("stderr", ""),
         "exit_code": result.get("exit_code", -1),
     }
+
+
+@register_tool("run_test_with_self_healing", "Runs tests and automatically self-corrects any failures up to 5 times using the TDD Healer.", [
+    ToolParam("test_command", "STRING", "The test command to execute.", required=True),
+    ToolParam("target_file", "STRING", "The file path containing the code to fix.", required=True),
+    ToolParam("context_files", "ARRAY", "Optional list of context files (e.g. test files)."),
+])
+def tool_run_test_with_self_healing(test_command: str, target_file: str, context_files: list = None, context: dict = None):
+    """Run tests with self-healing loop. Parses failures, patches via LLM, retries."""
+    global SANDBOX
+    
+    if not SANDBOX:
+        return {"error": "Sandbox required for self-healing. Set KORGKODE_SANDBOX=docker or modal."}
+    
+    # Initialize LLM client
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            base_url=os.environ.get("KORGKODE_API_URL", "https://inference-api.nousresearch.com/v1"),
+            api_key=os.environ.get("KORGKODE_API_KEY", ""),
+        )
+    except ImportError:
+        return {"error": "openai package required: pip install openai"}
+    
+    model = os.environ.get("KORGKODE_MODEL", "deepseek/deepseek-v4-flash")
+    
+    healer = TDDHealer(
+        sandbox=SANDBOX,
+        api_client=client,
+        model=model,
+        max_attempts=int(os.environ.get("KORGKODE_HEAL_MAX_ATTEMPTS", "5")),
+    )
+    
+    result = healer.heal(test_command, target_file, context_files or [])
+    
+    # Parse traceback for debugging
+    if result.get("status") == "failure":
+        tb = extract_traceback_info(result.get("output", ""))
+        result["traceback"] = tb
+    
+    return result
 
 
 @register_tool("google_search", "Online Google search to retrieve up-to-date information.", [

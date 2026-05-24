@@ -192,6 +192,55 @@ class DiffEngine:
 from src.tool_base import register_tool, ToolParam
 
 
+def apply_patch(filepath: str, patch_path: str) -> dict:
+    """Apply a SEARCH/REPLACE patch from a file.
+    
+    Args:
+        filepath: The target file to patch.
+        patch_path: Path to file containing SEARCH/REPLACE blocks.
+    
+    Returns:
+        dict with success/error info.
+    """
+    import os
+    if not os.path.exists(patch_path):
+        return {"success": False, "error": f"Patch file not found: {patch_path}"}
+    if not os.path.exists(filepath):
+        return {"success": False, "error": f"Target file not found: {filepath}"}
+    
+    with open(patch_path, "r") as f:
+        patch_content = f.read()
+    
+    with open(filepath, "r") as f:
+        file_content = f.read()
+    
+    # Parse and apply SEARCH/REPLACE blocks
+    blocks = patch_content.split("<<<<<<< SEARCH")
+    if len(blocks) < 2:
+        return {"success": False, "error": "No SEARCH blocks in patch file"}
+    
+    modified = file_content
+    changes = 0
+    
+    for block in blocks[1:]:
+        if "=======" not in block or ">>>>>>> REPLACE" not in block:
+            continue
+        search_part = block.split("=======")[0].strip()
+        replace_part = block.split("=======")[1].split(">>>>>>> REPLACE")[0].strip()
+        
+        if search_part in modified:
+            modified = modified.replace(search_part, replace_part, 1)
+            changes += 1
+    
+    if changes == 0:
+        return {"success": False, "error": "No SEARCH blocks matched target file"}
+    
+    with open(filepath, "w") as f:
+        f.write(modified)
+    
+    return {"success": True, "changes": changes}
+
+
 @register_tool("replace_with_git_merge_diff", 
     "Performs a targeted search-and-replace using Git merge diff format with fuzzy matching and AST validation.\n"
     "Supports: exact match → fuzzy whitespace match → git three-way merge fallback.", [
