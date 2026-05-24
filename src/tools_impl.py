@@ -753,31 +753,37 @@ def tool_memory_list(mem_type: str = None, context: dict = None):
 
 # ─── Mode & Strict Pairing Tools ──────────────────────────────────────
 
-@register_tool("enter_plan_mode", "Enter plan mode: read-only analysis with no file modifications. Write plan to plan file, then use exit_plan_mode to return.", [
+@register_tool("enter_plan_mode", "Enter plan mode: read-only analysis with no file modifications. Write plan to plan file, then use exit_plan_mode to return. Automatically switches model to Opus for deep reasoning.", [
     ToolParam("plan_file", "STRING", "Path to write the plan file to.", required=True),
 ])
 def tool_enter_plan_mode(plan_file: str, context: dict = None):
     from src.mode_schemas import ModeStateMachine
+    from src.model_router import on_mode_change
     machine = ModeStateMachine("execute")
     result = machine.enter_mode("plan")
+    on_mode_change("plan")
     return {
         "mode": "plan",
-        "description": "Read-only analysis mode. Use Read, Glob, Grep, Agent(plan), AskUserQuestion. NO writing, editing, or bash.",
+        "model": "Opus 4.7",
+        "description": "Read-only analysis mode with Opus for deep reasoning. Use Read, Glob, Grep, Agent(plan), AskUserQuestion. NO writing, editing, or bash.",
         "plan_file": plan_file,
         "instructions": "Write your analysis to the plan file. When ready, call exit_plan_mode for approval."
     }
 
 
-@register_tool("exit_plan_mode", "Exit plan mode and return to execute mode. Call this when your plan is written and you need approval.", [
+@register_tool("exit_plan_mode", "Exit plan mode and return to execute mode. Call this when your plan is written and you need approval. Automatically switches model to Sonnet for fast execution.", [
     ToolParam("plan_file", "STRING", "Path to the plan file you wrote.", required=True),
 ])
 def tool_exit_plan_mode(plan_file: str, context: dict = None):
     from src.mode_schemas import ModeStateMachine
+    from src.model_router import on_mode_change
     machine = ModeStateMachine("plan")
     result = machine.exit_mode()
+    on_mode_change("execute")
     return {
         "mode": "execute",
-        "description": "Full execution mode. All tools available.",
+        "model": "Sonnet 4.6",
+        "description": "Full execution mode with Sonnet for fast code generation. All tools available.",
         "plan_file": plan_file,
         "instructions": "Request user approval of the written plan before proceeding."
     }
