@@ -795,6 +795,14 @@ def init(repo_root: str = None, sandbox_mode: str = None):
     global REPO_ROOT, SANDBOX
     REPO_ROOT = repo_root or os.getcwd()
     
+    # Start interactive session
+    try:
+        from src.interactive import InteractiveSession
+        _session = InteractiveSession()
+        _session.start()
+    except Exception:
+        pass
+    
     # Initialize sandbox (auto-detects: modal > docker > direct)
     try:
         SANDBOX = SandboxManager.get(sandbox_mode)
