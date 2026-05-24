@@ -19,6 +19,7 @@ from src.github_api import (
 from src.swarm import AgentSwarm, SubTask
 from src.diff_engine import DiffEngine
 from src.self_healing import TDDHealer, extract_traceback_info
+from src.dependency_graph import DependencyAnalyzer
 
 # Initialize sandbox and GitHub on import
 SANDBOX = None
@@ -586,6 +587,37 @@ def tool_github_create_issue(owner: str, repo: str, title: str, body: str = "", 
     label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else None
     result = create_issue(owner, repo, title, body, label_list)
     return result
+
+
+# ─── Dependency Graph Tools ───────────────────────────────────────────
+
+@register_tool("get_codebase_impact_report", "Analyzes imports and AST nodes to map downstream files impacted by changing a target file.", [
+    ToolParam("target_file", "STRING", "The file path being modified.", required=True),
+    ToolParam("changed_symbols", "ARRAY", "List of class names, function names, or variables being altered."),
+])
+def tool_get_codebase_impact_report(target_file: str, changed_symbols: list = None, context: dict = None):
+    global REPO_ROOT
+    root = REPO_ROOT or os.getcwd()
+    analyzer = DependencyAnalyzer(root)
+    try:
+        report = analyzer.analyze_impact(target_file, changed_symbols)
+        return report
+    except Exception as e:
+        return {"error": f"Impact analysis failed: {e}"}
+
+
+@register_tool("get_god_nodes", "Finds files with the most dependents ('god nodes') — high-risk targets for refactoring.", [
+    ToolParam("min_dependents", "STRING", "Minimum number of dependents to qualify as a god node (default: 3)."),
+])
+def tool_get_god_nodes(min_dependents: str = "3", context: dict = None):
+    global REPO_ROOT
+    root = REPO_ROOT or os.getcwd()
+    analyzer = DependencyAnalyzer(root)
+    try:
+        nodes = analyzer.get_god_nodes(int(min_dependents))
+        return {"god_nodes": nodes, "count": len(nodes)}
+    except Exception as e:
+        return {"error": f"God node analysis failed: {e}"}
 
 
 # ─── Enterprise Vision Tools ────────────────────────────────────────────
