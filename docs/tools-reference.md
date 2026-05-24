@@ -1,6 +1,6 @@
 # Tools Reference
 
-Seluj exposes **33 tools** across 9 categories. Each tool has a name, description, and typed parameters.
+KorgKode exposes **33 tools** across 9 categories. Each tool has a name, description, and typed parameters.
 
 ## File Operations
 

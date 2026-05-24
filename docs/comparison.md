@@ -1,10 +1,10 @@
-# Seluj vs The Rest
+# KorgKode vs The Rest
 
-The autonomous coding agent landscape is evolving rapidly. Here's how Seluj compares to other tools in the space.
+The autonomous coding agent landscape is evolving rapidly. Here's how KorgKode compares to other tools in the space.
 
 ## At a Glance
 
-| Feature | Seluj | GitHub Copilot | Cursor AI | Cody (Sourcegraph) | Claude Code |
+| Feature | KorgKode | GitHub Copilot | Cursor AI | Cody (Sourcegraph) | Claude Code |
 |---------|-------|----------------|-----------|-------------------|-------------|
 | **Autonomous execution** | ✅ Full async agent | ❌ Suggestions only | ⚠️ Limited agent mode | ✅ Basic agent | ⚠️ Interactive only |
 | **Plan-first workflow** | ✅ Required | ❌ | ❌ | ❌ | ⚠️ Optional |
@@ -25,23 +25,23 @@ The autonomous coding agent landscape is evolving rapidly. Here's how Seluj comp
 
 Most coding assistants operate as **co-pilots** — they suggest completions while you type, or they wait for your next instruction after each action.
 
-Seluj operates as an **autonomous engineer**. You give it a task, it explores the codebase, formulates a plan, executes each step with verification, and submits the completed work. You review and approve — you don't babysit.
+KorgKode operates as an **autonomous engineer**. You give it a task, it explores the codebase, formulates a plan, executes each step with verification, and submits the completed work. You review and approve — you don't babysit.
 
-**✅ Seluj:** "Add authentication middleware" → explores → plans → builds → tests → submits a PR
+**✅ KorgKode:** "Add authentication middleware" → explores → plans → builds → tests → submits a PR
 **❌ Others:** "Add authentication middleware" → you guide every file change manually
 
 ### Plan-First Workflow
 
-Seluj never writes code without a plan. Every task begins with codebase exploration followed by a structured markdown plan. You approve the plan before any code changes are made.
+KorgKode never writes code without a plan. Every task begins with codebase exploration followed by a structured markdown plan. You approve the plan before any code changes are made.
 
 This means:
 - No wasted work on wrong approaches
-- Clear visibility into what Seluj intends to do
+- Clear visibility into what KorgKode intends to do
 - Ability to course-correct before code is written
 
 ### Tool Surface
 
-Seluj exposes **33 tools** — the most comprehensive tool surface of any coding agent:
+KorgKode exposes **33 tools** — the most comprehensive tool surface of any coding agent:
 
 | Category | Tools | Purpose |
 |----------|-------|---------|
@@ -57,33 +57,33 @@ Seluj exposes **33 tools** — the most comprehensive tool surface of any coding
 
 ### Model Agnostic
 
-Seluj doesn't lock you into a single LLM provider. Configure any model:
+KorgKode doesn't lock you into a single LLM provider. Configure any model:
 
 ```bash
 # OpenAI
-export SELUJ_API_URL="https://api.openai.com/v1"
-export SELUJ_MODEL="gpt-4o"
+export KORGKODE_API_URL="https://api.openai.com/v1"
+export KORGKODE_MODEL="gpt-4o"
 
 # Anthropic
-export SELUJ_API_URL="https://api.anthropic.com/v1"
-export SELUJ_MODEL="claude-sonnet-4-20250514"
+export KORGKODE_API_URL="https://api.anthropic.com/v1"
+export KORGKODE_MODEL="claude-sonnet-4-20250514"
 
 # OpenRouter
-export SELUJ_API_URL="https://openrouter.ai/api/v1"
-export SELUJ_MODEL="anthropic/claude-sonnet-4"
+export KORGKODE_API_URL="https://openrouter.ai/api/v1"
+export KORGKODE_MODEL="anthropic/claude-sonnet-4"
 
 # Local (Ollama)
-export SELUJ_API_URL="http://localhost:11434/v1"
-export SELUJ_MODEL="llama3"
+export KORGKODE_API_URL="http://localhost:11434/v1"
+export KORGKODE_MODEL="llama3"
 ```
 
 ### Open Source
 
-Seluj is fully open source under the MIT license. No paywalls, no usage caps, no vendor lock-in. You own your workflow entirely.
+KorgKode is fully open source under the MIT license. No paywalls, no usage caps, no vendor lock-in. You own your workflow entirely.
 
-## When to Choose Seluj
+## When to Choose KorgKode
 
-**Seluj excels at:**
+**KorgKode excels at:**
 - Bug fixes across multiple files
 - Test generation and test suite maintenance
 - Feature implementation with full test coverage
@@ -92,11 +92,11 @@ Seluj is fully open source under the MIT license. No paywalls, no usage caps, no
 - Automated code review responses
 - Async development — fire and forget
 
-**Seluj is evolving toward:**
+**KorgKode is evolving toward:**
 - Multi-agent orchestration for large features
 - CI/CD integration for automated PR responses
 - Real-time collaboration with human developers
 
 ## Summary
 
-Seluj occupies a unique position: the most comprehensive autonomous coding agent that's fully open source and model agnostic. It combines the autonomy of an async agent with the verification rigor of a senior engineer, backed by the largest tool surface in the category.
+KorgKode occupies a unique position: the most comprehensive autonomous coding agent that's fully open source and model agnostic. It combines the autonomy of an async agent with the verification rigor of a senior engineer, backed by the largest tool surface in the category.

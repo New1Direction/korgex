@@ -1,5 +1,5 @@
 """
-Seluj Tool System — mirrors Jules' 33 extracted tools.
+KorgKode Tool System — mirrors Jules' 33 extracted tools.
 
 Each tool is a function registered with a name, description, parameters schema,
 and a handler. The dispatch system routes tool calls to the right handler.
