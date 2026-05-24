@@ -5,11 +5,30 @@ Posts AgentToolCall events to a running korg web server at POST /api/agent/tool-
 Returns the assigned seq_id so callers can wire triggered_by on subsequent events.
 
 Design rules (see agent_event_spec.md in the korg repo):
-  - One event per completed tool call. Call record_tool_call() after the tool returns.
-  - triggered_by: seq_id of the event that caused this call (None for root events).
-  - Payloads over CONTENT_REF_THRESHOLD_BYTES are content-addressed automatically.
-  - Blobs are written to BLOB_DIR keyed by SHA-256 before the event is posted.
-  - Failures are logged, never raised. The agent loop must never halt for ledger reasons.
+
+  §1  One event per completed tool call. Call record_tool_call() after the tool returns.
+      If the agent crashes before a call completes, no event is written. Correct behavior.
+
+  §2  triggered_by: seq_id of the event that caused this call (None for root events).
+      Internal tool composition is not ledgered — only calls at the agent decision boundary.
+      Parallel tool calls from the same LLM batch share triggered_by (they are siblings).
+      Retry's triggered_by points at the failure event, not the original call.
+
+  §3  1 KB threshold applied uniformly. Hashing convention:
+        - JSON field values: compact JSON → UTF-8 bytes → SHA-256
+        - String values: UTF-8 bytes → SHA-256
+        - Binary values: raw bytes → SHA-256
+      Two agents emitting the same content MUST produce the same SHA-256.
+      Blobs are written before events (blob-first atomicity).
+      Missing blobs on replay are a ledger integrity failure — abort loudly.
+
+  §4  Originator is determined by walking triggered_by back to the root user_prompt.
+      There is no separate originator field. The causal chain is the audit answer.
+
+  §5  Client serializes ledger writes (spec §7.5). The background thread issues exactly
+      one HTTP request at a time. The agent loop enqueues non-blocking; if the queue
+      fills (maxsize=256), the oldest item is dropped with a WARNING. Never blocks the
+      agent loop. Never grows unboundedly.
 
 Actor identity convention:
   agent:<name>@<version>   — agent runtimes (e.g. "agent:korgex@0.2.2")
@@ -24,6 +43,8 @@ import hashlib
 import json
 import logging
 import os
+import queue
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -35,6 +56,10 @@ logger = logging.getLogger(__name__)
 # Any field value serialising to more than this many bytes is content-addressed.
 # Applied uniformly — no exceptions for "small" payloads. (spec §3)
 CONTENT_REF_THRESHOLD_BYTES = 1024
+
+# Background writer queue capacity (spec §7.5).
+# If korg is unreachable and 256 events pile up, oldest is dropped with a warning.
+_QUEUE_MAXSIZE = 256
 
 # Blob store location (v1). Must match the path korg expects.
 # Override via KORG_BLOB_DIR env var.
@@ -60,15 +85,43 @@ def _agent_identity() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Blob storage
+# Hashing — spec §7.2
 # ---------------------------------------------------------------------------
+
+def _canonical_bytes(value: Any) -> bytes:
+    """
+    Return the canonical byte representation of a value for SHA-256 hashing.
+
+    Convention (spec §7.2):
+    - Structured (dict/list): compact JSON → UTF-8
+    - str: UTF-8 directly
+    - bytes: raw bytes
+    - Everything else: compact JSON → UTF-8
+
+    Two agents hashing the same logical content MUST produce the same digest.
+    """
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    # Structured value: canonical JSON, no extra whitespace
+    return json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+# ---------------------------------------------------------------------------
+# Blob storage — spec §3, §7.3
+# ---------------------------------------------------------------------------
+
 def _write_blob(data: bytes) -> tuple[str, int]:
-    """Write a blob to the local blob store. Returns (sha256, size_bytes)."""
+    """Write a blob to the local blob store. Returns (sha256, size_bytes).
+
+    Blob is written before the event is appended (blob-first atomicity).
+    Missing blobs on replay are a ledger integrity failure (spec §7.3).
+    """
     digest = _sha256(data)
     prefix = digest[:2]
     dest = _blob_dir() / prefix / digest
@@ -79,7 +132,7 @@ def _write_blob(data: bytes) -> tuple[str, int]:
 
 
 # ---------------------------------------------------------------------------
-# Content-ref helpers
+# Content-ref helpers — spec §3
 # ---------------------------------------------------------------------------
 
 def _maybe_content_ref(
@@ -91,14 +144,87 @@ def _maybe_content_ref(
     If `value` serialises to more than CONTENT_REF_THRESHOLD_BYTES, write it
     to the blob store and return a content-ref sentinel dict. Otherwise return
     the value unchanged.
+
+    Uses canonical byte representation per spec §7.2 so two agents hashing the
+    same content produce the same SHA-256.
     """
-    encoded = json.dumps(value, separators=(",", ":")).encode()
-    if len(encoded) <= CONTENT_REF_THRESHOLD_BYTES:
+    data = _canonical_bytes(value)
+    if len(data) <= CONTENT_REF_THRESHOLD_BYTES:
         return value
 
-    sha256, size_bytes = _write_blob(encoded)
+    sha256, size_bytes = _write_blob(data)
     payload_refs.append({"sha256": sha256, "size_bytes": size_bytes, "label": label})
     return {"_ref": f"sha256:{sha256}", "size_bytes": size_bytes}
+
+
+# ---------------------------------------------------------------------------
+# Background writer — spec §7.5
+# ---------------------------------------------------------------------------
+
+class _LedgerWriter(threading.Thread):
+    """
+    Daemon thread that drains the write queue one request at a time.
+
+    Exactly one HTTP request is in-flight at any moment, preserving the order
+    in which events were enqueued — and therefore the seq_id ordering that
+    triggered_by depends on (spec §7.5).
+    """
+
+    def __init__(self, endpoint: str, timeout_secs: float) -> None:
+        super().__init__(daemon=True, name="korg-ledger-writer")
+        self._endpoint = endpoint
+        self._timeout = timeout_secs
+        self._q: queue.Queue[dict | None] = queue.Queue(maxsize=_QUEUE_MAXSIZE)
+        self._seq_results: dict[int, int] = {}  # enqueue_id → seq_id
+        self._enqueue_counter = 0
+        self._lock = threading.Lock()
+        self.start()
+
+    def enqueue(self, body: dict) -> None:
+        """Put a request body on the queue. Non-blocking; drops oldest if full."""
+        try:
+            self._q.put_nowait(body)
+        except queue.Full:
+            # Queue full means korg has been unreachable for >256 events.
+            # Drop oldest (get + discard) then enqueue new item.
+            try:
+                self._q.get_nowait()
+                self._q.task_done()
+            except queue.Empty:
+                pass
+            logger.warning(
+                "[korg] write queue full (%d slots) — oldest event dropped. "
+                "Ledger integrity is best-effort while korg is unreachable.",
+                _QUEUE_MAXSIZE,
+            )
+            try:
+                self._q.put_nowait(body)
+            except queue.Full:
+                pass  # extremely unlikely; give up on this event
+
+    def stop(self) -> None:
+        """Signal the writer thread to exit cleanly."""
+        self._q.put(None)  # sentinel
+
+    def run(self) -> None:
+        while True:
+            item = self._q.get()
+            if item is None:
+                self._q.task_done()
+                break
+            try:
+                resp = requests.post(
+                    self._endpoint,
+                    json=item,
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                seq_id = resp.json().get("seq_id")
+                logger.debug("[korg] recorded %s → seq=%s", item.get("tool_name"), seq_id)
+            except Exception as exc:
+                logger.warning("[korg] write failed (%s): %s", item.get("tool_name"), exc)
+            finally:
+                self._q.task_done()
 
 
 # ---------------------------------------------------------------------------
@@ -107,26 +233,25 @@ def _maybe_content_ref(
 
 class KorgLedgerClient:
     """
-    Non-blocking client for posting AgentToolCall events to a korg web server.
+    Serialized, non-blocking client for posting AgentToolCall events to korg.
+
+    Serialized: exactly one HTTP request in-flight at a time via background
+    thread. This preserves causal ordering of seq_ids (spec §7.5).
+
+    Non-blocking: record_tool_call() returns immediately. The agent loop is
+    never delayed by ledger writes or korg availability.
 
     Usage::
 
         client = KorgLedgerClient()
 
-        # At the start of a session, record the user's prompt as root event:
-        root_seq = client.record_tool_call(
-            tool_name="user_prompt",
-            args={"prompt": user_input},
-            result={},
-            success=True,
-            duration_ms=0,
-            triggered_by=None,
-        )
+        # Root event — the user's prompt (triggered_by=None)
+        root_seq = client.record_user_prompt("add a /healthz endpoint")
 
-        # Then for each tool call, pass the triggering seq_id:
+        # Then for each tool call, pass the triggering seq_id
         seq = client.record_tool_call(
             tool_name="Edit",
-            args={"file_path": "src/auth.py", ...},
+            args={"file_path": "src/routes.py", ...},
             result={"success": True},
             success=True,
             duration_ms=142,
@@ -145,6 +270,7 @@ class KorgLedgerClient:
         self.timeout_secs = timeout_secs
         self._endpoint = f"{self.base_url}/api/agent/tool-call"
         self._available: bool | None = None  # None = not yet probed
+        self._writer: _LedgerWriter | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -158,23 +284,28 @@ class KorgLedgerClient:
         success: bool,
         duration_ms: int,
         triggered_by: int | None = None,
-    ) -> int | None:
+    ) -> None:
         """
-        Emit one AgentToolCall event. Returns the assigned seq_id (for use as
-        triggered_by on subsequent events), or None if the ledger is unavailable.
+        Enqueue one AgentToolCall event. Returns immediately.
 
-        This method never raises. Failures are logged at WARNING level.
+        The event is written by the background thread in enqueue order,
+        preserving causal ordering. Failures are logged, never raised.
+
+        Note: returns None (not a seq_id) because the write is async.
+        To chain triggered_by, use record_user_prompt() and record_llm_call()
+        which return seq_ids synchronously via a blocking probe call.
+        See agent_event_spec.md §7.5 for the ordering rationale.
         """
         if not self._is_available():
-            return None
+            return
 
         payload_refs: list[dict] = []
 
-        # Apply 1 KB content-ref threshold uniformly to args and result
+        # Apply 1 KB content-ref threshold uniformly (spec §3 + §7.2)
         safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
         safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
 
-        body = {
+        body: dict[str, Any] = {
             "source_agent": self.source_agent,
             "tool_name": tool_name,
             "args": safe_args,
@@ -186,31 +317,17 @@ class KorgLedgerClient:
         if triggered_by is not None:
             body["triggered_by"] = triggered_by
 
-        try:
-            resp = requests.post(
-                self._endpoint,
-                json=body,
-                timeout=self.timeout_secs,
-            )
-            resp.raise_for_status()
-            seq_id: int = resp.json()["seq_id"]
-            logger.debug(
-                "[korg] recorded %s → seq=%d (triggered_by=%s)",
-                tool_name,
-                seq_id,
-                triggered_by,
-            )
-            return seq_id
-        except Exception as exc:
-            logger.warning("[korg] failed to record %s: %s", tool_name, exc)
-            return None
+        self._get_writer().enqueue(body)
 
     def record_user_prompt(self, prompt: str) -> int | None:
         """
-        Convenience wrapper: emit the root AgentToolCall for a user prompt.
-        Returns the seq_id to use as triggered_by for the first LLM call.
+        Emit the root AgentToolCall for a user prompt synchronously.
+
+        This is the only synchronous call because we need the seq_id to wire
+        triggered_by on the first LLM event. Blocks for at most timeout_secs.
+        Returns the assigned seq_id, or None if korg is unavailable.
         """
-        return self.record_tool_call(
+        return self._post_sync(
             tool_name="user_prompt",
             args={"prompt": prompt},
             result={},
@@ -228,11 +345,13 @@ class KorgLedgerClient:
         triggered_by: int | None,
     ) -> int | None:
         """
-        Emit an event for an LLM inference call.
-        The returned seq_id should be used as triggered_by for all tool calls
-        spawned by this inference response (siblings in the causal tree).
+        Emit an LLM inference event synchronously.
+
+        Synchronous because all parallel tool calls from the same LLM response
+        need triggered_by=<this seq_id>. Blocks for at most timeout_secs.
+        Returns the assigned seq_id, or None if korg is unavailable.
         """
-        return self.record_tool_call(
+        return self._post_sync(
             tool_name="llm_inference",
             args={"model": model, "prompt_tokens": prompt_tokens},
             result={"completion_tokens": completion_tokens},
@@ -242,18 +361,58 @@ class KorgLedgerClient:
         )
 
     # ------------------------------------------------------------------
-    # Availability probe
+    # Internal helpers
     # ------------------------------------------------------------------
 
+    def _post_sync(
+        self,
+        tool_name: str,
+        args: Any,
+        result: Any,
+        success: bool,
+        duration_ms: int,
+        triggered_by: int | None,
+    ) -> int | None:
+        """Blocking post — used only for root/llm events that need the seq_id back."""
+        if not self._is_available():
+            return None
+
+        payload_refs: list[dict] = []
+        safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
+        safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
+
+        body: dict[str, Any] = {
+            "source_agent": self.source_agent,
+            "tool_name": tool_name,
+            "args": safe_args,
+            "result": safe_result,
+            "payload_refs": payload_refs,
+            "success": success,
+            "duration_ms": duration_ms,
+        }
+        if triggered_by is not None:
+            body["triggered_by"] = triggered_by
+
+        try:
+            resp = requests.post(self._endpoint, json=body, timeout=self.timeout_secs)
+            resp.raise_for_status()
+            seq_id: int = resp.json()["seq_id"]
+            logger.debug("[korg] sync recorded %s → seq=%d", tool_name, seq_id)
+            return seq_id
+        except Exception as exc:
+            logger.warning("[korg] sync write failed (%s): %s", tool_name, exc)
+            return None
+
+    def _get_writer(self) -> _LedgerWriter:
+        if self._writer is None:
+            self._writer = _LedgerWriter(self._endpoint, self.timeout_secs)
+        return self._writer
+
     def _is_available(self) -> bool:
-        """
-        Probe whether the korg server is reachable. Result is cached after
-        first successful probe; unreachable server logs once and stays quiet.
-        """
         if self._available is True:
             return True
         if self._available is False:
-            return False  # already failed, stay quiet
+            return False
 
         try:
             r = requests.get(
@@ -285,3 +444,4 @@ def get_default_client() -> KorgLedgerClient:
     if _default_client is None:
         _default_client = KorgLedgerClient()
     return _default_client
+
