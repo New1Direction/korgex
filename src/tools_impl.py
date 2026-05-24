@@ -638,6 +638,44 @@ def tool_get_performance_profile(command: str, context: dict = None):
         return {"error": f"Performance profiling failed: {e}"}
 
 
+# ─── AST Context Compression Tools ──────────────────────────────────────
+
+@register_tool("get_compressed_file_context", "Retrieves a compressed AST representation of a large Python file, preserving only focus symbols to save tokens.", [
+    ToolParam("filepath", "STRING", "Path of the file relative to repo root.", required=True),
+    ToolParam("focus_symbols", "ARRAY", "List of class or function names to keep expanded.", required=False),
+])
+def tool_get_compressed_file_context(filepath: str, focus_symbols: list = None, context: dict = None):
+    global REPO_ROOT
+    from src.context_compression import ASTCompressor
+
+    root = REPO_ROOT or os.getcwd()
+    full_path = os.path.join(root, filepath)
+
+    if not os.path.isfile(full_path):
+        return {"error": f"File does not exist: {filepath}"}
+
+    try:
+        compressor = ASTCompressor(focus_symbols)
+        compressed_source = compressor.compress(full_path)
+
+        # Calculate token savings estimation
+        original_size = os.path.getsize(full_path)
+        compressed_size = len(compressed_source.encode("utf-8"))
+        savings_percent = round((1 - (compressed_size / max(1, original_size))) * 100, 2)
+        total_lines = compressed_source.count("\n")
+
+        return {
+            "filepath": filepath,
+            "original_size_bytes": original_size,
+            "compressed_size_bytes": compressed_size,
+            "token_savings_percent": f"{savings_percent}%",
+            "total_lines": total_lines,
+            "compressed_content": compressed_source,
+        }
+    except Exception as e:
+        return {"error": f"Failed to compress file: {str(e)}"}
+
+
 # ─── Enterprise Vision Tools ────────────────────────────────────────────
 
 @register_tool("capture_screenshot", "Takes a browser screenshot of a URL for visual verification.", [
