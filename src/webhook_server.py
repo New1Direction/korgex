@@ -1,14 +1,14 @@
 """
-KorgKode Webhook Server — GitHub App Daemon.
+Korgex Webhook Server — GitHub App Daemon.
 
-Listens for GitHub webhooks and triggers KorgKode tasks autonomously.
+Listens for GitHub webhooks and triggers Korgex tasks autonomously.
 Designed to run as a 24/7 background service on Modal or a VPS.
 
 Events handled:
-- issues.labeled (label = "korgkode") → run task
-- issue_comment.created (comment contains "/korgkode") → run task
-- pull_request.opened (PR has "korgkode" label) → review PR
-- pull_request_review_comment.created (comment contains "/korgkode") → address feedback
+- issues.labeled (label = "korgex") → run task
+- issue_comment.created (comment contains "/korgex") → run task
+- pull_request.opened (PR has "korgex" label) → review PR
+- pull_request_review_comment.created (comment contains "/korgex") → address feedback
 """
 
 import json
@@ -27,8 +27,8 @@ except ImportError:
     WEBHOOK_AVAILABLE = False
 
 
-SECRET = os.environ.get("KORGKODE_WEBHOOK_SECRET", "")
-KORGKODE_PATH = os.environ.get("KORGKODE_PATH", os.path.expanduser("~/KorgKode"))
+SECRET = os.environ.get("KORGEX_WEBHOOK_SECRET", "")
+KORGEX_PATH = os.environ.get("KORGEX_PATH", os.path.expanduser("~/Korgex"))
 
 
 def verify_signature(payload_body: bytes, signature_header: str) -> bool:
@@ -46,7 +46,7 @@ def create_webhook_app() -> Optional[object]:
     if not WEBHOOK_AVAILABLE:
         return None
     
-    app = FastAPI(title="KorgKode Webhook Server")
+    app = FastAPI(title="Korgex Webhook Server")
     
     @app.post("/webhook")
     async def webhook(request: Request):
@@ -71,7 +71,7 @@ def create_webhook_app() -> Optional[object]:
     
     @app.get("/health")
     async def health():
-        return {"status": "ok", "korgkode": True}
+        return {"status": "ok", "korgex": True}
     
     return app
 
@@ -84,77 +84,77 @@ def _process_webhook(event: str, data: dict):
         
         if event == "issues" and data.get("action") == "labeled":
             label = data.get("label", {}).get("name", "")
-            if label.lower() == "korgkode":
+            if label.lower() == "korgex":
                 issue = data.get("issue", {})
                 title = issue.get("title", "")
                 body = issue.get("body", "")
                 number = issue.get("number", "")
                 
                 task = f"Issue #{number}: {title}\n{body}"
-                _run_korgkode(task, repo, clone_url)
+                _run_korgex(task, repo, clone_url)
         
         elif event == "issue_comment" and data.get("action") == "created":
             comment = data.get("comment", {}).get("body", "")
-            if "/korgkode" in comment.lower():
+            if "/korgex" in comment.lower():
                 issue = data.get("issue", {})
                 title = issue.get("title", "")
                 number = issue.get("number", "")
                 
                 task = f"Address comment on issue #{number} ({title}):\n{comment}"
-                _run_korgkode(task, repo, clone_url)
+                _run_korgex(task, repo, clone_url)
         
         elif event == "pull_request" and data.get("action") in ("opened", "labeled"):
             pr = data.get("pull_request", {})
             labels = [l.get("name", "").lower() for l in pr.get("labels", [])]
             
-            if "korgkode" in labels:
+            if "korgex" in labels:
                 title = pr.get("title", "")
                 body = pr.get("body", "")
                 number = pr.get("number", "")
                 head_sha = pr.get("head", {}).get("sha", "")
                 
                 task = f"Review PR #{number}: {title}\n{body}"
-                _run_korgkode(task, repo, clone_url)
+                _run_korgex(task, repo, clone_url)
         
         elif event == "pull_request_review_comment" and data.get("action") == "created":
             comment = data.get("comment", {}).get("body", "")
-            if "/korgkode" in comment.lower():
+            if "/korgex" in comment.lower():
                 task = f"Address review feedback:\n{comment}"
-                _run_korgkode(task, repo, clone_url)
+                _run_korgex(task, repo, clone_url)
     
     except Exception as e:
         print(f"Webhook processing error: {e}")
 
 
-def _run_korgkode(task: str, repo: str, clone_url: str):
-    """Execute KorgKode on a task."""
-    print(f"Running KorgKode on {repo}: {task[:80]}...")
+def _run_korgex(task: str, repo: str, clone_url: str):
+    """Execute Korgex on a task."""
+    print(f"Running Korgex on {repo}: {task[:80]}...")
     
-    workdir = f"/tmp/korgkode-{repo.replace('/', '-')}"
+    workdir = f"/tmp/korgex-{repo.replace('/', '-')}"
     
     # Clone repo
     subprocess.run(["rm", "-rf", workdir], capture_output=True)
     subprocess.run(["git", "clone", clone_url, workdir], capture_output=True, timeout=120)
     
-    # Run KorgKode
+    # Run Korgex
     cmd = [
-        "python3", f"{KORGKODE_PATH}/korgkode.sh",
+        "python3", f"{KORGEX_PATH}/korgex.sh",
         task,
         "--repo", workdir,
     ]
     env = {**os.environ}
     subprocess.run(cmd, capture_output=True, timeout=600, env=env)
     
-    print(f"KorgKode completed for {repo}")
+    print(f"Korgex completed for {repo}")
 
 
 def start_webhook_server(host: str = "0.0.0.0", port: int = 8091):
-    """Start the KorgKode webhook server."""
+    """Start the Korgex webhook server."""
     app = create_webhook_app()
     if app is None:
         print("Install FastAPI: pip install fastapi uvicorn")
         return
     
-    print(f"🔌 KorgKode Webhook Server: http://{host}:{port}/webhook")
+    print(f"🔌 Korgex Webhook Server: http://{host}:{port}/webhook")
     print(f"   Health check: http://{host}:{port}/health")
     uvicorn.run(app, host=host, port=port, log_level="info")

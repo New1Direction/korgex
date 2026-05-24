@@ -1,8 +1,8 @@
 """
-KorgKode MCP Client — Native Model Context Protocol integration.
+Korgex MCP Client — Native Model Context Protocol integration.
 
 Connects to any MCP server (stdio or HTTP) and exposes its tools
-through KorgKode's tool abstraction layer.
+through Korgex's tool abstraction layer.
 
 Architecture:
     [MCP Server Process] ←──stdio──→ [MCPClient]
@@ -163,7 +163,7 @@ class MCPClient:
                 }
             },
             "clientInfo": {
-                "name": "korgkode",
+                "name": "korgex",
                 "version": "1.0.0",
             },
         })

@@ -1,5 +1,5 @@
 """
-KorgKode Multimodal Vision — Screenshot & UI analysis.
+Korgex Multimodal Vision — Screenshot & UI analysis.
 
 Integrates with browser automation for visual testing and screenshot capture.
 """

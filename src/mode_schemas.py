@@ -1,5 +1,5 @@
 """
-KorgKode Mode-Gated Tool Schemas — Claude Code's plan/execute split.
+Korgex Mode-Gated Tool Schemas — Claude Code's plan/execute split.
 
 Each mode exposes a different subset of the 12 user-facing tools.
 The model only sees the tools relevant to its current mode, reducing

@@ -1,5 +1,5 @@
 """
-KorgKode Interactive TUI — Streaming, Diffs, Spinners, Interrupts.
+Korgex Interactive TUI — Streaming, Diffs, Spinners, Interrupts.
 
 Bridges the gap between a headless backend and a Claude Code-level feel.
 
@@ -507,7 +507,7 @@ class Spinner:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class InteractiveSession:
-    """Full interactive TUI session for KorgKode.
+    """Full interactive TUI session for Korgex.
     
     Wires together:
     - SSE stream processing → interleaved thinking/text/tool display
@@ -532,7 +532,7 @@ class InteractiveSession:
         """Start the interactive session."""
         self._running = True
         self.interrupt.install()
-        console.print("[bold]╔══ KorgKode Interactive ──[/bold]")
+        console.print("[bold]╔══ Korgex Interactive ──[/bold]")
     
     def stop(self):
         """Stop the interactive session."""

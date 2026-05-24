@@ -1,5 +1,5 @@
 """
-KorgKode System Prompt — 4-block architecture inspired by Claude Code.
+Korgex System Prompt — 4-block architecture inspired by Claude Code.
 
 Architecture:
   Block 0: Attribution header (billing, version info)
@@ -18,12 +18,12 @@ from pathlib import Path
 
 
 def build_system_prompt(memory_text: str = "", workdir: str = None,
-                        model_info: str = "KorgKode (Sonnet-level)") -> list[dict]:
+                        model_info: str = "Korgex (Sonnet-level)") -> list[dict]:
     """
     Build a 4-block system prompt matching Claude Code's architecture.
     
     Returns a list of dicts suitable for Anthropic's API system parameter,
-    or for use with KorgKode's own prompt assembly.
+    or for use with Korgex's own prompt assembly.
     """
     blocks = [
         _build_attribution_block(),
@@ -38,7 +38,7 @@ def _build_attribution_block() -> dict:
     """Block 0: Billing/attribution header (~85 chars, matches Claude Code)."""
     return {
         "type": "text",
-        "text": "x-korgkode-billing-header: version=1.0.0; cc_entrypoint=cli;\n",
+        "text": "x-korgex-billing-header: version=1.0.0; cc_entrypoint=cli;\n",
     }
 
 
@@ -46,7 +46,7 @@ def _build_identity_block() -> dict:
     """Block 1: Single-sentence identity statement."""
     return {
         "type": "text",
-        "text": "You are KorgKode, an autonomous AI software engineer built on the KorgKode Agent SDK.\n",
+        "text": "You are Korgex, an autonomous AI software engineer built on the Korgex Agent SDK.\n",
     }
 
 
@@ -97,7 +97,7 @@ Carefully consider reversibility and blast radius:
 
 
 def _build_session_block(memory_text: str, workdir: str = None,
-                          model_info: str = "KorgKode") -> dict:
+                          model_info: str = "Korgex") -> dict:
     """Block 3: Session-specific context (changes each turn)."""
     parts = ["# Text output (does not apply to tool calls)"]
     

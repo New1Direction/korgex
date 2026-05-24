@@ -1,12 +1,12 @@
-# Contributing to KorgKode
+# Contributing to Korgex
 
 Thanks for your interest in contributing! Here's how to get started.
 
 ## Development Setup
 
 ```bash
-git clone https://github.com/New1Direction/KorgKode.git
-cd KorgKode
+git clone https://github.com/New1Direction/Korgex.git
+cd Korgex
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

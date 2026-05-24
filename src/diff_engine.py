@@ -1,5 +1,5 @@
 """
-KorgKode Diff Engine — AST-aware patching with three-way merge fallback.
+Korgex Diff Engine — AST-aware patching with three-way merge fallback.
 
 Replaces the simple substring-based replace_with_git_merge_diff with:
 1. Native git three-way merge (most robust)
@@ -37,22 +37,22 @@ class DiffEngine:
                 with open(tmp_file, "w") as f:
                     f.write(new_content)
                 
-                subprocess.run(["git", "checkout", "-b", "_korgkode_tmp_merge"], 
+                subprocess.run(["git", "checkout", "-b", "_korgex_tmp_merge"], 
                              cwd=cwd, capture_output=True, timeout=30)
                 subprocess.run(["cp", tmp_file, filepath], capture_output=True, timeout=10)
                 subprocess.run(["git", "add", filepath], cwd=cwd, capture_output=True, timeout=10)
-                subprocess.run(["git", "commit", "-m", "_korgkode_tmp_commit"], 
+                subprocess.run(["git", "commit", "-m", "_korgex_tmp_commit"], 
                              cwd=cwd, capture_output=True, timeout=30)
                 
                 # Switch back and merge
                 subprocess.run(["git", "checkout", "-"], cwd=cwd, capture_output=True, timeout=30)
                 merge_result = subprocess.run(
-                    ["git", "merge", "_korgkode_tmp_merge", "--no-commit"],
+                    ["git", "merge", "_korgex_tmp_merge", "--no-commit"],
                     cwd=cwd, capture_output=True, text=True, timeout=30
                 )
                 
                 # Clean up temp branch
-                subprocess.run(["git", "branch", "-D", "_korgkode_tmp_merge"], 
+                subprocess.run(["git", "branch", "-D", "_korgex_tmp_merge"], 
                              cwd=cwd, capture_output=True, timeout=10)
                 
                 # Restore stashed changes

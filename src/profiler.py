@@ -1,5 +1,5 @@
 """
-KorgKode Performance Profiler — Automated No-Regression Guarantee.
+Korgex Performance Profiler — Automated No-Regression Guarantee.
 
 Executes test suites or scripts under a CPU profiler, extracts execution
 time metrics for key functions, and detects performance regressions.
@@ -26,7 +26,7 @@ class PerformanceProfiler:
     def __init__(self, sandbox):
         self.sandbox = sandbox
 
-    def run_profile(self, command: str, output_file: str = "korgkode_stats.prof") -> dict:
+    def run_profile(self, command: str, output_file: str = "korgex_stats.prof") -> dict:
         """Runs a python command under cProfile and extracts the slowest functions."""
         prof_cmd = self._inject_profiler(command, output_file)
 

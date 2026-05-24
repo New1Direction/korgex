@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Package the KorgKode VS Code extension into a .vsix for one-click install.
+# Package the Korgex VS Code extension into a .vsix for one-click install.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-EXT_DIR="$HERE/../korgkode-vscode"
-VSIX="$EXT_DIR/korgkode-sidecar.vsix"
+EXT_DIR="$HERE/../korgex-vscode"
+VSIX="$EXT_DIR/korgex-sidecar.vsix"
 
-echo "  Packaging KorgKode VS Code extension..."
+echo "  Packaging Korgex VS Code extension..."
 
 cd "$EXT_DIR"
 
@@ -41,9 +41,9 @@ else
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
   <Metadata>
-    <Identity Id="korgkode-sidecar" Version="1.0.0" Publisher="KorgKode" />
-    <DisplayName>KorgKode Autonomy</DisplayName>
-    <Description>IDE sidecar for the KorgKode AI Swarm</Description>
+    <Identity Id="korgex-sidecar" Version="1.0.0" Publisher="Korgex" />
+    <DisplayName>Korgex Autonomy</DisplayName>
+    <Description>IDE sidecar for the Korgex AI Swarm</Description>
   </Metadata>
   <Installation>
     <InstallationTarget Id="Microsoft.VisualStudio.Code" />

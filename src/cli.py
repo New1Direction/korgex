@@ -1,13 +1,13 @@
 """
-KorgKode CLI — the `korgkode` command. Works like `claude` from anywhere.
+Korgex CLI — the `korgex` command. Works like `claude` from anywhere.
 
 Usage:
-    korgkode                  Start backend + open VS Code with sidecar
-    korgkode init             One-shot setup: install deps, compile extension
-    korgkode dashboard        Start the web dashboard only
-    korgkode status           Check if backend is running
-    korgkode stop             Stop the running backend
-    korgkode install-extension Install VS Code extension from .vsix
+    korgex                  Start backend + open VS Code with sidecar
+    korgex init             One-shot setup: install deps, compile extension
+    korgex dashboard        Start the web dashboard only
+    korgex status           Check if backend is running
+    korgex stop             Stop the running backend
+    korgex install-extension Install VS Code extension from .vsix
 """
 
 import os
@@ -21,7 +21,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PORT = 8090
-PID_FILE = Path(tempfile.gettempdir()) / "korgkode.pid"
+PID_FILE = Path(tempfile.gettempdir()) / "korgex.pid"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -92,30 +92,30 @@ def _start_background_server():
 
 def cmd_default():
     """Default: start backend + open VS Code with the sidecar."""
-    _log("KorgKode — starting backend...")
+    _log("Korgex — starting backend...")
     _start_background_server()
 
     code = _find_vscode()
-    ext_path = _resolve("korgkode-vscode")
+    ext_path = _resolve("korgex-vscode")
 
     _log(f"Opening VS Code at {ext_path}...")
     subprocess.Popen([code, str(ext_path)])
 
     print()
     print(f"  ┌─────────────────────────────────────────────┐")
-    print(f"  │  KorgKode is live                           │")
+    print(f"  │  Korgex is live                           │")
     print(f"  │                                             │")
     print(f"  │  Dashboard  → http://localhost:{DASHBOARD_PORT:<4}           │")
     print(f"  │  VS Code    → Press F5 in the new window    │")
-    print(f"  │  Commands   → Cmd+Shift+P → 'KorgKode:'     │")
+    print(f"  │  Commands   → Cmd+Shift+P → 'Korgex:'     │")
     print(f"  │                                             │")
-    print(f"  │  korgkode stop   to shut down               │")
+    print(f"  │  korgex stop   to shut down               │")
     print(f"  └─────────────────────────────────────────────┘")
 
 
 def cmd_init():
     """One-shot setup: install Python deps, compile the extension."""
-    _log("KorgKode init — setting up...")
+    _log("Korgex init — setting up...")
 
     # Python deps
     _log("Installing Python dependencies (fastapi, uvicorn)...")
@@ -129,7 +129,7 @@ def cmd_init():
     )
 
     # VS Code extension
-    ext_path = _resolve("korgkode-vscode")
+    ext_path = _resolve("korgex-vscode")
     _log("Installing Node dependencies...")
     subprocess.run(["npm", "install"], cwd=str(ext_path), capture_output=True)
 
@@ -145,7 +145,7 @@ def cmd_init():
         sys.exit(1)
 
     print()
-    _log("Ready. Run `korgkode` to launch.")
+    _log("Ready. Run `korgex` to launch.")
 
 
 def cmd_dashboard():
@@ -159,17 +159,17 @@ def cmd_status():
     """Check if the backend is running."""
     if _is_running():
         pid = PID_FILE.read_text().strip()
-        print(f"  KorgKode is running (PID {pid})")
+        print(f"  Korgex is running (PID {pid})")
         print(f"  Dashboard: http://localhost:{DASHBOARD_PORT}")
     else:
-        print("  KorgKode is not running.")
-        print(f"  Run `korgkode` to start.")
+        print("  Korgex is not running.")
+        print(f"  Run `korgex` to start.")
 
 
 def cmd_stop():
     """Stop the running backend."""
     if not _is_running():
-        print("  KorgKode is not running.")
+        print("  Korgex is not running.")
         return
 
     pid = int(PID_FILE.read_text().strip())
@@ -183,17 +183,17 @@ def cmd_stop():
         except ProcessLookupError:
             pass
         PID_FILE.unlink(missing_ok=True)
-        _log(f"KorgKode stopped (PID {pid})")
+        _log(f"Korgex stopped (PID {pid})")
     except ProcessLookupError:
         PID_FILE.unlink(missing_ok=True)
-        _log("KorgKode was already stopped.")
+        _log("Korgex was already stopped.")
 
 
 def cmd_install_extension():
     """Install the .vsix into VS Code."""
-    vsix = _resolve("korgkode-vscode") / "korgkode-sidecar.vsix"
+    vsix = _resolve("korgex-vscode") / "korgex-sidecar.vsix"
     if not vsix.exists():
-        _log("No .vsix found. Run `korgkode init` first to compile.")
+        _log("No .vsix found. Run `korgex init` first to compile.")
         return
 
     code = _find_vscode()
@@ -210,26 +210,112 @@ def cmd_install_extension():
 
 # ── Entry Point ──────────────────────────────────────────────────────────
 
+import argparse
+
+# Map subcommand name → handler. Existing bodies untouched.
+SUBCOMMANDS = {
+    "serve":             cmd_default,             # default behavior: dashboard + VS Code
+    "dashboard":         cmd_dashboard,           # dashboard only
+    "init":              cmd_init,
+    "status":            cmd_status,
+    "stop":              cmd_stop,
+    "install-extension": cmd_install_extension,
+}
+
+
+def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
+                   mode: str = None, mcp: bool = False, quiet: bool = False) -> int:
+    """Spawn the agent loop on a naked prompt. Returns a shell exit code."""
+    try:
+        from src.agent import KorgexAgent
+    except Exception as e:
+        print(f"korgex: failed to import agent: {e}", file=sys.stderr)
+        return 2
+
+    # interactive=None lets the agent auto-detect TTY; quiet forces off
+    interactive = False if quiet else None
+
+    try:
+        agent = KorgexAgent(model=model, mode=mode,
+                              interactive=interactive, load_mcp=mcp)
+        result = agent.run_task(prompt)
+    except RuntimeError as e:
+        print(f"korgex: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"korgex: agent crashed: {type(e).__name__}: {e}", file=sys.stderr)
+        return 2
+
+    text = (result or {}).get("result", "")
+    if text and quiet:
+        # In quiet mode the streamer didn't print; emit the final text now
+        print(text)
+    return 0 if (result or {}).get("success", False) else 1
+
+
+_DESCRIPTION = ("Korgex — autonomous coding agent. "
+                "Pass a naked prompt to run the agent, or use a subcommand.")
+
+_EPILOG = ("Examples:\n"
+           "  korgex \"fix the auth bug\"     # run the agent on a task\n"
+           "  korgex serve                    # start dashboard + open VS Code\n"
+           "  korgex dashboard                # start dashboard only\n"
+           "  korgex init                     # install deps + compile extension\n"
+           "  korgex status                   # show backend status\n"
+           "  korgex stop                     # stop background backend\n")
+
+
+def _build_subcommand_parser():
+    p = argparse.ArgumentParser(prog="korgex", description=_DESCRIPTION, epilog=_EPILOG,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="command", metavar="SUBCOMMAND")
+    for name, fn in SUBCOMMANDS.items():
+        sub.add_parser(name, help=(fn.__doc__ or "").strip().split("\n")[0])
+    return p
+
+
+def _build_prompt_parser():
+    p = argparse.ArgumentParser(prog="korgex", description=_DESCRIPTION, epilog=_EPILOG,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--model", help="Override model (e.g. claude-sonnet-4-6, gpt-4o)")
+    p.add_argument("--mode",
+                   choices=["plan", "execute", "explore", "review", "debug", "research"],
+                   help="Mode-based model selection (e.g. plan → Opus, execute → Sonnet)")
+    p.add_argument("--mcp", action="store_true",
+                   help="Load MCP servers from mcp.json at startup")
+    p.add_argument("--quiet", "-q", action="store_true",
+                   help="Disable streaming TUI; print only the final result")
+    p.add_argument("--resume", action="store_true", help="Resume the last session")
+    p.add_argument("prompt_words", nargs="*", help="Task description for the agent")
+    return p
+
+
 def main():
-    cmds = {
-        "init": cmd_init,
-        "dashboard": cmd_dashboard,
-        "status": cmd_status,
-        "stop": cmd_stop,
-        "install-extension": cmd_install_extension,
-    }
+    argv = sys.argv[1:]
 
-    if len(sys.argv) > 1:
-        cmd = cmds.get(sys.argv[1])
-        if cmd:
-            cmd()
-            return
-        print(f"Unknown subcommand: {sys.argv[1]}")
-        print(f"Available: {' | '.join(['(default)'] + list(cmds.keys()))}")
-        sys.exit(1)
+    # Decide which parser to use up-front:
+    #   - any token equal to a known subcommand → subcommand parser
+    #   - just --help / -h → subcommand parser (it has the richer help)
+    #   - otherwise → prompt parser
+    is_subcommand = any(tok in SUBCOMMANDS for tok in argv)
+    is_help_only = argv in ([], ["-h"], ["--help"])
 
-    cmd_default()
+    if is_subcommand or is_help_only:
+        args = _build_subcommand_parser().parse_args(argv)
+        if not args.command:
+            _build_subcommand_parser().print_help()
+            return 0
+        SUBCOMMANDS[args.command]()
+        return 0
+
+    args = _build_prompt_parser().parse_args(argv)
+    if not args.prompt_words:
+        _build_subcommand_parser().print_help()
+        return 0
+    return run_agent_shim(" ".join(args.prompt_words),
+                          model=args.model, resume=args.resume,
+                          mode=args.mode, mcp=args.mcp, quiet=args.quiet)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

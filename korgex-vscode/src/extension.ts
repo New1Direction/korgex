@@ -5,16 +5,16 @@ import * as http from 'http';
 type Protocol = typeof http | typeof https;
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('[KorgKode] Sidecar activated.');
+    console.log('[Korgex] Sidecar activated.');
 
     // ── Command 1: Refactor Current File ────────────────────────────────
     const refactorCmd = vscode.commands.registerCommand(
-        'korgkode.refactorFile',
+        'korgex.refactorFile',
         async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showErrorMessage(
-                    'KorgKode: No active file to refactor.'
+                    'Korgex: No active file to refactor.'
                 );
                 return;
             }
@@ -24,7 +24,7 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.withProgress(
                 {
                     location: vscode.ProgressLocation.Notification,
-                    title: `KorgKode analyzing ${filePath}...`,
+                    title: `Korgex analyzing ${filePath}...`,
                     cancellable: false,
                 },
                 async (_progress) => {
@@ -33,11 +33,11 @@ export function activate(context: vscode.ExtensionContext) {
                     });
                     if (result.success) {
                         vscode.window.showInformationMessage(
-                            'KorgKode: Refactoring complete. Check the diff.'
+                            'Korgex: Refactoring complete. Check the diff.'
                         );
                     } else {
                         vscode.window.showErrorMessage(
-                            `KorgKode: Refactoring failed — ${result.error}`
+                            `Korgex: Refactoring failed — ${result.error}`
                         );
                     }
                 }
@@ -47,12 +47,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Command 2: TDD Healer ───────────────────────────────────────────
     const healCmd = vscode.commands.registerCommand(
-        'korgkode.healTests',
+        'korgex.healTests',
         async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showErrorMessage(
-                    'KorgKode: No active file.'
+                    'Korgex: No active file.'
                 );
                 return;
             }
@@ -64,7 +64,7 @@ export function activate(context: vscode.ExtensionContext) {
             if (!testCommand) return;
 
             vscode.window.showInformationMessage(
-                `KorgKode: Booting TDD Healer for ${testCommand}...`
+                `Korgex: Booting TDD Healer for ${testCommand}...`
             );
 
             const result = await postToBackend('/api/swarm/heal', {
@@ -73,11 +73,11 @@ export function activate(context: vscode.ExtensionContext) {
             });
             if (result.success) {
                 vscode.window.showInformationMessage(
-                    'KorgKode: Tests healed successfully.'
+                    'Korgex: Tests healed successfully.'
                 );
             } else {
                 vscode.window.showErrorMessage(
-                    `KorgKode: Healing failed — ${result.error}`
+                    `Korgex: Healing failed — ${result.error}`
                 );
             }
         }
@@ -85,7 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Command 3: Profile Test Suite ───────────────────────────────────
     const profileCmd = vscode.commands.registerCommand(
-        'korgkode.profileTests',
+        'korgex.profileTests',
         async () => {
             const testCommand = await vscode.window.showInputBox({
                 prompt:
@@ -96,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.withProgress(
                 {
                     location: vscode.ProgressLocation.Notification,
-                    title: 'KorgKode profiling...',
+                    title: 'Korgex profiling...',
                     cancellable: false,
                 },
                 async (_progress) => {
@@ -108,11 +108,11 @@ export function activate(context: vscode.ExtensionContext) {
                     );
                     if (result.success) {
                         vscode.window.showInformationMessage(
-                            'KorgKode: Profiling complete. See Output panel for details.'
+                            'Korgex: Profiling complete. See Output panel for details.'
                         );
                     } else {
                         vscode.window.showErrorMessage(
-                            `KorgKode: Profiling failed — ${result.error}`
+                            `Korgex: Profiling failed — ${result.error}`
                         );
                     }
                 }
@@ -122,15 +122,15 @@ export function activate(context: vscode.ExtensionContext) {
 
     // ── Command 4: Open Swarm Dashboard ─────────────────────────────────
     const dashboardCmd = vscode.commands.registerCommand(
-        'korgkode.openDashboard',
+        'korgex.openDashboard',
         async () => {
-            const config = vscode.workspace.getConfiguration('korgkode');
+            const config = vscode.workspace.getConfiguration('korgex');
             const baseUrl =
                 config.get<string>('backendUrl') || 'http://localhost:8000';
             const dashboardUrl = `${baseUrl}/dashboard`;
             vscode.env.openExternal(vscode.Uri.parse(dashboardUrl));
             vscode.window.showInformationMessage(
-                `KorgKode: Dashboard opened at ${dashboardUrl}`
+                `Korgex: Dashboard opened at ${dashboardUrl}`
             );
         }
     );
@@ -155,7 +155,7 @@ function postToBackend(
     endpoint: string,
     payload: Record<string, unknown>
 ): Promise<BackendResponse> {
-    const config = vscode.workspace.getConfiguration('korgkode');
+    const config = vscode.workspace.getConfiguration('korgex');
     const baseUrl: string =
         config.get<string>('backendUrl') || 'http://localhost:8000';
 
@@ -204,5 +204,5 @@ function postToBackend(
 }
 
 export function deactivate() {
-    console.log('[KorgKode] Sidecar deactivated.');
+    console.log('[Korgex] Sidecar deactivated.');
 }

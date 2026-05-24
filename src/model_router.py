@@ -1,5 +1,5 @@
 """
-KorgKode Multi-Model Router — Opus-for-plan, Sonnet-for-execute routing.
+Korgex Multi-Model Router — Opus-for-plan, Sonnet-for-execute routing.
 
 Architecture:
   [Mode State Machine] ──▶ [ModelRouter] ──▶ [API Client]

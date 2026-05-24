@@ -1,5 +1,5 @@
 """
-KorgKode Strict Tool Result Pairing — cryptographic-like binding between
+Korgex Strict Tool Result Pairing — cryptographic-like binding between
 tool_use_id and environment tool_result.
 
 Prevents the single most dangerous failure mode in autonomous agents:

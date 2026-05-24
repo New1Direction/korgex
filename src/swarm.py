@@ -1,5 +1,5 @@
 """
-KorgKode Multi-Agent Swarm — Parallel subagent delegation engine.
+Korgex Multi-Agent Swarm — Parallel subagent delegation engine.
 
 Spins up specialized agents in their own sandboxes (Docker/Modal),
 runs them concurrently, and aggregates results. Each subagent gets

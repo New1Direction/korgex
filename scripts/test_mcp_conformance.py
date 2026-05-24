@@ -1,8 +1,8 @@
 """
-MCP Conformance Test: Connect KorgKode's MCP client to a real server,
+MCP Conformance Test: Connect Korgex's MCP client to a real server,
 discover its tools, and execute a tool call.
 
-This is the proof that KorgKode's MCP architecture works outside 
+This is the proof that Korgex's MCP architecture works outside 
 Anthropic's walled garden — connecting to a standard, open-source MCP server.
 """
 
@@ -12,8 +12,8 @@ import subprocess
 import sys
 import time
 
-# Add KorgKode to path
-sys.path.insert(0, os.path.expanduser("~/KorgKode"))
+# Add Korgex to path
+sys.path.insert(0, os.path.expanduser("~/Korgex"))
 
 from src.mcp_client import MCPServerConfig, get_manager, MCPTool, make_request
 
@@ -72,11 +72,11 @@ def test_filesystem_mcp():
     sys.stdout.flush()
     
     # Write a test file
-    with open("/tmp/korgkode_mcp_test.txt", "w") as f:
-        f.write("KorgKode MCP integration verified: " + time.ctime())
+    with open("/tmp/korgex_mcp_test.txt", "w") as f:
+        f.write("Korgex MCP integration verified: " + time.ctime())
     
     result = manager.call_tool("read_file", {
-        "path": "/tmp/korgkode_mcp_test.txt"
+        "path": "/tmp/korgex_mcp_test.txt"
     })
     
     if "error" in result:
@@ -94,7 +94,7 @@ def test_filesystem_mcp():
     
     result = manager.call_tool("search", {
         "path": "/tmp",
-        "pattern": "korgkode_mcp_test*"
+        "pattern": "korgex_mcp_test*"
     })
     
     if "error" in result:
@@ -107,14 +107,14 @@ def test_filesystem_mcp():
     print(f"       Found: {search_text[:80]}")
     
     # Cleanup
-    os.unlink("/tmp/korgkode_mcp_test.txt")
+    os.unlink("/tmp/korgex_mcp_test.txt")
     
     print()
     print("=" * 60)
     print("MCP CONFORMANCE: PASSED")
     print("=" * 60)
     print()
-    print("KorgKode successfully:")
+    print("Korgex successfully:")
     print("  - Spawned a standard MCP server as a subprocess")
     print("  - Performed the JSON-RPC 2.0 initialize handshake")
     print("  - Discovered all server tools via tools/list")

@@ -1,5 +1,5 @@
 """
-KorgKode Web Dashboard — Steering & Approval UI.
+Korgex Web Dashboard — Steering & Approval UI.
 
 FastAPI server + HTML interface for:
 - Viewing agent state and plan steps
@@ -44,7 +44,7 @@ def create_app() -> Optional[object]:
     if not FASTAPI_AVAILABLE:
         return None
     
-    app = FastAPI(title="KorgKode Dashboard", version="1.0.0")
+    app = FastAPI(title="Korgex Dashboard", version="1.0.0")
     
     # ─── Routes ────────────────────────────────────────────────────────
     
@@ -93,7 +93,90 @@ def create_app() -> Optional[object]:
                 await websocket.send_json(_dashboard_state["logs"][-50:])
         except:
             pass
-    
+
+    # ── Health ───────────────────────────────────────────────────────────
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok", "service": "korgex-dashboard"}
+
+    # ── Swarm endpoints (VS Code extension entry points) ─────────────────
+    # Sync defs → FastAPI runs them in a thread pool, so the agent's blocking
+    # API calls don't starve the event loop.
+
+    def _run_agent_for(prompt: str) -> dict:
+        """Spin a one-shot agent. Returns {success, output} or {success: False, error}."""
+        try:
+            from src.agent import KorgexAgent
+        except Exception as e:
+            return {"success": False, "error": f"agent import failed: {e}"}
+        try:
+            agent = KorgexAgent(interactive=False)
+            result = agent.run_task(prompt)
+            return {
+                "success": bool(result.get("success")),
+                "output": result.get("result", ""),
+                "iterations": result.get("iterations", 0),
+            }
+        except RuntimeError as e:
+            return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": f"{type(e).__name__}: {e}"}
+
+    @app.post("/api/swarm/refactor")
+    def swarm_refactor(payload: dict):
+        filepath = (payload or {}).get("filepath", "").strip()
+        if not filepath:
+            return JSONResponse({"success": False, "error": "filepath required"}, status_code=400)
+        prompt = (f"Refactor the file at {filepath} for clarity, idiomatic style, "
+                  f"and maintainability. Read it first, then apply targeted Edit "
+                  f"changes. Verify by reading again after each change.")
+        result = _run_agent_for(prompt)
+        result["filepath"] = filepath
+        return result
+
+    @app.post("/api/swarm/heal")
+    def swarm_heal(payload: dict):
+        payload = payload or {}
+        filepath = payload.get("filepath", "").strip()
+        command = payload.get("command", "").strip()
+        if not filepath or not command:
+            return JSONResponse(
+                {"success": False, "error": "filepath and command required"},
+                status_code=400,
+            )
+        prompt = (f"The test command `{command}` is failing for file {filepath}. "
+                  f"Run the command, parse the failure, edit {filepath} to fix it, "
+                  f"and rerun until tests pass. Stop after 5 attempts.")
+        result = _run_agent_for(prompt)
+        result["filepath"] = filepath
+        result["command"] = command
+        return result
+
+    @app.post("/api/swarm/profile")
+    def swarm_profile(payload: dict):
+        command = (payload or {}).get("command", "").strip()
+        if not command:
+            return JSONResponse(
+                {"success": False, "error": "command required"}, status_code=400,
+            )
+        try:
+            from src.sandbox import SandboxManager
+            from src.profiler import PerformanceProfiler
+        except Exception as e:
+            return {"success": False, "error": f"profiler unavailable: {e}"}
+        try:
+            sb = SandboxManager.get()  # auto-selects modal/docker/direct
+            profiler = PerformanceProfiler(sb)
+            result = profiler.run_profile(command)
+            return {
+                "success": bool(result.get("success")),
+                "output": result,
+                "command": command,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"{type(e).__name__}: {e}"}
+
     return app
 
 
@@ -132,13 +215,13 @@ def _run_task_background(description: str):
 
 
 def start_dashboard(host: str = "0.0.0.0", port: int = 8090):
-    """Start the KorgKode dashboard server."""
+    """Start the Korgex dashboard server."""
     app = create_app()
     if app is None:
         print("Install FastAPI: pip install fastapi uvicorn")
         return
     
-    print(f"🌐 KorgKode Dashboard: http://{host}:{port}")
+    print(f"🌐 Korgex Dashboard: http://{host}:{port}")
     print(f"📋 Approve plans: http://{host}:{port}/api/approve-plan")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
@@ -148,7 +231,7 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KorgKode Dashboard</title>
+    <title>Korgex Dashboard</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -179,7 +262,7 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
 </head>
 <body>
     <div class="sidebar">
-        <h2 style="margin-bottom: 24px; font-size: 20px;">⚡ KorgKode</h2>
+        <h2 style="margin-bottom: 24px; font-size: 20px;">⚡ Korgex</h2>
         <div style="margin-bottom: 24px;">
             <div style="font-size: 12px; color: #8b949e; margin-bottom: 4px;">Status</div>
             <div><span class="badge active">● Active</span></div>
@@ -288,7 +371,7 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
 from src.tool_base import register_tool, ToolParam
 
 
-@register_tool("start_dashboard", "Starts the KorgKode web steering dashboard.", [
+@register_tool("start_dashboard", "Starts the Korgex web steering dashboard.", [
     ToolParam("port", "STRING", "Port to run the dashboard on (default: 8090)."),
 ])
 def tool_start_dashboard(port: str = "8090", context: dict = None):

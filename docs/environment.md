@@ -1,10 +1,10 @@
 # Environment Setup
 
-KorgKode runs each task inside a secure sandbox. This lets it clone your repository, install dependencies, run tests, and verify changes without affecting your local environment.
+Korgex runs each task inside a secure sandbox. This lets it clone your repository, install dependencies, run tests, and verify changes without affecting your local environment.
 
 ## Sandbox Requirements
 
-KorgKode's sandbox runs Ubuntu Linux and includes the following preinstalled tools:
+Korgex's sandbox runs Ubuntu Linux and includes the following preinstalled tools:
 
 ```
 -------- Python --------
@@ -38,7 +38,7 @@ git, curl, jq, yq, tmux, ripgrep
 
 ## Providing a Setup Script
 
-For projects with complex dependencies, provide a setup script that KorgKode runs before starting work:
+For projects with complex dependencies, provide a setup script that Korgex runs before starting work:
 
 ```bash
 # Example setup.sh
@@ -49,7 +49,7 @@ python -m pytest tests/ -x
 
 ## Environment Snapshots
 
-After a successful setup, KorgKode can snapshot the environment for use in future tasks. This is especially useful for projects with long setup times.
+After a successful setup, Korgex can snapshot the environment for use in future tasks. This is especially useful for projects with long setup times.
 
 ## Validation Tips
 

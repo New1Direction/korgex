@@ -1,5 +1,5 @@
 """
-KorgKode Dependency Graph & Impact Analyzer — Safe downstream edits.
+Korgex Dependency Graph & Impact Analyzer — Safe downstream edits.
 
 Performs AST-based static analysis of the codebase to track import graphs
 and trace references to modified classes, functions, or variable symbols.
