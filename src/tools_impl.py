@@ -714,6 +714,43 @@ def tool_sandbox_status(context: dict = None):
     return {"mode": "none", "status": "not initialized"}
 
 
+# ─── Memory System (Claude Code-inspired) ─────────────────────────────
+
+@register_tool("memory_save", "Save a persistent memory about the user, project, or workflow. Immutable — use memory_delete first if updating.", [
+    ToolParam("name", "STRING", "Short kebab-case slug (e.g. 'prefers-bun-over-npm').", required=True),
+    ToolParam("description", "STRING", "One-line summary for relevance matching.", required=True),
+    ToolParam("mem_type", "STRING", "Type: user (preferences), feedback (corrections), project (context), or reference (external pointers).", required=True),
+    ToolParam("body", "STRING", "Memory content. For feedback/project: include rule/fact, Why:, and How to apply:.", required=True),
+])
+def tool_memory_save(name: str, description: str, mem_type: str, body: str, context: dict = None):
+    from src.memory import save_memory
+    return save_memory(name, description, mem_type, body)
+
+
+@register_tool("memory_delete", "Delete a memory by its slug name. Use before recreating (immutable design).", [
+    ToolParam("name", "STRING", "The memory slug name to delete.", required=True),
+])
+def tool_memory_delete(name: str, context: dict = None):
+    from src.memory import delete_memory
+    return delete_memory(name)
+
+
+@register_tool("memory_search", "Search memory index for relevant memories.", [
+    ToolParam("query", "STRING", "Search terms to match against memory descriptions.", required=True),
+])
+def tool_memory_search(query: str, context: dict = None):
+    from src.memory import search_memory
+    return {"results": search_memory(query)}
+
+
+@register_tool("memory_list", "List all saved memories, optionally filtered by type.", [
+    ToolParam("mem_type", "STRING", "Optional filter: user, feedback, project, or reference."),
+])
+def tool_memory_list(mem_type: str = None, context: dict = None):
+    from src.memory import list_memories
+    return {"memories": list_memories(mem_type)}
+
+
 def init(repo_root: str = None, sandbox_mode: str = None):
     """Initialize KorgKode tools with a repo root and optional sandbox."""
     global REPO_ROOT, SANDBOX
