@@ -16,9 +16,12 @@ from src.github_api import (
     create_pr, list_prs, get_pr_comments, reply_to_pr_comment,
     create_issue, label_issue, get_repo_info, init_from_cli
 )
+from src.swarm import AgentSwarm, SubTask
+from src.diff_engine import DiffEngine
 
 # Initialize sandbox and GitHub on import
 SANDBOX = None
+SWARM = AgentSwarm()
 init_from_cli()
 
 REPO_ROOT = None
@@ -421,14 +424,34 @@ def tool_start_live_preview_instructions(context: dict = None):
     }
 
 
-@register_tool("call_hello_world_agent", "Calls the Hello World Agency agent.", [
-    ToolParam("message", "STRING", "Message to send to the agent.", required=True),
+@register_tool("call_hello_world_agent", "Delegates a sub-task to a specialized agent in a parallel sandbox.", [
+    ToolParam("message", "STRING", "The task description for the sub-agent.", required=True),
 ])
 def tool_call_hello_world_agent(message: str, context: dict = None):
-    return {
-        "result": f"Hello World agent received: {message}",
-        "response": f"Echo: {message}",
-    }
+    """Now uses the real agent swarm for delegation."""
+    global SWARM
+    repo_root = context.get("repo_root") if context else os.getcwd()
+    
+    # Auto-detect agent type from the message
+    msg_lower = message.lower()
+    if any(w in msg_lower for w in ["test", "pytest", "unittest", "spec"]):
+        agent_type = "test"
+    elif any(w in msg_lower for w in ["security", "vuln", "cve", "audit"]):
+        agent_type = "security"
+    elif any(w in msg_lower for w in ["doc", "readme", "document"]):
+        agent_type = "docs"
+    elif any(w in msg_lower for w in ["refactor", "clean", "optimize"]):
+        agent_type = "refactor"
+    else:
+        agent_type = "test"  # default
+    
+    task = SubTask(agent_type, message, repo_root)
+    result = SWARM.run_concurrent([task])
+    
+    r = result[0] if result else None
+    if r and r.success:
+        return {"response": r.summary, "agent": r.agent_type, "duration": r.duration_seconds}
+    return {"response": "Sub-agent task completed", "result": str(r) if r else "no output"}
 
 
 @register_tool("done", "Subagent completion signal.", [
