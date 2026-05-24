@@ -13,12 +13,14 @@ Pipeline:
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
 from src.tool_abstraction import USER_TOOLS, route_tool_call
 # tools_impl must be imported so its @register_tool decorators populate the registry
 import src.tools_impl  # noqa: F401
+from src.korg_ledger import get_default_client as _korg
 
 
 SYSTEM_PROMPT = """You are Korgex, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks: solving bugs, implementing features, writing tests, and refactoring code.
@@ -367,10 +369,35 @@ class KorgexAgent:
         if session:
             session.start()
 
+        # ── korg ledger: root event ──────────────────────────────────────────
+        # Every korgex session starts with a user_prompt event at triggered_by=None.
+        # All subsequent events chain back here via triggered_by.
+        korg = _korg()
+        prompt_seq = korg.record_user_prompt(prompt)
+        # ────────────────────────────────────────────────────────────────────
+
         try:
             for i in range(max_iter):
+                # ── korg: time the LLM round-trip ──────────────────────────
+                _llm_t0 = time.monotonic()
                 response = self._call(client, messages, tools_payload)
+                _llm_ms = int((time.monotonic() - _llm_t0) * 1000)
+
                 tool_calls = self._extract_tool_calls(response)
+
+                # Emit one llm_inference event per completed round-trip.
+                # Parallel tool calls in this batch all use llm_seq as triggered_by
+                # (they are siblings, not a chain — see agent_event_spec.md §2).
+                llm_seq = korg.record_llm_call(
+                    model=self.model,
+                    prompt_tokens=getattr(getattr(response, "usage", None), "input_tokens", 0)
+                                  or getattr(getattr(response, "usage", None), "prompt_tokens", 0),
+                    completion_tokens=getattr(getattr(response, "usage", None), "output_tokens", 0)
+                                      or getattr(getattr(response, "usage", None), "completion_tokens", 0),
+                    duration_ms=_llm_ms,
+                    triggered_by=prompt_seq,
+                )
+                # ───────────────────────────────────────────────────────────
 
                 if not tool_calls:
                     text = self._extract_final_text(response)
@@ -385,10 +412,32 @@ class KorgexAgent:
                     if session:
                         # Show a transient spinner while the tool runs
                         with session.spinner(f"{call['name']}({_short_args(call['args'])})"):
+                            _t0 = time.monotonic()
                             tool_result = route_tool_call(call["name"], call["args"])
+                            _ms = int((time.monotonic() - _t0) * 1000)
                     else:
+                        _t0 = time.monotonic()
                         tool_result = route_tool_call(call["name"], call["args"])
+                        _ms = int((time.monotonic() - _t0) * 1000)
+
+                    # ── korg: one event per completed tool call ─────────────
+                    # All tool calls from the same LLM batch share triggered_by=llm_seq.
+                    # They are siblings in the causal tree, not chained to each other.
+                    _success = "error" not in tool_result if isinstance(tool_result, dict) else True
+                    korg.record_tool_call(
+                        tool_name=call["name"],
+                        args=call["args"],
+                        result=tool_result,
+                        success=_success,
+                        duration_ms=_ms,
+                        triggered_by=llm_seq,
+                    )
+                    # ───────────────────────────────────────────────────────
+
                     messages.append(self._tool_result_turn(call["id"], tool_result))
+
+                # Advance the LLM trigger for the next round-trip to the last llm_seq
+                prompt_seq = llm_seq
 
             return {
                 "success": False,
