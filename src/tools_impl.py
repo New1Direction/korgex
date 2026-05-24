@@ -796,6 +796,47 @@ def tool_tool_use_status(context: dict = None):
     return ctx.to_dict()
 
 
+# ─── MCP Server Management ─────────────────────────────────────────────
+
+@register_tool("mcp_connect", "Connect to an MCP (Model Context Protocol) server to discover and use its tools. Connect to GitHub, filesystem, databases, and more.", [
+    ToolParam("name", "STRING", "A name for this server connection.", required=True),
+    ToolParam("command", "STRING", "The command to run (e.g. 'npx', 'uvx', 'python').", required=True),
+    ToolParam("args", "ARRAY", "Command arguments (e.g. ['-y', '@modelcontextprotocol/server-github'])."),
+    ToolParam("env", "OBJECT", "Environment variables as key-value pairs."),
+])
+def tool_mcp_connect(name: str, command: str, args: list = None,
+                      env: dict = None, context: dict = None):
+    from src.mcp_client import MCPServerConfig, get_manager
+    config = MCPServerConfig(name=name, command=command,
+                             args=args or [], env=env or {})
+    manager = get_manager()
+    return manager.add_server(config)
+
+
+@register_tool("mcp_disconnect", "Disconnect from an MCP server and remove its tools.", [
+    ToolParam("name", "STRING", "Server name to disconnect.", required=True),
+])
+def tool_mcp_disconnect(name: str, context: dict = None):
+    from src.mcp_client import get_manager
+    manager = get_manager()
+    return manager.remove_server(name)
+
+
+@register_tool("mcp_list", "List all connected MCP servers and their available tools.", [])
+def tool_mcp_list(context: dict = None):
+    from src.mcp_client import get_manager
+    manager = get_manager()
+    servers = manager.list_servers()
+    tools = manager.get_all_tools()
+    return {
+        "servers": servers,
+        "total_tools": len(tools),
+        "tools": [{"name": t.name, "server": t.server_name,
+                    "description": t.description[:100]}
+                   for t in tools],
+    }
+
+
 def init(repo_root: str = None, sandbox_mode: str = None):
     """Initialize KorgKode tools with a repo root and optional sandbox."""
     global REPO_ROOT, SANDBOX

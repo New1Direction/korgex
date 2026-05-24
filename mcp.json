@@ -1,0 +1,25 @@
+{
+  "$schema": "https://spec.modelcontextprotocol.io/schema/2025-03-26/server.json",
+  "mcpServers": {
+    "example-filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/tmp"
+      ],
+      "description": "Full filesystem access — read, write, search, move files"
+    },
+    "example-github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub API — issues, PRs, repos, commits, files"
+    }
+  }
+}
