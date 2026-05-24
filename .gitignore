@@ -34,7 +34,6 @@ secrets*
 # Seluj
 .seluj/
 prompt.md
-AGENTS.md
 *.log
 node_modules/
 
