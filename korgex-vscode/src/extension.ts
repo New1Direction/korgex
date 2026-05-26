@@ -28,16 +28,25 @@ export function activate(context: vscode.ExtensionContext) {
                     cancellable: false,
                 },
                 async (_progress) => {
-                    const result = await postToBackend('/api/swarm/refactor', {
-                        filepath: filePath,
-                    });
-                    if (result.success) {
-                        vscode.window.showInformationMessage(
-                            'Korgex: Refactoring complete. Check the diff.'
+                    try {
+                        const result = await postToBackend(
+                            '/api/swarm/refactor',
+                            { filepath: filePath }
                         );
-                    } else {
+                        if (result.success) {
+                            vscode.window.showInformationMessage(
+                                'Korgex: Refactoring complete. Check the diff.'
+                            );
+                        } else {
+                            vscode.window.showErrorMessage(
+                                `Korgex: Refactoring failed — ${result.error}`
+                            );
+                        }
+                    } catch (err) {
+                        const msg =
+                            err instanceof Error ? err.message : String(err);
                         vscode.window.showErrorMessage(
-                            `Korgex: Refactoring failed — ${result.error}`
+                            `Korgex: Refactoring crashed — ${msg}`
                         );
                     }
                 }
@@ -100,19 +109,25 @@ export function activate(context: vscode.ExtensionContext) {
                     cancellable: false,
                 },
                 async (_progress) => {
-                    const result = await postToBackend(
-                        '/api/swarm/profile',
-                        {
-                            command: testCommand,
-                        }
-                    );
-                    if (result.success) {
-                        vscode.window.showInformationMessage(
-                            'Korgex: Profiling complete. See Output panel for details.'
+                    try {
+                        const result = await postToBackend(
+                            '/api/swarm/profile',
+                            { command: testCommand }
                         );
-                    } else {
+                        if (result.success) {
+                            vscode.window.showInformationMessage(
+                                'Korgex: Profiling complete. See Output panel for details.'
+                            );
+                        } else {
+                            vscode.window.showErrorMessage(
+                                `Korgex: Profiling failed — ${result.error}`
+                            );
+                        }
+                    } catch (err) {
+                        const msg =
+                            err instanceof Error ? err.message : String(err);
                         vscode.window.showErrorMessage(
-                            `Korgex: Profiling failed — ${result.error}`
+                            `Korgex: Profiling crashed — ${msg}`
                         );
                     }
                 }

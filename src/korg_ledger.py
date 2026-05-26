@@ -14,6 +14,31 @@ Design rules (see agent_event_spec.md in the korg repo):
       Parallel tool calls from the same LLM batch share triggered_by (they are siblings).
       Retry's triggered_by points at the failure event, not the original call.
 
+  §2a llm_inference parent rule. Round-N's llm_inference.triggered_by points at
+      round-(N-1)'s llm_inference seq_id — NOT at the most recent tool call from
+      round-(N-1). The cause of round-N's inference is the prior inference's
+      decision to keep going, not any specific tool result.
+
+      Naive "chain to the most recent emitted event" implementations look right
+      on inspection and pass topological checks, but break rewind semantics:
+      replaying from a tool_call seq backward skips the llm_inference that
+      actually produced the next round's prompt.
+
+      WRONG (naive chaining):
+        seq=1 user_prompt   triggered_by=None
+        seq=2 llm_inference triggered_by=1
+        seq=3 Edit          triggered_by=2
+        seq=4 llm_inference triggered_by=3   ← wrong: round 2's LLM was not
+                                                caused by the Edit, it was
+                                                caused by round 1's LLM
+                                                deciding to take another turn
+
+      CORRECT:
+        seq=4 llm_inference triggered_by=2   ← round-(N-1)'s llm_inference
+
+      Tool calls within a round are still siblings under that round's
+      llm_inference (rule §2): seq=3 Edit's triggered_by remains 2.
+
   §3  1 KB threshold applied uniformly. Hashing convention:
         - JSON field values: compact JSON → UTF-8 bytes → SHA-256
         - String values: UTF-8 bytes → SHA-256

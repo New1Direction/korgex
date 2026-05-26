@@ -10,7 +10,12 @@
     "Machine Learning",
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:korgex.refactorFile",
+    "onCommand:korgex.healTests",
+    "onCommand:korgex.profileTests",
+    "onCommand:korgex.openDashboard"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
