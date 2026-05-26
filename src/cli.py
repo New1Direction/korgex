@@ -93,15 +93,16 @@ def _start_background_server():
         env=env,
     )
 
-    PID_FILE.write_text(str(proc.pid))
-    _log(f"Backend started (PID {proc.pid}) on http://localhost:{DASHBOARD_PORT}")
-
-    # Wait briefly to confirm it doesn't crash immediately
+    # Confirm the process actually stayed up before recording its PID. The
+    # previous order wrote PID first and unlinked on death, leaving a
+    # short race where `korgex status` could report "running" for a dead pid.
     time.sleep(1.5)
     if proc.poll() is not None:
         _log("Backend exited immediately — check dependencies (fastapi, uvicorn)")
-        PID_FILE.unlink(missing_ok=True)
         sys.exit(1)
+
+    PID_FILE.write_text(str(proc.pid))
+    _log(f"Backend started (PID {proc.pid}) on http://localhost:{DASHBOARD_PORT}")
 
 
 # ── Subcommands ──────────────────────────────────────────────────────────

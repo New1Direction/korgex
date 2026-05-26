@@ -29,8 +29,13 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+# Cap MCP server stderr capture so a chatty server can't grow memory unbounded.
+# 1000 lines is plenty for post-mortem diagnostics; oldest are dropped first.
+_STDERR_BUFFER_MAX = 1000
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -120,7 +125,7 @@ class MCPClient:
         self._pending_requests: dict[str, threading.Event] = {}
         self._pending_results: dict[str, dict] = {}
         self._reader_thread: Optional[threading.Thread] = None
-        self._stderr_buffer: list[str] = []
+        self._stderr_buffer: deque[str] = deque(maxlen=_STDERR_BUFFER_MAX)
     
     # ── Connection ───────────────────────────────────────────────────
     
@@ -311,7 +316,13 @@ class MCPClient:
                 self._stderr_buffer.append(line.rstrip())
     
     def start_response_reader(self):
-        """Start reading stdout responses (run in a thread)."""
+        """Start reading stdout responses (run in a thread).
+
+        Assumes one complete JSON-RPC message per line — the MCP stdio
+        transport spec mandates this, but a non-compliant server emitting a
+        message larger than Python's stdout line buffer would split.
+        We tolerate malformed lines by skipping them (JSONDecodeError below).
+        """
         if self._process and self._process.stdout:
             for line in self._process.stdout:
                 line = line.strip()
@@ -333,7 +344,7 @@ class MCPClient:
         return self._connected and self._process is not None and self._process.poll() is None
     
     def get_stderr_log(self) -> list[str]:
-        return self._stderr_buffer.copy()
+        return list(self._stderr_buffer)
     
     def get_stats(self) -> dict:
         return {

@@ -99,8 +99,18 @@ class DockerSandbox(SandboxBase):
     def cleanup(self):
         """Stop and remove the sandbox container."""
         if self.container_id:
-            subprocess.run(["docker", "rm", "-f", self.container_id],
-                         capture_output=True, timeout=10)
+            result = subprocess.run(
+                ["docker", "rm", "-f", self.container_id],
+                capture_output=True, timeout=10, text=True,
+            )
+            if result.returncode != 0:
+                # Don't raise — cleanup is best-effort — but surface it so an
+                # orphaned container doesn't pile up invisibly across runs.
+                import sys
+                sys.stderr.write(
+                    f"warning: docker rm -f {self.container_id} failed "
+                    f"(exit {result.returncode}): {result.stderr.strip()}\n"
+                )
             self.container_id = None
 
 

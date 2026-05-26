@@ -4,6 +4,38 @@ import * as http from 'http';
 
 type Protocol = typeof http | typeof https;
 
+/**
+ * Return the editor's file path if it's an on-disk file inside the current
+ * workspace, otherwise show an error and return null. Stops untitled buffers
+ * and symlink-escapes from being shipped to the backend.
+ */
+function resolveWorkspaceFile(editor: vscode.TextEditor): string | null {
+    if (editor.document.isUntitled) {
+        vscode.window.showErrorMessage(
+            'Korgex: please save the file before running this command.'
+        );
+        return null;
+    }
+    const filePath = editor.document.fileName;
+    const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+    if (!folder) {
+        vscode.window.showErrorMessage(
+            'Korgex: file is outside the current workspace.'
+        );
+        return null;
+    }
+    return filePath;
+}
+
+/**
+ * Strip control characters / newlines from a user-typed shell command before
+ * sending it to the backend. Backend posture about shell=True varies; this is
+ * a defense-in-depth measure, not the primary safeguard.
+ */
+function sanitizeCommand(cmd: string): string {
+    return cmd.replace(/[\x00-\x1f\x7f]/g, ' ').trim();
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.log('[Korgex] Sidecar activated.');
 
@@ -19,7 +51,8 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const filePath = editor.document.fileName;
+            const filePath = resolveWorkspaceFile(editor);
+            if (!filePath) return;
 
             vscode.window.withProgress(
                 {
@@ -66,10 +99,15 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            const testCommand = await vscode.window.showInputBox({
+            const filePath = resolveWorkspaceFile(editor);
+            if (!filePath) return;
+
+            const rawCommand = await vscode.window.showInputBox({
                 prompt:
                     'Test command to heal (e.g. pytest tests/ -x)',
             });
+            if (!rawCommand) return;
+            const testCommand = sanitizeCommand(rawCommand);
             if (!testCommand) return;
 
             vscode.window.showInformationMessage(
@@ -78,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
 
             try {
                 const result = await postToBackend('/api/swarm/heal', {
-                    filepath: editor.document.fileName,
+                    filepath: filePath,
                     command: testCommand,
                 });
                 if (result.success) {
@@ -103,10 +141,12 @@ export function activate(context: vscode.ExtensionContext) {
     const profileCmd = vscode.commands.registerCommand(
         'korgex.profileTests',
         async () => {
-            const testCommand = await vscode.window.showInputBox({
+            const rawCommand = await vscode.window.showInputBox({
                 prompt:
                     'Test command to profile (e.g. pytest tests/ -x)',
             });
+            if (!rawCommand) return;
+            const testCommand = sanitizeCommand(rawCommand);
             if (!testCommand) return;
 
             vscode.window.withProgress(
@@ -205,7 +245,7 @@ function postToBackend(
 
         const options: http.RequestOptions = {
             hostname: url.hostname,
-            port: url.port || (isHttps ? 443 : 80),
+            port: url.port ? Number(url.port) : (isHttps ? 443 : 80),
             path: url.pathname + url.search,
             method: 'POST',
             headers: {
@@ -234,6 +274,9 @@ function postToBackend(
 
         req.on('error', (err: Error) => reject(err));
         req.on('timeout', () => {
+            // Clear the timer before destroy() so it can't fire a second time
+            // against a half-torn-down request.
+            req.setTimeout(0);
             req.destroy();
             reject(new Error('Request timed out after 120s'));
         });

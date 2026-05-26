@@ -12,6 +12,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -116,8 +117,10 @@ def get_context() -> dict:
     }
 
 
+@lru_cache(maxsize=1)
 def _find_repo_root() -> Optional[str]:
-    """Find the git repo root from cwd."""
+    """Find the git repo root from cwd. Cached per process (cwd is stable
+    once the agent starts; cache invalidated only on process restart)."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
