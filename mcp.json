@@ -6,9 +6,9 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/tmp"
+        "${TMPDIR:-/tmp}"
       ],
-      "description": "Full filesystem access — read, write, search, move files"
+      "description": "Full filesystem access — read, write, search, move files. Scopes the server to $TMPDIR (or /tmp as a fallback) so the example is portable across OSes."
     },
     "example-github": {
       "command": "npx",
