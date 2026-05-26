@@ -45,6 +45,16 @@ def _find_vscode() -> str:
     return "code"  # fallback — let it fail with a clear message later
 
 
+def _run_or_die(cmd: list[str], *, step: str, cwd: str | None = None) -> None:
+    """Run a subprocess and exit with a clear error if it fails."""
+    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"    {step} failed (exit {result.returncode}):")
+        if result.stderr:
+            print(result.stderr.rstrip())
+        sys.exit(1)
+
+
 def _is_running() -> bool:
     if not PID_FILE.exists():
         return False
@@ -57,21 +67,27 @@ def _is_running() -> bool:
         return False
 
 
+_LAUNCHER_SRC = (
+    "import os, sys; "
+    "sys.path.insert(0, os.environ['KORGEX_REPO_ROOT']); "
+    "from src.dashboard import start_dashboard; "
+    "start_dashboard(port=int(os.environ['KORGEX_DASHBOARD_PORT']))"
+)
+
+
 def _start_background_server():
     """Launch the FastAPI dashboard in a subprocess."""
     if _is_running():
         _log(f"Backend already running (PID from {PID_FILE})")
         return
 
-    dashboard = _resolve("src/dashboard.py")
     env = os.environ.copy()
     env["PYTHONPATH"] = str(REPO_ROOT)
+    env["KORGEX_REPO_ROOT"] = str(REPO_ROOT)
+    env["KORGEX_DASHBOARD_PORT"] = str(DASHBOARD_PORT)
 
     proc = subprocess.Popen(
-        [sys.executable, "-c",
-         f"import sys; sys.path.insert(0, '{REPO_ROOT}'); "
-         f"from src.dashboard import start_dashboard; "
-         f"start_dashboard(port={DASHBOARD_PORT})"],
+        [sys.executable, "-c", _LAUNCHER_SRC],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=env,
@@ -119,19 +135,19 @@ def cmd_init():
 
     # Python deps
     _log("Installing Python dependencies (fastapi, uvicorn)...")
-    subprocess.run(
+    _run_or_die(
         [sys.executable, "-m", "pip", "install", "-e", str(REPO_ROOT)],
-        capture_output=True,
+        step="pip install -e .",
     )
-    subprocess.run(
+    _run_or_die(
         [sys.executable, "-m", "pip", "install", "fastapi", "uvicorn"],
-        capture_output=True,
+        step="pip install fastapi uvicorn",
     )
 
     # VS Code extension
     ext_path = _resolve("korgex-vscode")
     _log("Installing Node dependencies...")
-    subprocess.run(["npm", "install"], cwd=str(ext_path), capture_output=True)
+    _run_or_die(["npm", "install"], step="npm install", cwd=str(ext_path))
 
     _log("Compiling TypeScript → JavaScript...")
     result = subprocess.run(

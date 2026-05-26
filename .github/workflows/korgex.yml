@@ -45,8 +45,12 @@ jobs:
       
       - name: Install Korgex
         run: |
-          git clone https://github.com/New1Direction/Korgex.git /opt/korgex
+          # Pin to a release tag — never install whatever happens to be on the
+          # default branch when CI runs, since that's a supply-chain hole.
+          git clone --depth 1 --branch v0.2.2 https://github.com/New1Direction/Korgex.git /opt/korgex
           pip install -r /opt/korgex/requirements.txt
+          # Install the package itself so the `korgex` console script becomes available.
+          pip install /opt/korgex
       
       - name: Setup GitHub Token
         run: |
@@ -57,7 +61,7 @@ jobs:
       - name: Run Korgex on Issue
         if: github.event_name == 'issues' && github.event.label.name == 'korgex'
         run: |
-          /opt/korgex/korgex.sh \
+          korgex \
             "Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
              ${{ github.event.issue.body }}"
         env:
@@ -66,7 +70,7 @@ jobs:
       - name: Run Korgex on PR
         if: github.event_name == 'pull_request'
         run: |
-          /opt/korgex/korgex.sh \
+          korgex \
             "PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
              ${{ github.event.pull_request.body }}"
         env:
@@ -75,7 +79,7 @@ jobs:
       - name: Run Korgex on Comment
         if: contains(github.event.comment.body, '/korgex')
         run: |
-          /opt/korgex/korgex.sh \
+          korgex \
             "Address feedback: ${{ github.event.comment.body }}"
         env:
           KORGEX_SANDBOX: docker
@@ -85,7 +89,13 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const summary = fs.readFileSync('/tmp/korgex-summary.md', 'utf8').catch(() => 'Task completed by Korgex.');
+            // readFileSync is synchronous — wrap in try/catch instead of .catch().
+            let summary;
+            try {
+              summary = fs.readFileSync('/tmp/korgex-summary.md', 'utf8');
+            } catch {
+              summary = 'Task completed by Korgex.';
+            }
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
