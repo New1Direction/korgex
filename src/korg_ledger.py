@@ -78,6 +78,9 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# korg_dogfood.py validates events carry this; missing == rejected (spec §1.0).
+SCHEMA_VERSION = "1.0"
+
 # Any field value serialising to more than this many bytes is content-addressed.
 # Applied uniformly — no exceptions for "small" payloads. (spec §3)
 CONTENT_REF_THRESHOLD_BYTES = 1024
@@ -151,8 +154,25 @@ def _write_blob(data: bytes) -> tuple[str, int]:
     prefix = digest[:2]
     dest = _blob_dir() / prefix / digest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if not dest.exists():
-        dest.write_bytes(data)
+    if dest.exists():
+        return digest, len(data)
+
+    # Atomic write: tmp file → fsync → rename. A concurrent writer landing the
+    # same blob first is fine — os.replace is atomic and the content is
+    # content-addressed, so the result is identical either way.
+    tmp = dest.with_suffix(dest.suffix + f".tmp.{os.getpid()}")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, dest)
+    except Exception:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
     return digest, len(data)
 
 
@@ -331,6 +351,7 @@ class KorgLedgerClient:
         safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
 
         body: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
             "source_agent": self.source_agent,
             "tool_name": tool_name,
             "args": safe_args,
@@ -407,6 +428,7 @@ class KorgLedgerClient:
         safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
 
         body: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
             "source_agent": self.source_agent,
             "tool_name": tool_name,
             "args": safe_args,

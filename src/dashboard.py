@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from fastapi import FastAPI, HTTPException, WebSocket
+    from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
     from fastapi.responses import HTMLResponse, JSONResponse
     import uvicorn
     FASTAPI_AVAILABLE = True
@@ -91,7 +91,7 @@ def create_app() -> Optional[object]:
                 await websocket.receive_text()
                 # Send latest logs
                 await websocket.send_json(_dashboard_state["logs"][-50:])
-        except:
+        except WebSocketDisconnect:
             pass
 
     # ── Health ───────────────────────────────────────────────────────────
