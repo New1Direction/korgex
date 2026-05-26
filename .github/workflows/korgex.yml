@@ -57,7 +57,18 @@ jobs:
           echo "KORGEX_GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
           echo "KORGEX_API_KEY=${{ secrets.KORGEX_API_KEY }}" >> $GITHUB_ENV
           echo "KORGEX_MODEL=${{ secrets.KORGEX_MODEL }}" >> $GITHUB_ENV
-      
+
+      - name: Verify required secrets
+        # Fail fast — if the repo secret is missing, the job otherwise runs all
+        # the way through setup before korgex itself errors out on auth.
+        env:
+          KORGEX_API_KEY: ${{ secrets.KORGEX_API_KEY }}
+        run: |
+          if [ -z "$KORGEX_API_KEY" ]; then
+            echo "::error::KORGEX_API_KEY secret is not configured. Set it in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
       - name: Run Korgex on Issue
         if: github.event_name == 'issues' && github.event.label.name == 'korgex'
         run: |

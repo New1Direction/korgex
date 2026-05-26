@@ -188,7 +188,12 @@ def cmd_stop():
         print("  Korgex is not running.")
         return
 
-    pid = int(PID_FILE.read_text().strip())
+    try:
+        pid = int(PID_FILE.read_text().strip())
+    except (ValueError, OSError) as exc:
+        PID_FILE.unlink(missing_ok=True)
+        _log(f"PID file was corrupt ({exc}); cleared.")
+        sys.exit(1)
     try:
         os.kill(pid, signal.SIGTERM)
         # Give it a moment, then force-kill

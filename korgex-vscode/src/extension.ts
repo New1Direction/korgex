@@ -76,17 +76,24 @@ export function activate(context: vscode.ExtensionContext) {
                 `Korgex: Booting TDD Healer for ${testCommand}...`
             );
 
-            const result = await postToBackend('/api/swarm/heal', {
-                filepath: editor.document.fileName,
-                command: testCommand,
-            });
-            if (result.success) {
-                vscode.window.showInformationMessage(
-                    'Korgex: Tests healed successfully.'
-                );
-            } else {
+            try {
+                const result = await postToBackend('/api/swarm/heal', {
+                    filepath: editor.document.fileName,
+                    command: testCommand,
+                });
+                if (result.success) {
+                    vscode.window.showInformationMessage(
+                        'Korgex: Tests healed successfully.'
+                    );
+                } else {
+                    vscode.window.showErrorMessage(
+                        `Korgex: Healing failed — ${result.error}`
+                    );
+                }
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
                 vscode.window.showErrorMessage(
-                    `Korgex: Healing failed — ${result.error}`
+                    `Korgex: Healing crashed — ${msg}`
                 );
             }
         }
@@ -142,7 +149,22 @@ export function activate(context: vscode.ExtensionContext) {
             const config = vscode.workspace.getConfiguration('korgex');
             const baseUrl =
                 config.get<string>('backendUrl') || 'http://localhost:8090';
-            const dashboardUrl = `${baseUrl}/dashboard`;
+            let parsed: vscode.Uri;
+            try {
+                parsed = vscode.Uri.parse(baseUrl, true);
+            } catch {
+                vscode.window.showErrorMessage(
+                    `Korgex: invalid backendUrl in settings: ${baseUrl}`
+                );
+                return;
+            }
+            if (parsed.scheme !== 'http' && parsed.scheme !== 'https') {
+                vscode.window.showErrorMessage(
+                    `Korgex: refusing to open dashboard — backendUrl scheme '${parsed.scheme}' is not http/https.`
+                );
+                return;
+            }
+            const dashboardUrl = `${baseUrl.replace(/\/+$/, '')}/dashboard`;
             vscode.env.openExternal(vscode.Uri.parse(dashboardUrl));
             vscode.window.showInformationMessage(
                 `Korgex: Dashboard opened at ${dashboardUrl}`
@@ -178,7 +200,7 @@ function postToBackend(
     const isHttps = url.protocol === 'https:';
     const transport: Protocol = isHttps ? https : http;
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const body = JSON.stringify(payload);
 
         const options: http.RequestOptions = {
@@ -194,23 +216,26 @@ function postToBackend(
         };
 
         const req = transport.request(options, (res) => {
+            res.setEncoding('utf8');
             let data = '';
             res.on('data', (chunk: string) => (data += chunk));
             res.on('end', () => {
                 try {
                     resolve(JSON.parse(data) as BackendResponse);
                 } catch {
-                    resolve({ success: false, error: 'Invalid JSON response' });
+                    // Backend responded but with non-JSON — that's a transport
+                    // failure, not a "backend ran and said no." Reject so the
+                    // caller's try/catch can distinguish it from a clean
+                    // {success: false, error: ...} from the backend itself.
+                    reject(new Error('Invalid JSON response from backend'));
                 }
             });
         });
 
-        req.on('error', (err: Error) =>
-            resolve({ success: false, error: err.message })
-        );
+        req.on('error', (err: Error) => reject(err));
         req.on('timeout', () => {
             req.destroy();
-            resolve({ success: false, error: 'Request timed out' });
+            reject(new Error('Request timed out after 120s'));
         });
 
         req.write(body);
