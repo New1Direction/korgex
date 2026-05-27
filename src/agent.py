@@ -385,6 +385,12 @@ class KorgexAgent:
 
                 tool_calls = self._extract_tool_calls(response)
 
+                # Pull the assistant's text content (if any) so we can record
+                # it onto the llm_inference event. Tool-call-only rounds emit
+                # an empty string here, which becomes None on the bridge call
+                # and preserves the v0.3.1 shape for those events.
+                round_text = self._extract_final_text(response)
+
                 # Emit one llm_inference event per completed round-trip.
                 # Parallel tool calls in this batch all use llm_seq as triggered_by
                 # (they are siblings, not a chain — see agent_event_spec.md §2).
@@ -396,14 +402,16 @@ class KorgexAgent:
                                       or getattr(getattr(response, "usage", None), "completion_tokens", 0),
                     duration_ms=_llm_ms,
                     triggered_by=prompt_seq,
+                    assistant_text=round_text if round_text else None,
                 )
                 # ───────────────────────────────────────────────────────────
 
                 if not tool_calls:
-                    text = self._extract_final_text(response)
+                    # Reuse round_text we already extracted above; saves a
+                    # second pass over response.content.
                     return {
                         "success": True,
-                        "result": text or "(no output)",
+                        "result": round_text or "(no output)",
                         "iterations": i + 1,
                     }
 
