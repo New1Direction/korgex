@@ -43,7 +43,7 @@ $ korgex "add a /healthz endpoint that returns 200 with uptime"
 ### From GitHub Release (recommended today)
 
 ```bash
-pip install https://github.com/New1Direction/korgex/releases/download/v0.2.2/korgex-0.2.2-py3-none-any.whl
+pip install https://github.com/New1Direction/korgex/releases/download/v0.3.2/korgex-0.3.2-py3-none-any.whl
 ```
 
 ### From source
@@ -608,5 +608,7 @@ MIT — see [LICENSE](LICENSE).
 
 ## Related projects
 
-- **[korg](https://github.com/New1Direction/korg)** — deterministic cognitive runtime for AI agents (Rust). Separate project, same author. korgex does not depend on korg today; the two may integrate in the future.
+- **[korg](https://github.com/New1Direction/korg)** — deterministic cognitive runtime for AI agents (Rust). korgex v0.3.0+ records every tool call into a korg ledger via the `korg_bridge` PyO3 extension; the ledger is what korg-tui rewinds and korgchat builds on.
+- **[korgchat](https://github.com/New1Direction/korgchat)** — chat product built on the same ledger; runs in the same `.korg/journal.json` as a korgex agent run, so you can interleave chat and autonomous edits.
+- **[thumper](https://github.com/New1Direction/thumper)** — local execution + recovery substrate that runs under korgex; pre-warmed sandbox pools, persistent LSP, sub-second compile-error healing.
 - **[Model Context Protocol](https://modelcontextprotocol.io/)** — the open MCP standard korgex implements.
