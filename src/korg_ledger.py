@@ -479,16 +479,112 @@ class KorgLedgerClient:
 
 
 # ---------------------------------------------------------------------------
+# In-process bridge client (v0.3.0). Same public API as KorgLedgerClient but
+# writes via the PyO3 `korg_bridge` extension instead of HTTP. No background
+# thread, no queue, no server dependency — the write happens inline and the
+# returned seq_id is the journal's actual assignment.
+# ---------------------------------------------------------------------------
+
+
+class KorgBridgeClient:
+    """In-process equivalent of KorgLedgerClient.
+
+    Constructed when the `korg_bridge` Python extension is importable. Same
+    three public methods as the HTTP client so call sites can swap freely.
+    Each method is synchronous because the Rust side is microsecond-scale;
+    the background queue the HTTP client needed exists to hide HTTP latency,
+    which doesn't apply here.
+
+    The on-disk journal format is identical to what korg-server writes via
+    HTTP — a server can be launched against the same journal after the fact.
+    """
+
+    def __init__(
+        self,
+        journal_path: str | None = None,
+        source_agent: str | None = None,
+    ) -> None:
+        import korg_bridge  # local import: only required when this path is used
+
+        journal_path = journal_path or os.environ.get(
+            "KORG_JOURNAL_PATH", str(Path(".korg") / "journal.json")
+        )
+        self.source_agent = source_agent or _agent_identity()
+        self._bridge = korg_bridge.Bridge(journal_path)
+
+    def record_tool_call(
+        self,
+        tool_name: str,
+        args: Any,
+        result: Any,
+        success: bool,
+        duration_ms: int,
+        triggered_by: int | None = None,
+    ) -> int:
+        payload_refs: list[dict] = []
+        safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
+        safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
+        # payload_refs is currently a side channel — the bridge sets
+        # payload_refs=[] internally. If the agent emits a content-addressed
+        # blob, _maybe_content_ref has already written it to disk; the event
+        # itself just carries the {_ref: sha256:...} sentinel inline.
+        return self._bridge.record_tool_call(
+            source_agent=self.source_agent,
+            tool_name=tool_name,
+            args=safe_args,
+            result=safe_result,
+            success=success,
+            duration_ms=int(duration_ms),
+            triggered_by=triggered_by,
+        )
+
+    def record_user_prompt(self, prompt: str) -> int:
+        return self._bridge.record_user_prompt(prompt)
+
+    def record_llm_call(
+        self,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        duration_ms: int,
+        triggered_by: int | None,
+    ) -> int:
+        return self._bridge.record_llm_call(
+            model=model,
+            prompt_tokens=int(prompt_tokens),
+            completion_tokens=int(completion_tokens),
+            duration_ms=int(duration_ms),
+            triggered_by=triggered_by,
+            source_agent=self.source_agent,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Module-level default client (lazily initialised)
 # ---------------------------------------------------------------------------
 
-_default_client: KorgLedgerClient | None = None
+_default_client: "KorgLedgerClient | KorgBridgeClient | None" = None
 
 
-def get_default_client() -> KorgLedgerClient:
-    """Return the process-wide default KorgLedgerClient (created on first call)."""
+def get_default_client() -> "KorgLedgerClient | KorgBridgeClient":
+    """Return the process-wide default ledger client (created on first call).
+
+    Prefers the in-process Bridge when korg_bridge is importable; falls back
+    to the HTTP client otherwise. Set KORGEX_LEDGER=http to force the HTTP
+    path (useful when debugging the network protocol)."""
     global _default_client
     if _default_client is None:
-        _default_client = KorgLedgerClient()
+        force = os.environ.get("KORGEX_LEDGER", "auto").lower()
+        if force == "http":
+            _default_client = KorgLedgerClient()
+        elif force == "bridge":
+            _default_client = KorgBridgeClient()
+        else:
+            try:
+                _default_client = KorgBridgeClient()
+                logger.info("[korg] using in-process bridge for ledger writes")
+            except ImportError:
+                _default_client = KorgLedgerClient()
+                logger.info("[korg] korg_bridge not installed; falling back to HTTP ledger client")
     return _default_client
 
