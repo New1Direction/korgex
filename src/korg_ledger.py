@@ -524,10 +524,11 @@ class KorgBridgeClient:
         payload_refs: list[dict] = []
         safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
         safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
-        # payload_refs is currently a side channel — the bridge sets
-        # payload_refs=[] internally. If the agent emits a content-addressed
-        # blob, _maybe_content_ref has already written it to disk; the event
-        # itself just carries the {_ref: sha256:...} sentinel inline.
+        # v0.3.1: payload_refs flow-through. _maybe_content_ref has already
+        # written any large blob bytes to .korg/blobs/ and populated this
+        # list with ContentRef dicts ({sha256, size_bytes, label}). The
+        # bridge now records them on the event itself so the journal carries
+        # a complete index — matching what the HTTP path has always done.
         return self._bridge.record_tool_call(
             source_agent=self.source_agent,
             tool_name=tool_name,
@@ -536,6 +537,7 @@ class KorgBridgeClient:
             success=success,
             duration_ms=int(duration_ms),
             triggered_by=triggered_by,
+            payload_refs=payload_refs,
         )
 
     def record_user_prompt(self, prompt: str) -> int:
