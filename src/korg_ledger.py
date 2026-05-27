@@ -389,6 +389,7 @@ class KorgLedgerClient:
         completion_tokens: int,
         duration_ms: int,
         triggered_by: int | None,
+        assistant_text: str | None = None,
     ) -> int | None:
         """
         Emit an LLM inference event synchronously.
@@ -396,11 +397,19 @@ class KorgLedgerClient:
         Synchronous because all parallel tool calls from the same LLM response
         need triggered_by=<this seq_id>. Blocks for at most timeout_secs.
         Returns the assigned seq_id, or None if korg is unavailable.
+
+        v0.3.2: pass `assistant_text` so the reply text lands on the event's
+        `result` field — downstream consumers (KorgChat /recall, audit
+        replay) can then grep the journal for what the model actually said,
+        not just token counts. None preserves the v0.3.1 on-disk shape.
         """
+        result: dict[str, Any] = {"completion_tokens": completion_tokens}
+        if assistant_text is not None:
+            result["text"] = assistant_text
         return self._post_sync(
             tool_name="llm_inference",
             args={"model": model, "prompt_tokens": prompt_tokens},
-            result={"completion_tokens": completion_tokens},
+            result=result,
             success=True,
             duration_ms=duration_ms,
             triggered_by=triggered_by,
@@ -550,7 +559,12 @@ class KorgBridgeClient:
         completion_tokens: int,
         duration_ms: int,
         triggered_by: int | None,
+        assistant_text: str | None = None,
     ) -> int:
+        """v0.3.2: forward `assistant_text` to the bridge so the reply text
+        lands on the event's `result.text`. Matches the HTTP client's new
+        signature so callers stay uniform regardless of which transport
+        get_default_client() chose."""
         return self._bridge.record_llm_call(
             model=model,
             prompt_tokens=int(prompt_tokens),
@@ -558,6 +572,7 @@ class KorgBridgeClient:
             duration_ms=int(duration_ms),
             triggered_by=triggered_by,
             source_agent=self.source_agent,
+            assistant_text=assistant_text,
         )
 
 
