@@ -10,6 +10,8 @@ Usage:
     korgex install-extension Install VS Code extension from .vsix
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json
@@ -321,8 +323,27 @@ def _build_prompt_parser():
     return p
 
 
+def _get_version() -> str:
+    """Best-effort version lookup. Falls back to '0.0.0+dev' if package
+    metadata isn't available (e.g. running from a checkout without install)."""
+    try:
+        from importlib.metadata import version as _pkg_version
+        return _pkg_version("korgex")
+    except Exception:
+        return "0.0.0+dev"
+
+
 def main():
     argv = sys.argv[1:]
+
+    # --introspect short-circuit. Foundry-style pre-parse: scan raw argv
+    # before any parser builds or imports run, so the JSON document on
+    # stdout is never polluted by import-time prints or argparse errors
+    # from missing positional args.
+    if "--introspect" in argv:
+        from src.introspect import emit as _emit_introspect
+        _emit_introspect(_get_version())
+        return 0
 
     # Decide which parser to use up-front:
     #   - any token equal to a known subcommand → subcommand parser
