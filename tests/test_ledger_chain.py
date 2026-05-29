@@ -199,6 +199,20 @@ def test_blob_dir_default_when_nothing_set(monkeypatch):
     assert L._blob_dir() == Path(".korg") / "blobs"
 
 
+def test_large_payload_blobs_land_beside_journal_not_cwd(tmp_path, monkeypatch):
+    # End-to-end guard for the leak the bench caught: a >1KB payload is
+    # content-ref'd to a blob, which must land beside the journal — not in a
+    # cwd-relative .korg (the source checkout during an isolated run).
+    jp = tmp_path / "j.jsonl"
+    monkeypatch.setenv("KORG_JOURNAL_PATH", str(jp))
+    monkeypatch.delenv("KORG_BLOB_DIR", raising=False)
+    c = L.LocalJournalClient(journal_path=str(jp))
+    c.record_tool_call(tool_name="Write", args={"content": "x" * 5000},
+                       result={}, success=True, duration_ms=0, triggered_by=1)
+    blobs = tmp_path / "blobs"
+    assert blobs.is_dir() and any(blobs.iterdir())   # blob beside the journal
+
+
 def test_local_journal_continues_chain_across_restart(tmp_path):
     jp = tmp_path / "journal.jsonl"
     c1 = L.LocalJournalClient(journal_path=str(jp))
