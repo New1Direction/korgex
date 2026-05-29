@@ -21,6 +21,7 @@ from src.tool_abstraction import USER_TOOLS, route_tool_call
 # tools_impl must be imported so its @register_tool decorators populate the registry
 import src.tools_impl  # noqa: F401
 from src.korg_ledger import get_default_client as _korg
+from src.hooks import load_hooks, run_event
 
 
 SYSTEM_PROMPT = """You are Korgex, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks: solving bugs, implementing features, writing tests, and refactoring code.
@@ -44,6 +45,29 @@ def _looks_anthropic(model_id: str) -> bool:
     """True for any Claude model — direct Anthropic, OpenRouter (anthropic/claude-...), etc."""
     m = (model_id or "").lower()
     return "claude" in m or m.startswith("anthropic/")
+
+
+# Read-only tool subset handed to non-mutating subagents (Recall is read-only).
+_READONLY_SUBAGENT_TOOLS = ["Read", "Grep", "Glob", "Recall"]
+
+# Map the Agent tool's model alias → a concrete model id.
+_MODEL_ALIASES = {
+    "opus": "claude-opus-4-8",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku": "claude-haiku-4-5-20251001",
+}
+
+
+def subagent_tools(subagent_type: str) -> list:
+    """Tool name subset a subagent of `subagent_type` is allowed to use.
+
+    Read-only types (explore/plan/review/research) get search/read tools only.
+    The default ("code") gets every tool EXCEPT Agent — subagents must not
+    recursively spawn subagents (nesting is one level, like Claude Code's Task).
+    """
+    if subagent_type in ("explore", "plan", "review", "research"):
+        return list(_READONLY_SUBAGENT_TOOLS)
+    return [name for name in USER_TOOLS.keys() if name != "Agent"]
 
 
 def _resolve_model(model: str, mode: str) -> str:
@@ -70,12 +94,28 @@ class KorgexAgent:
 
     def __init__(self, model: str = None, repo_root: str = None,
                  mode: str = None, interactive: bool = None,
-                 load_mcp: bool = None, **_ignored):
+                 load_mcp: bool = None, ledger=None, **_ignored):
         # **_ignored absorbs legacy kwargs (model_override, resume_session, etc.)
         self.mode = mode
         self.model = _resolve_model(model, mode)
         self.repo_root = repo_root or os.getcwd()
         self.provider = "anthropic" if _looks_anthropic(self.model) else "openai"
+
+        # Injectable ledger client. None → resolve the process default lazily in
+        # run_task. A subagent is handed its parent's ledger so events from the
+        # whole multi-agent run land in one causal journal.
+        self.ledger = ledger
+
+        # Injectable hook table. None → load from .korgex/settings.json in run_task.
+        self.hooks = None
+
+        # Factory used by the Agent tool to build a child agent. None → a real
+        # nested KorgexAgent. Overridable in tests / for custom subagent runtimes.
+        self.subagent_factory = None
+
+        # Effective system prompt. Recomputed per run_task from the base prompt +
+        # project instructions (AGENTS.md/CLAUDE.md) + persistent memory index.
+        self.system_prompt = SYSTEM_PROMPT
 
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
@@ -92,6 +132,41 @@ class KorgexAgent:
 
         # Lazy: only construct the session when actually streaming
         self._session = None
+
+    def _assemble_system_prompt(self) -> str:
+        """Base prompt + project instructions + persistent memory index.
+
+        Reads AGENTS.md/CLAUDE.md and an EXISTING memory store — never creates a
+        memory dir as a side effect of running a task.
+        """
+        parts = [SYSTEM_PROMPT]
+
+        # Project instructions: AGENTS.md (preferred) or CLAUDE.md.
+        for fname in ("AGENTS.md", "CLAUDE.md"):
+            path = os.path.join(self.repo_root, fname)
+            if os.path.isfile(path):
+                try:
+                    content = open(path).read().strip()
+                except OSError:
+                    content = ""
+                if content:
+                    parts.append(f"# Project instructions ({fname})\n\n{content}")
+                break
+
+        # Persistent memory index, if one already exists.
+        for mem_root in (os.path.join(self.repo_root, ".korgex", "memory"),
+                         os.path.join(os.path.expanduser("~"), ".korgex", "memory")):
+            idx = os.path.join(mem_root, "MEMORY.md")
+            if os.path.isfile(idx):
+                try:
+                    content = open(idx).read().strip()
+                except OSError:
+                    content = ""
+                if content and content != "# Memory Index":
+                    parts.append(f"# Memory\n\n{content[:3000]}")
+                break
+
+        return "\n\n".join(parts)
 
     def _get_session(self):
         """Create the InteractiveSession on demand (avoids Rich import in non-TTY runs)."""
@@ -134,14 +209,24 @@ class KorgexAgent:
 
     # ── Tool schema translation ──────────────────────────────────────────
 
-    def _get_provider_tools(self) -> list[dict]:
-        """Translate USER_TOOLS into the schema shape the provider expects."""
+    def _get_provider_tools(self, tools_filter=None) -> list[dict]:
+        """Translate USER_TOOLS into the schema shape the provider expects.
+
+        `tools_filter` (a set/list of tool names) restricts the exposed tools —
+        used to give a subagent a narrower surface than the parent.
+        """
+        if tools_filter is None:
+            items = list(USER_TOOLS.values())
+        else:
+            allow = set(tools_filter)
+            items = [t for n, t in USER_TOOLS.items() if n in allow]
+
         if self.provider == "anthropic":
             return [{
                 "name": t["name"],
                 "description": t["description"],
                 "input_schema": t["input_schema"],
-            } for t in USER_TOOLS.values()]
+            } for t in items]
 
         # OpenAI-compatible: openai, openrouter, ollama, deepseek, etc.
         return [{
@@ -151,7 +236,7 @@ class KorgexAgent:
                 "description": t["description"],
                 "parameters": t["input_schema"],
             },
-        } for t in USER_TOOLS.values()]
+        } for t in items]
 
     # ── Client wiring ────────────────────────────────────────────────────
 
@@ -176,17 +261,37 @@ class KorgexAgent:
             base_url=os.environ.get("KORGEX_API_URL", "https://api.openai.com/v1"),
         )
 
-    def _call(self, client, messages: list, tools: list) -> object:
+    def _call(self, client, messages: list, tools: list, output_schema: dict = None,
+              system_prompt: str = None) -> object:
+        # `system_prompt` is passed explicitly (not read off self) so concurrent
+        # run_task calls on one agent instance can't clobber each other's prompt.
+        sp = system_prompt if system_prompt is not None else self.system_prompt
+
+        # Schema-constrained final answer: force a non-streamed, structured reply.
+        # (You can't render a partial validated object, so streaming is bypassed
+        # when output_schema is set.)
+        if output_schema is not None:
+            from src.structured_output import build_request_kwargs
+            extra = build_request_kwargs(output_schema, self.provider)
+            if self.provider == "anthropic":
+                return client.messages.create(
+                    model=self.model, system=sp,
+                    messages=messages, max_tokens=4096, **extra,
+                )
+            return client.chat.completions.create(
+                model=self.model, messages=messages, max_tokens=4096, **extra,
+            )
+
         # Interactive streaming paths
         if self.interactive and self.provider == "anthropic":
-            return self._call_anthropic_streaming(client, messages, tools)
+            return self._call_anthropic_streaming(client, messages, tools, sp)
         if self.interactive and self.provider == "openai":
             return self._call_openai_streaming(client, messages, tools)
 
         # Non-streaming
         if self.provider == "anthropic":
             return client.messages.create(
-                model=self.model, system=SYSTEM_PROMPT,
+                model=self.model, system=sp,
                 messages=messages, tools=tools, max_tokens=4096,
             )
         return client.chat.completions.create(
@@ -194,13 +299,14 @@ class KorgexAgent:
             tools=tools, max_tokens=4096,
         )
 
-    def _call_anthropic_streaming(self, client, messages: list, tools: list):
+    def _call_anthropic_streaming(self, client, messages: list, tools: list,
+                                  system_prompt: str = None):
         """Stream Anthropic messages through the InteractiveSession renderer."""
         from src.interactive import SSEMessage, SSEEvent
         session = self._get_session()
 
         with client.messages.stream(
-            model=self.model, system=SYSTEM_PROMPT,
+            model=self.model, system=(system_prompt if system_prompt is not None else self.system_prompt),
             messages=messages, tools=tools, max_tokens=4096,
         ) as stream:
             for event in stream:
@@ -351,15 +457,37 @@ class KorgexAgent:
 
     # ── Main loop ────────────────────────────────────────────────────────
 
-    def run_task(self, prompt: str) -> dict:
-        tools_payload = self._get_provider_tools()
+    def run_task(self, prompt: str, output_schema: dict = None,
+                 parent_seq: int = None, tools_filter=None) -> dict:
+        korg = self.ledger if self.ledger is not None else _korg()
+        hooks = self.hooks if self.hooks is not None else load_hooks(self.repo_root)
+        # Memory injection: assemble base + AGENTS.md + memory. Held in a LOCAL and
+        # threaded through _call so concurrent run_task calls (korgantic fan-out)
+        # can't clobber each other via shared self.system_prompt. The attribute is
+        # still updated for introspection/back-compat, but is never the read source.
+        sys_prompt = self._assemble_system_prompt()
+        self.system_prompt = sys_prompt
+
+        # UserPromptSubmit hooks may inject context (advisory; cannot block).
+        # The ledger records the ORIGINAL prompt; only the model's view is augmented.
+        effective_prompt = prompt
+        if hooks:
+            ups = run_event(
+                "UserPromptSubmit", "",
+                {"event": "UserPromptSubmit", "prompt": prompt, "cwd": self.repo_root},
+                hooks, cwd=self.repo_root,
+            )
+            if ups.get("additional_context"):
+                effective_prompt = f"{prompt}\n\n[hook context]\n{ups['additional_context']}"
+
+        tools_payload = self._get_provider_tools(tools_filter)
 
         if self.provider == "anthropic":
-            messages = [{"role": "user", "content": prompt}]
+            messages = [{"role": "user", "content": effective_prompt}]
         else:
             messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": effective_prompt},
             ]
 
         client = self._get_client()
@@ -370,17 +498,17 @@ class KorgexAgent:
             session.start()
 
         # ── korg ledger: root event ──────────────────────────────────────────
-        # Every korgex session starts with a user_prompt event at triggered_by=None.
-        # All subsequent events chain back here via triggered_by.
-        korg = _korg()
-        prompt_seq = korg.record_user_prompt(prompt)
+        # Top-level session → triggered_by=None (a true root). When this run is a
+        # SUBAGENT, parent_seq chains its root into the parent's causal DAG so the
+        # whole multi-agent run is one connected, rewindable tree.
+        prompt_seq = korg.record_user_prompt(prompt, triggered_by=parent_seq)
         # ────────────────────────────────────────────────────────────────────
 
         try:
             for i in range(max_iter):
                 # ── korg: time the LLM round-trip ──────────────────────────
                 _llm_t0 = time.monotonic()
-                response = self._call(client, messages, tools_payload)
+                response = self._call(client, messages, tools_payload, system_prompt=sys_prompt)
                 _llm_ms = int((time.monotonic() - _llm_t0) * 1000)
 
                 tool_calls = self._extract_tool_calls(response)
@@ -407,25 +535,62 @@ class KorgexAgent:
                 # ───────────────────────────────────────────────────────────
 
                 if not tool_calls:
+                    # Schema-constrained finish: do a final structured pass so
+                    # the answer is a validated object on the ledger, not prose.
+                    if output_schema is not None:
+                        return self._finalize_structured(
+                            client, messages, response, output_schema,
+                            llm_seq, korg, i + 1, prompt_seq, sys_prompt,
+                        )
                     # Reuse round_text we already extracted above; saves a
                     # second pass over response.content.
                     return {
                         "success": True,
                         "result": round_text or "(no output)",
                         "iterations": i + 1,
+                        "root_seq": prompt_seq,
                     }
 
                 messages.append(self._assistant_turn(response))
                 for call in tool_calls:
+                    # ── PreToolUse gate: deterministic, ledger-native ────────
+                    # A matching hook can block the call. Every verdict (allow or
+                    # deny) is recorded as its own causal event carrying the
+                    # policy_hash of the rule that fired — so governance over tool
+                    # calls is rewindable and auditable, not fire-and-forget.
+                    if hooks:
+                        pre = run_event(
+                            "PreToolUse", call["name"],
+                            {"event": "PreToolUse", "tool_name": call["name"],
+                             "tool_input": call["args"], "cwd": self.repo_root},
+                            hooks, cwd=self.repo_root,
+                        )
+                        if pre["ran"]:
+                            verdict = "BLOCKED" if pre["decision"] == "block" else "APPROVED"
+                            korg.record_tool_call(
+                                tool_name="hook.PreToolUse",
+                                args={"tool": call["name"]},
+                                result={"verdict": verdict, "reason": pre["reason"],
+                                        "policy_hash": pre["policy_hash"]},
+                                success=(verdict == "APPROVED"),
+                                duration_ms=0,
+                                triggered_by=llm_seq,
+                            )
+                        if pre["decision"] == "block":
+                            blocked = {"error": "blocked by PreToolUse hook",
+                                       "reason": pre["reason"] or "policy denied this tool call"}
+                            messages.append(self._tool_result_turn(call["id"], blocked))
+                            continue  # the tool never runs
+
                     if session:
                         # Show a transient spinner while the tool runs
                         with session.spinner(f"{call['name']}({_short_args(call['args'])})"):
                             _t0 = time.monotonic()
-                            tool_result = route_tool_call(call["name"], call["args"])
+                            tool_result = self._dispatch_call(call, llm_seq)
                             _ms = int((time.monotonic() - _t0) * 1000)
                     else:
                         _t0 = time.monotonic()
-                        tool_result = route_tool_call(call["name"], call["args"])
+                        tool_result = self._dispatch_call(call, llm_seq)
                         _ms = int((time.monotonic() - _t0) * 1000)
 
                     # ── korg: one event per completed tool call ─────────────
@@ -442,6 +607,24 @@ class KorgexAgent:
                     )
                     # ───────────────────────────────────────────────────────
 
+                    # ── PostToolUse hook (advisory; cannot undo the call) ────
+                    if hooks:
+                        post = run_event(
+                            "PostToolUse", call["name"],
+                            {"event": "PostToolUse", "tool_name": call["name"],
+                             "tool_input": call["args"], "tool_result": tool_result,
+                             "cwd": self.repo_root},
+                            hooks, cwd=self.repo_root,
+                        )
+                        if post["ran"]:
+                            korg.record_tool_call(
+                                tool_name="hook.PostToolUse",
+                                args={"tool": call["name"]},
+                                result={"verdict": "OBSERVED",
+                                        "policy_hash": post["policy_hash"]},
+                                success=True, duration_ms=0, triggered_by=llm_seq,
+                            )
+
                     messages.append(self._tool_result_turn(call["id"], tool_result))
 
                 # Advance the LLM trigger for the next round-trip to the last llm_seq
@@ -451,10 +634,134 @@ class KorgexAgent:
                 "success": False,
                 "result": f"max iterations reached ({max_iter})",
                 "iterations": max_iter,
+                "root_seq": prompt_seq,
             }
         finally:
             if session:
                 session.stop()
+
+    def _dispatch_call(self, call: dict, parent_seq) -> dict:
+        """Run one tool call. The Agent tool spawns a real nested subagent;
+        every other tool routes to its in-process / MCP handler."""
+        if call["name"] == "Agent":
+            return self._run_subagent(call["args"], parent_seq)
+        return route_tool_call(call["name"], call["args"])
+
+    def _run_subagent(self, args: dict, parent_seq) -> dict:
+        """Spawn a real nested KorgexAgent for the Agent tool.
+
+        The child shares this run's ledger and chains its root under parent_seq,
+        so the multi-agent run is one causal DAG. It gets a tool subset scoped to
+        its subagent_type and cannot itself spawn subagents (no Agent tool).
+        """
+        sub_type = args.get("subagent_type", "code")
+        prompt = args.get("prompt") or args.get("description") or ""
+        model = _MODEL_ALIASES.get(args.get("model")) or self.model
+
+        factory = self.subagent_factory or (lambda **kw: KorgexAgent(**kw))
+        child = factory(
+            model=model, repo_root=self.repo_root,
+            interactive=False, ledger=(self.ledger if self.ledger is not None else _korg()),
+        )
+        child_result = child.run_task(
+            prompt, parent_seq=parent_seq, tools_filter=subagent_tools(sub_type),
+        )
+        return {
+            "agent_type": sub_type,
+            "success": child_result.get("success", False),
+            "result": child_result.get("result", ""),
+            "iterations": child_result.get("iterations"),
+            "root_seq": child_result.get("root_seq"),
+        }
+
+    def run_korgantic_task(self, task: str, effort: str = "auto") -> dict:
+        """Max-power mode: run the effort-scaled korgantic workflow chain.
+
+        Each phase (understand/design/implement/review/verify/critic) runs as a
+        run_task chained under ONE korgantic root seq, so the whole run is a
+        single causal DAG in the ledger — rewindable per phase. Analysis phases
+        get a read-only tool surface; implement gets the full toolset.
+        """
+        from src.korgantic import run_korgantic
+        from src.korg_ledger import ThreadSafeLedger
+
+        base = self.ledger if self.ledger is not None else _korg()
+        # Wrap in a thread-safe ledger so concurrent phases (multi-modal sweep,
+        # fan-out) can't race seq/triggered_by and corrupt the causal DAG.
+        safe = ThreadSafeLedger(base)
+        prev_ledger = self.ledger
+        self.ledger = safe
+        read_only = {"understand", "design", "review", "verify", "critic"}
+
+        try:
+            root_seq = safe.record_user_prompt(f"[korgantic:{effort}] {task}")
+
+            def runner(role, prompt, output_schema=None):
+                tools_filter = subagent_tools("explore") if role in read_only else None
+                return self.run_task(
+                    prompt, output_schema=output_schema,
+                    parent_seq=root_seq, tools_filter=tools_filter,
+                )
+
+            result = run_korgantic(task, effort, runner)
+            result["root_seq"] = root_seq
+            return result
+        finally:
+            self.ledger = prev_ledger
+
+    def _finalize_structured(self, client, messages: list, last_response,
+                             output_schema: dict, prior_llm_seq, korg,
+                             iterations: int, root_seq=None, system_prompt=None) -> dict:
+        """Coerce the conversation's final answer into a schema-conforming object.
+
+        Runs a forced structured call, validates client-side, retries once with
+        the validation errors, then records the validated object onto a final
+        llm_inference ledger event (so the journal carries structured data, not
+        prose). Returns success=False — never a lie — if it still doesn't conform.
+        """
+        from src.structured_output import extract, validate
+
+        convo = list(messages)
+        convo.append(self._assistant_turn(last_response))
+        convo.append({
+            "role": "user",
+            "content": "Return your final result now as a single object that "
+                       "conforms exactly to the required schema.",
+        })
+
+        obj = None
+        errors = ["no structured object returned"]
+        for _attempt in range(2):  # initial + one retry
+            resp = self._call(client, convo, [], output_schema=output_schema,
+                              system_prompt=system_prompt)
+            obj = extract(resp, self.provider)
+            errors = validate(obj, output_schema) if obj is not None else \
+                ["no structured object returned"]
+            if not errors:
+                break
+            convo.append({"role": "assistant",
+                          "content": json.dumps(obj) if obj is not None else ""})
+            convo.append({
+                "role": "user",
+                "content": f"That did not conform to the schema. Fix these "
+                           f"errors and re-emit the object: {errors}",
+            })
+
+        text = json.dumps(obj) if obj is not None else "{}"
+        korg.record_llm_call(
+            model=self.model, prompt_tokens=0, completion_tokens=0,
+            duration_ms=0, triggered_by=prior_llm_seq, assistant_text=text,
+        )
+
+        if not errors:
+            return {"success": True, "result": obj, "iterations": iterations,
+                    "root_seq": root_seq}
+        return {
+            "success": False,
+            "result": f"structured output failed schema validation: {errors}",
+            "iterations": iterations,
+            "root_seq": root_seq,
+        }
 
 
 def _short_args(args: dict) -> str:
