@@ -365,13 +365,17 @@ class KorgLedgerClient:
 
         self._get_writer().enqueue(body)
 
-    def record_user_prompt(self, prompt: str) -> int | None:
+    def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int | None:
         """
-        Emit the root AgentToolCall for a user prompt synchronously.
+        Emit the user_prompt event synchronously.
 
-        This is the only synchronous call because we need the seq_id to wire
-        triggered_by on the first LLM event. Blocks for at most timeout_secs.
-        Returns the assigned seq_id, or None if korg is unavailable.
+        This is synchronous because we need the seq_id to wire triggered_by on
+        the first LLM event. Blocks for at most timeout_secs. Returns the
+        assigned seq_id, or None if korg is unavailable.
+
+        `triggered_by` is None for a top-level session (a true root), or the
+        parent's seq_id when this prompt is a SUBAGENT spawned by another run —
+        that chains the whole multi-agent tree into one causal DAG.
         """
         return self._post_sync(
             tool_name="user_prompt",
@@ -379,7 +383,7 @@ class KorgLedgerClient:
             result={},
             success=True,
             duration_ms=0,
-            triggered_by=None,
+            triggered_by=triggered_by,
         )
 
     def record_llm_call(
@@ -549,8 +553,15 @@ class KorgBridgeClient:
             payload_refs=payload_refs,
         )
 
-    def record_user_prompt(self, prompt: str) -> int:
-        return self._bridge.record_user_prompt(prompt)
+    def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int:
+        # Subagent roots pass the parent's seq so the multi-agent run is one DAG.
+        # Forward-compatible: older bridges without the param degrade to a root.
+        if triggered_by is None:
+            return self._bridge.record_user_prompt(prompt)
+        try:
+            return self._bridge.record_user_prompt(prompt, triggered_by)
+        except TypeError:
+            return self._bridge.record_user_prompt(prompt)
 
     def record_llm_call(
         self,
