@@ -1,0 +1,28 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.New1Direction/korg-ledger",
+  "description": "Verifiable-cognition MCP server. korg_verify proves an agent's session ledger is tamper-evident; korg_audit audits your own Claude Code logs zero-config; korg_import replays any vendor's session into a hash-chained korg-ledger@v1 journal. Make any agent's cognition checkable.",
+  "version": "0.6.0",
+  "repository": {
+    "url": "https://github.com/New1Direction/korgex",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "korgex",
+      "version": "0.6.0",
+      "transport": { "type": "stdio" },
+      "runtimeArguments": [
+        { "type": "positional", "value": "mcp-server", "isRequired": true,
+          "description": "the korgex subcommand that runs the MCP server" }
+      ],
+      "environmentVariables": [
+        { "name": "KORG_JOURNAL_PATH", "isRequired": false,
+          "description": "Path to the JSONL ledger journal (defaults to .korg/journal.jsonl)." },
+        { "name": "KORG_LEDGER_HMAC_KEY", "isRequired": false,
+          "description": "Optional HMAC key — makes the chain tamper-PROOF, not just tamper-evident." }
+      ]
+    }
+  ]
+}
