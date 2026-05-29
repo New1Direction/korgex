@@ -19,6 +19,7 @@ $ korgex "add a /healthz endpoint that returns 200 with uptime"
 - [Install](#install)
 - [Quickstart](#quickstart)
 - [How it works](#how-it-works)
+- [Verifiable cognition](#verifiable-cognition)
 - [CLI reference](#cli-reference)
 - [Tools](#tools)
 - [Environment variables](#environment-variables)
@@ -133,6 +134,31 @@ The agent is provider-agnostic by design: tool schemas are translated per provid
 
 ---
 
+## Verifiable cognition
+
+What sets korgex apart: every run is recorded to a **tamper-evident causal ledger**, not an opaque log. Each event is hash-linked (`prev_hash`/`entry_hash`) to the previous one, so a whole session can be cryptographically proven intact — any edit, deletion, reorder, or splice is detected and localized to the offending event.
+
+```bash
+# Prove a recorded run was not altered after the fact
+korgex verify .korg/journal.jsonl
+#   ✓ ledger intact — 7 events, hash-chain verified      (exit 0; exit 1 + the bad seq_id if tampered)
+
+# Set KORG_LEDGER_HMAC_KEY to make the chain tamper-PROOF, not just tamper-evident
+export KORG_LEDGER_HMAC_KEY=…
+```
+
+On top of the chain, korgex tracks **memory drift**: a remembered fact is anchored to a sha256 baseline of its source, so when the source moves on the staleness is an exact signal — and the keep/refresh/discard reconcile decision is itself recorded to the ledger.
+
+```bash
+# Scan persistent memories for drift against their recorded source baselines
+korgex drift
+#   ✗ memory DRIFT — 1 drifted … reconcile is recorded to the ledger    (exit 0 if none, 1 if drift)
+```
+
+See [Self-Coding Bench](docs/self-coding-bench.md) for live reliability data across five models.
+
+---
+
 ## CLI reference
 
 ```
@@ -152,6 +178,8 @@ positional arguments:
     stop             Stop the running backend.
     install-extension
                      Install the .vsix into VS Code.
+    verify           Prove the cognition ledger is intact (hash-chain proof).
+    drift            Scan memories for drift vs their source baselines.
 ```
 
 ### Naked-prompt invocation (the default)
@@ -185,6 +213,8 @@ korgex --quiet "list all functions called from main()"
 | `korgex status` | Reports whether the background backend is running. |
 | `korgex stop` | Terminates the background backend (SIGTERM, then SIGKILL if needed). |
 | `korgex install-extension` | Installs the compiled `.vsix` into your local VS Code. |
+| `korgex verify [journal]` | Verify the ledger's hash-chain is intact — proves the recorded run wasn't edited, deleted, reordered, or spliced (exit 0/1, CI-friendly). |
+| `korgex drift` | Scan persistent memories for drift against their recorded source baselines (exit 0/1). |
 
 ---
 
@@ -222,8 +252,11 @@ Under the hood these route to 49+ internal handlers (file ops, git, GitHub API, 
 | `KORGEX_MAX_ITERATIONS` | Maximum agent loop iterations before giving up. | `30` |
 | `KORGEX_MCP` | Set to `1` to auto-load MCP servers from `mcp.json` (equivalent to `--mcp`). | unset |
 | `KORGEX_SANDBOX` | `modal` \| `docker` \| `direct` \| `auto`. Controls bash sandbox isolation. | `auto` |
+| `KORGEX_PROVIDER` | Force the transport (`openai` \| `anthropic`), overriding model-id autodetect — e.g. drive `anthropic/*` or `google/*` models through OpenRouter. | autodetect |
+| `KORG_JOURNAL_PATH` | Path to the durable JSONL ledger journal; content-addressed blobs are written beside it. | `.korg/journal.jsonl` |
+| `KORG_LEDGER_HMAC_KEY` | If set, the ledger hash-chain is HMAC-keyed — tamper-*proof*, not just tamper-evident. | unset |
 
-Provider-detection rule: if the model id contains `"claude"` or starts with `"anthropic/"`, the agent uses the Anthropic SDK. Otherwise it uses the OpenAI SDK (which works against OpenAI, OpenRouter, Ollama, DeepSeek, vLLM, and anything else that speaks OpenAI's chat-completions protocol).
+Provider-detection rule: if the model id contains `"claude"` or starts with `"anthropic/"`, the agent uses the Anthropic SDK. Otherwise it uses the OpenAI SDK (which works against OpenAI, OpenRouter, Ollama, DeepSeek, vLLM, and anything else that speaks OpenAI's chat-completions protocol). Set `KORGEX_PROVIDER=openai` to force the OpenAI-compatible transport even for a `claude`/`anthropic/` model id — e.g. to drive Claude through OpenRouter.
 
 ---
 
