@@ -119,3 +119,23 @@ def test_agent_recall_and_reconcile_end_to_end(tmp_path):
     recon = [e for e in led.events if e["tool_name"] == "memory_reconcile"]
     assert any(e["args"]["memory_name"] == "test-cmd" and e["args"]["decision"] == "flag"
                for e in recon)
+
+
+def test_recall_never_crashes_the_loop(tmp_path, monkeypatch):
+    # Recall is an enhancement, not core: a failure in the memory subsystem
+    # (a missing optional dep like PyYAML, an unreadable store) must degrade to
+    # no recall, never crash run_task. Regression: Gate F caught run_task
+    # importing src.memory → PyYAML, fatal on a clean install.
+    from src import memory as M
+    from src import memory_drift as D
+    from src.agent import KorgexAgent
+
+    M.init_memory(project_root=str(tmp_path))
+    M.save_memory("x", "a stored memory", "user", "body")
+
+    def _boom(*a, **k):
+        raise RuntimeError("simulated memory-subsystem failure")
+
+    monkeypatch.setattr(D, "recall_block", _boom)
+    a = KorgexAgent(model="gpt-4o", repo_root=str(tmp_path), interactive=False)
+    assert a._recall_and_reconcile(_FakeLedger(), prompt_seq=1) == ""  # no raise
