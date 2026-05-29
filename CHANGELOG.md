@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-05-29
+
+### Fixed
+- **`korgex` crashed on a clean install (no `requests`) — and is now on PyPI.** `src/korg_ledger.py` did a top-level `import requests` (used by the HTTP korg-server transport), but `requests` was never a declared dependency. Dev/CI envs have it transitively (twine pulls it in), so every local run masked the failure — but a fresh `pip install` with `requests` absent died with `ModuleNotFoundError` before the CLI could even parse args. This is the **exact same class** of bug as the v0.6.1 PyYAML fix. Found while verifying the first PyPI publish in a clean venv. Fix: declare `requests`.
+
+### Added
+- **Regression test for the whole undeclared-dependency class** (`tests/test_no_undeclared_module_imports.py`). AST-scans `src/` for *bare module-level* third-party imports and asserts each is provided by a distribution declared in `pyproject` — resolving import-name→dist-name via `top_level.txt` (so `yaml`→`PyYAML`), skipping stdlib (via `find_spec` origin, no `sys.stdlib_module_names`) and lazy in-function imports. Would have caught **both** PyYAML and `requests`. Dependency-light and 3.9-compatible so it runs in the local suite, not just CI.
+- **korgex published to PyPI** — `pip install korgex` is now the primary install path (0.6.2 is the first version on PyPI and the first verified to import cleanly from a fresh install with only its declared dependencies).
+
 ## [0.6.1] — 2026-05-29
 
 ### Fixed

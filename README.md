@@ -41,10 +41,18 @@ $ korgex "add a /healthz endpoint that returns 200 with uptime"
 
 ## Install
 
-### From GitHub Release (recommended today)
+### From PyPI (recommended)
 
 ```bash
-pip install https://github.com/New1Direction/korgex/releases/download/v0.6.1/korgex-0.6.1-py3-none-any.whl
+pip install korgex
+```
+
+Requires Python ≥ 3.10.
+
+### From GitHub Release
+
+```bash
+pip install https://github.com/New1Direction/korgex/releases/download/v0.6.2/korgex-0.6.2-py3-none-any.whl
 ```
 
 ### From source
