@@ -395,6 +395,13 @@ def cmd_audit():
     return 1
 
 
+def cmd_mcp_server():
+    """Run the korg-ledger MCP server (JSON-RPC over stdio) — verify/audit/import for any MCP host."""
+    from src.mcp_server import serve
+    serve()
+    return 0
+
+
 # ── Entry Point ──────────────────────────────────────────────────────────
 
 import argparse
@@ -411,6 +418,7 @@ SUBCOMMANDS = {
     "drift":             cmd_drift,
     "import":            cmd_import,
     "audit":             cmd_audit,
+    "mcp-server":        cmd_mcp_server,
 }
 
 

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **korg-ledger MCP server (`korgex mcp-server`).** Exposes the verifiable-cognition substrate over MCP (JSON-RPC 2.0 / stdio, dependency-free) so any MCP host — Claude Desktop, Cursor, … — can call `korg_verify` (prove a journal is tamper-evident-intact), `korg_audit` (audit the host agent's own Claude Code logs), and `korg_import` (import a vendor transcript into a chained ledger). "Be the substrate, not an app" at the protocol layer — the governance/audit gap the MCP roadmap names. Wire it with `{"mcpServers":{"korg-ledger":{"command":"korgex","args":["mcp-server"]}}}`.
+
 ## [0.5.1] — 2026-05-29
 
 ### Added
