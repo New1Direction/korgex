@@ -117,7 +117,14 @@ class KorgexAgent:
         self.mode = mode
         self.model = _resolve_model(model, mode)
         self.repo_root = repo_root or os.getcwd()
-        self.provider = "anthropic" if _looks_anthropic(self.model) else "openai"
+        # KORGEX_PROVIDER forces the transport (overriding model-id autodetect),
+        # so a Claude/Gemini model can be driven through an OpenAI-compatible
+        # gateway like OpenRouter. Garbage values fall back to autodetect.
+        _forced = os.environ.get("KORGEX_PROVIDER", "").strip().lower()
+        if _forced in ("openai", "anthropic"):
+            self.provider = _forced
+        else:
+            self.provider = "anthropic" if _looks_anthropic(self.model) else "openai"
 
         # Per-mode generation params (max_tokens / thinking budget / temperature).
         self.params = _resolve_params(mode)
