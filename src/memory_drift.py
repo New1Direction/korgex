@@ -102,6 +102,54 @@ def scan(memories: list, repo_root: str | None = None) -> dict:
     return report
 
 
+def recall_block(memories: list, repo_root: str | None = None,
+                 record_event=None, triggered_by=None) -> dict:
+    """Verify memories at recall time and build a TRUSTED prompt block (idea #5).
+
+    Anchored memories are checked against their source baselines: fresh ones are
+    injected, drifted/missing ones are WITHHELD and a `memory_reconcile` decision
+    (decision="flag") is recorded via `record_event` (chained off `triggered_by`).
+    Unanchored memories (no source) are injected as-is — they can't drift.
+
+    `record_event(tool_name, args, result, success, triggered_by) -> seq` is the
+    ledger sink. Returns {block, injected:[names], flagged:[names], report}.
+    The differentiator: every injected fact is verified-current, and every stale
+    one is on the record — auditable memory, not just memory.
+    """
+    report = scan(memories, repo_root)
+    flagged = set(report["drifted"]) | set(report["missing"])
+    verdict_by_name = {v.get("name"): v for v in report["verdicts"]}
+
+    injected, lines = [], []
+    last_seq = triggered_by
+    for mem in memories:
+        name = mem.get("name")
+        if name in flagged:
+            if record_event is not None:
+                v = verdict_by_name.get(name, {})
+                last_seq = record_event(
+                    "memory_reconcile",
+                    {"memory_name": name, "decision": "flag", "source": mem.get("source")},
+                    {"status": v.get("status"), "reason": v.get("reason")},
+                    False, last_seq)
+            continue
+        anchored = bool(mem.get("source"))
+        tag = "✓ verified-current" if anchored else "unverified"
+        desc = (mem.get("description") or "").strip()
+        body = (mem.get("body") or "").strip().splitlines()
+        snippet = body[0][:240] if body else ""
+        lines.append(f"- **{name}** ({tag}) — {desc}\n  {snippet}")
+        injected.append(name)
+
+    block = ""
+    if lines:
+        block = ("# Recalled memory\n\n"
+                 "Facts recalled this turn. Anchored memories were checked against their "
+                 "source baselines; stale ones were withheld and flagged on the ledger — "
+                 "trust these over your priors.\n\n" + "\n".join(lines))
+    return {"block": block, "injected": injected, "flagged": list(flagged), "report": report}
+
+
 def record_reconcile(ledger, memory_name: str, decision: str,
                      baseline_sha: str | None = None,
                      current_sha: str | None = None,
