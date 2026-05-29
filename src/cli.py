@@ -332,6 +332,69 @@ def cmd_import():
     return 0 if summary["verified"] else 1
 
 
+def cmd_audit():
+    """Audit an agent's session: import the logs you already have into a verifiable ledger."""
+    from collections import Counter
+    from src import import_adapters as IA
+
+    argv = sys.argv[1:]
+    root = session = out = None
+    if "audit" in argv:
+        toks = argv[argv.index("audit") + 1:]
+        i = 0
+        while i < len(toks):
+            t = toks[i]
+            if t == "--root":
+                root = toks[i + 1] if i + 1 < len(toks) else None
+                i += 2
+            elif t == "--session":
+                session = toks[i + 1] if i + 1 < len(toks) else None
+                i += 2
+            elif t in ("--out", "-o"):
+                out = toks[i + 1] if i + 1 < len(toks) else None
+                i += 2
+            else:
+                i += 1
+
+    if not session:
+        found = IA.discover_claude_code_sessions(root=root)
+        if not found:
+            print("  No Claude Code sessions found under ~/.claude/projects.")
+            print("  (or run: korgex audit --session <transcript.jsonl>)")
+            return 1
+        session = found[0]
+
+    if not out:
+        base = os.path.basename(session).rsplit(".", 1)[0]
+        out = os.path.join(os.path.expanduser("~"), ".korgex", "audits", base + ".korg.jsonl")
+
+    try:
+        summary = IA.import_transcript(session, vendor="claude-code", out_path=out)
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        print(f"  audit failed: {exc}")
+        return 1
+
+    events = []
+    try:
+        with open(out) as f:
+            events = [json.loads(line) for line in f if line.strip()]
+    except OSError:
+        pass
+    tools = Counter(e.get("tool_name") for e in events)
+    top = ", ".join(f"{k}×{v}" for k, v in tools.most_common(6))
+
+    print(f"  audited {os.path.basename(session)} → {summary['events']} ledger events")
+    if top:
+        print(f"  activity: {top}")
+    print(f"  journal:  {out}")
+    if summary["verified"]:
+        print("  chain:    ✓ INTACT — tamper-evident, cryptographically verifiable")
+        print(f"  re-check any time:  korgex verify {out}")
+        return 0
+    print(f"  chain:    ✗ TAMPERED — {summary['errors'][:3]}")
+    return 1
+
+
 # ── Entry Point ──────────────────────────────────────────────────────────
 
 import argparse
@@ -347,6 +410,7 @@ SUBCOMMANDS = {
     "verify":            cmd_verify,
     "drift":             cmd_drift,
     "import":            cmd_import,
+    "audit":             cmd_audit,
 }
 
 
@@ -437,6 +501,10 @@ def _build_subcommand_parser():
             sp.add_argument("vendor", nargs="?", help="claude-code")
             sp.add_argument("transcript", nargs="?", help="path to the vendor session transcript")
             sp.add_argument("--out", "-o", help="output journal path (default: <transcript>.korg.jsonl)")
+        elif name == "audit":
+            sp.add_argument("--session", help="a specific transcript (default: newest Claude Code session)")
+            sp.add_argument("--root", help="sessions root (default: ~/.claude/projects)")
+            sp.add_argument("--out", "-o", help="output journal path")
     return p
 
 
