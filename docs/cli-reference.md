@@ -50,6 +50,8 @@ korgex --quiet "list all functions exported from src/utils.py"
 | `korgex status` | Report whether the background backend is running and its PID. |
 | `korgex stop` | Send SIGTERM (then SIGKILL) to the background backend. |
 | `korgex install-extension` | Install the compiled `.vsix` into your local VS Code. |
+| `korgex verify [journal]` | Verify the ledger hash-chain is intact (tamper-evidence proof); exits 0 if intact, 1 if tampered (and prints the offending `seq_id`). Defaults to `$KORG_JOURNAL_PATH` or `.korg/journal.jsonl`. |
+| `korgex drift` | Scan persistent memories for drift against their recorded source baselines; exits 0 if none drifted, 1 if drift is found. |
 
 ---
 
@@ -65,8 +67,11 @@ korgex --quiet "list all functions exported from src/utils.py"
 | `KORGEX_MAX_ITERATIONS` | `30` | Maximum agent loop iterations before the agent gives up. |
 | `KORGEX_MCP` | unset | Set to `1` to auto-load MCP servers from `mcp.json` (same effect as `--mcp`). |
 | `KORGEX_SANDBOX` | `auto` | Bash sandbox isolation: `modal`, `docker`, `direct`, or `auto`. |
+| `KORGEX_PROVIDER` | autodetect | Force the transport (`openai` or `anthropic`), overriding model-id autodetect. Lets `anthropic/*` and `google/*` models run through OpenRouter's OpenAI-compatible endpoint. |
+| `KORG_JOURNAL_PATH` | `.korg/journal.jsonl` | Path to the durable JSONL ledger journal; content-addressed blobs are written beside it. Read by `korgex verify`. |
+| `KORG_LEDGER_HMAC_KEY` | unset | If set, the ledger hash-chain is HMAC-keyed — tamper-*proof*, not just tamper-evident. |
 
-**Provider detection:** if the model id contains `"claude"` or starts with `"anthropic/"`, korgex uses the Anthropic SDK. Otherwise it uses the OpenAI SDK, which covers OpenAI, OpenRouter, Ollama, DeepSeek, vLLM, and any OpenAI-compatible endpoint.
+**Provider detection:** if the model id contains `"claude"` or starts with `"anthropic/"`, korgex uses the Anthropic SDK. Otherwise it uses the OpenAI SDK, which covers OpenAI, OpenRouter, Ollama, DeepSeek, vLLM, and any OpenAI-compatible endpoint. Set `KORGEX_PROVIDER=openai` to force the OpenAI-compatible transport even for a `claude`/`anthropic/` model id (e.g. Claude or Gemini through OpenRouter).
 
 ---
 
@@ -112,4 +117,16 @@ korgex serve
 
 # Check backend status
 korgex status
+
+# Drive Claude (or Gemini) through OpenRouter's OpenAI-compatible endpoint
+export KORGEX_API_KEY=sk-or-v1-...
+export KORGEX_API_URL=https://openrouter.ai/api/v1
+export KORGEX_PROVIDER=openai
+korgex --model anthropic/claude-sonnet-4.6 "refactor the parser"
+
+# Prove a recorded run's ledger was not altered (exit 0 = intact, 1 = tampered)
+korgex verify .korg/journal.jsonl
+
+# Scan persistent memories for drift against their source baselines
+korgex drift
 ```
