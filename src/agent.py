@@ -209,6 +209,41 @@ class KorgexAgent:
 
         return "\n\n".join(parts)
 
+    def _recall_and_reconcile(self, korg, prompt_seq) -> str:
+        """Recall persistent memories, verify each anchored one against its source
+        baseline, and return a trusted-memory prompt block of the FRESH facts —
+        withholding stale ones and recording a `memory_reconcile` decision to the
+        (hash-chained) ledger for each drift (idea #5: auditable memory). Returns
+        "" when there's no memory store. Never creates a memory dir.
+        """
+        from src import memory as M
+        from src import memory_drift as D
+
+        mem_root = None
+        for cand in (os.path.join(self.repo_root, ".korgex", "memory"),
+                     os.path.join(os.path.expanduser("~"), ".korgex", "memory")):
+            if os.path.isdir(cand):
+                mem_root = cand
+                break
+        if not mem_root:
+            return ""
+
+        prev = M.MEMORY_DIR
+        M.MEMORY_DIR = mem_root  # point the lister at the existing store (no creation)
+        try:
+            memories = M.list_memories()
+        finally:
+            M.MEMORY_DIR = prev
+        if not memories:
+            return ""
+
+        out = D.recall_block(
+            memories, repo_root=self.repo_root,
+            record_event=lambda tn, a, r, s, tb: korg.record_tool_call(
+                tool_name=tn, args=a, result=r, success=s, duration_ms=0, triggered_by=tb),
+            triggered_by=prompt_seq)
+        return out["block"]
+
     def _get_session(self):
         """Create the InteractiveSession on demand (avoids Rich import in non-TTY runs)."""
         if self._session is None and self.interactive:
@@ -564,6 +599,15 @@ class KorgexAgent:
         # whole multi-agent run is one connected, rewindable tree.
         prompt_seq = korg.record_user_prompt(prompt, triggered_by=parent_seq)
         # ────────────────────────────────────────────────────────────────────
+
+        # idea #5: recall persistent memory, verify anchored facts against their
+        # source baselines, inject the fresh ones, and record a memory_reconcile
+        # decision (chained off prompt_seq) for any that drifted — auditable memory.
+        recalled = self._recall_and_reconcile(korg, prompt_seq)
+        if recalled:
+            sys_prompt = sys_prompt + "\n\n" + recalled
+            if self.provider != "anthropic" and messages and messages[0].get("role") == "system":
+                messages[0]["content"] = sys_prompt
 
         mutated = False  # did any file-mutating tool run? gates the test-gate
         try:

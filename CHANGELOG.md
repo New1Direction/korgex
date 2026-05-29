@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Auditable memory recall in the agent loop.** At task entry korgex recalls its persistent memories, verifies each anchored one against its source baseline, injects only the **fresh** facts into the system prompt, and **withholds stale ones** — recording a `memory_reconcile` (decision="flag") event to the hash-chained ledger for each drift, causally linked off the task prompt (`memory_drift.recall_block` + `KorgexAgent._recall_and_reconcile`). Not "agent memory" (a commodity) but *auditable* memory: every recalled fact is verified-current and every staleness call is on the record. No-op when no memory store exists; never creates one.
 - **`korg-ledger@v1` — frozen spec + reference + conformance vectors** (`spec/korg-ledger-v1/`). The tamper-evident hash-chain is extracted out of korgex into a dependency-free reference module (`src/ledger_spec.py`) that korgex now *imports* rather than owns, a normative `SPEC.md` (canonicalization, preimage, chaining, HMAC, verify algorithm), and language-agnostic golden vectors (intact / HMAC / tampered) with **frozen tip hashes** — the cross-implementation oracle for porting the chain into the Rust core. Standalone `conformance.py` harness (exit 0/1) + `_generate_vectors.py` regenerator. This turns "korgex has a hash-chain" into "korg has an open, conformance-tested ledger standard."
 
 ### Changed
