@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-05-29
+
 ### Fixed
 - **`korgex <prompt>` crashed on a clean install (no PyYAML).** The idea-#5 memory-recall wiring made every `run_task` import `src.memory` → `yaml`, but PyYAML was never a declared dependency — fatal (`ModuleNotFoundError`) on any environment without it (regression shipped in v0.5.0–v0.6.0; **caught by the new Gate F CI run, which the local suite masked** because PyYAML was present locally). Fix: declare `pyyaml` as a dependency, and make `_recall_and_reconcile` fail-safe so the memory subsystem can never crash the agent loop (degrades to no recall).
 
