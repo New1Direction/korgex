@@ -1,0 +1,52 @@
+name: self-coding-bench (Gate F)
+
+# Gate F: run korgex-bench end-to-end against a LIVE model and assert the three
+# zero-invariants (no_escape / no_green_on_red / durable_ledger) hold. This is
+# the "trust number" gate — the measured answer to "can korgex write its own
+# code reliably?". Manual-dispatch (it spends real tokens), and a no-op if the
+# KORGEX_API_KEY secret isn't set, so forks/CI without a key stay green.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model (OpenAI-compatible / OpenRouter slug)"
+        default: "z-ai/glm-5.1"
+      only:
+        description: "KORGEX_BENCH_ONLY (comma-separated task ids; blank = all)"
+        default: ""
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" openai
+      - name: Run korgex-bench against a live model
+        env:
+          KORGEX_API_URL: https://openrouter.ai/api/v1
+          KORGEX_API_KEY: ${{ secrets.KORGEX_API_KEY }}
+          KORGEX_PROVIDER: openai
+          KORGEX_MODEL: ${{ github.event.inputs.model }}
+          KORGEX_BENCH_ONLY: ${{ github.event.inputs.only }}
+          KORG_JOURNAL_PATH: ${{ runner.temp }}/bench.jsonl
+          KORGEX_MAX_ITERATIONS: "15"
+        run: |
+          if [ -z "$KORGEX_API_KEY" ]; then
+            echo "::warning::KORGEX_API_KEY secret not set — skipping live bench (Gate F no-op)."
+            exit 0
+          fi
+          # exits non-zero if any of the three invariants is violated
+          python -m src.korgex_bench
+      - name: Verify the bench journal is tamper-evident-intact
+        if: ${{ env.KORGEX_API_KEY != '' }}
+        env:
+          KORGEX_API_KEY: ${{ secrets.KORGEX_API_KEY }}
+        run: python -m src.cli verify "${{ runner.temp }}/bench.jsonl" || true
