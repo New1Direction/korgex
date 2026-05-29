@@ -594,6 +594,70 @@ class KorgBridgeClient:
 _default_client: "KorgLedgerClient | KorgBridgeClient | None" = None
 
 
+class ThreadSafeLedger:
+    """Serializes all writes to an inner ledger client behind one lock.
+
+    The concurrency contract for korgantic's parallel() fan-out: N subagents
+    write ONE journal at once. The Rust registry's seq_id assignment is a
+    non-atomic `last_seq_id += 1` guarded only by an external mutex (a known
+    footgun); wrapping the Python client here makes every record_* call atomic,
+    so concurrent writers can't collide a seq or drop an event — the causal DAG
+    stays well-formed. Same three-method API, so it's a drop-in for run_task.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self._lock = threading.RLock()
+
+    def record_user_prompt(self, prompt, triggered_by=None):
+        with self._lock:
+            return self._inner.record_user_prompt(prompt, triggered_by=triggered_by)
+
+    def record_llm_call(self, **kwargs):
+        with self._lock:
+            return self._inner.record_llm_call(**kwargs)
+
+    def record_tool_call(self, **kwargs):
+        with self._lock:
+            return self._inner.record_tool_call(**kwargs)
+
+
+def verify_dag(events: list) -> list:
+    """Check a list of ledger events forms a well-formed causal DAG.
+
+    Returns a list of error strings ([] == valid). Invariants:
+      - seq_ids are unique;
+      - every triggered_by points to an existing seq_id that is STRICTLY EARLIER.
+    The strictly-earlier rule is what makes rewind-by-truncation sound: cutting
+    at seq N can never orphan a survivor, because a survivor's parent (< its own
+    seq ≤ N) also survives.
+    """
+    errors = []
+    seqs = [e.get("seq_id") for e in events]
+    if len(seqs) != len(set(seqs)):
+        errors.append("duplicate seq_id present")
+    seqset = set(seqs)
+    for e in events:
+        tb = e.get("triggered_by")
+        if tb is None:
+            continue
+        sid = e.get("seq_id")
+        if tb not in seqset:
+            errors.append(f"seq {sid}: triggered_by {tb} does not exist")
+        elif sid is not None and tb >= sid:
+            errors.append(f"seq {sid}: triggered_by {tb} is not strictly earlier")
+    return errors
+
+
+def rewind_events(events: list, target_seq: int) -> list:
+    """Truncate events to seq_id <= target_seq (mirrors the registry's rewind).
+
+    Pure; preserves order. Sound for branched DAGs precisely because edges point
+    strictly backward (see verify_dag) — no survivor is ever left dangling.
+    """
+    return [e for e in events if (e.get("seq_id") is None or e["seq_id"] <= target_seq)]
+
+
 def get_default_client() -> "KorgLedgerClient | KorgBridgeClient":
     """Return the process-wide default ledger client (created on first call).
 
