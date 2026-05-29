@@ -165,7 +165,10 @@ SEED_TASKS = [
 def main():  # pragma: no cover — runs live against a real model
     import json
     repo = os.environ.get("KORGEX_BENCH_REPO", os.getcwd())
-    report = run_bench(SEED_TASKS, default_agent_runner, repo)
+    # KORGEX_BENCH_ONLY=id1,id2 runs a subset (use for a cheap smoke first).
+    only = {t.strip() for t in os.environ.get("KORGEX_BENCH_ONLY", "").split(",") if t.strip()}
+    tasks = [t for t in SEED_TASKS if t.id in only] if only else SEED_TASKS
+    report = run_bench(tasks, default_agent_runner, repo)
     print(json.dumps({k: v for k, v in report.items() if k != "results"}, indent=2))
     bad = sum(report["invariant_violations"].values())
     return 0 if bad == 0 else 1

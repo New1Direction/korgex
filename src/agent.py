@@ -23,6 +23,7 @@ import src.tools_impl  # noqa: F401
 from src.korg_ledger import get_default_client as _korg
 from src.hooks import load_hooks, run_event
 from src.workspace import path_within
+from src.guardrails import is_protected
 
 
 SYSTEM_PROMPT = """You are Korgex, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks: solving bugs, implementing features, writing tests, and refactoring code.
@@ -121,6 +122,11 @@ class KorgexAgent:
         # Workspace isolation (Gate A): when set, Write/Edit whose resolved path
         # escapes this root are blocked. Set by run_isolated_task to a worktree.
         self.workspace_root = None
+
+        # Guardrail fence (Gate G): a list of protected path patterns. When set,
+        # Write/Edit to a guardrail-critical file is blocked (PROTECTED_PATH) so
+        # an unsupervised run can't weaken its own gates.
+        self.protected_paths = None
 
         # Test gate (Gate B): {"command": "pytest -q ..."} → after a run that
         # mutated files, the suite runs and a red result forces success=False.
@@ -579,6 +585,18 @@ class KorgexAgent:
                         messages.append(self._tool_result_turn(call["id"], ws_block))
                         continue  # the write never happens
 
+                    # ── Guardrail fence (Gate G): protect gate-enforcing code ─
+                    gr_block = self._guardrail_block(call)
+                    if gr_block is not None:
+                        korg.record_tool_call(
+                            tool_name="guardrail.block",
+                            args={"tool": call["name"], "path": call["args"].get("file_path")},
+                            result=gr_block,
+                            success=False, duration_ms=0, triggered_by=llm_seq,
+                        )
+                        messages.append(self._tool_result_turn(call["id"], gr_block))
+                        continue  # the agent can't edit its own guardrails
+
                     # ── PreToolUse gate: deterministic, ledger-native ────────
                     # A matching hook can block the call. Every verdict (allow or
                     # deny) is recorded as its own causal event carrying the
@@ -723,31 +741,56 @@ class KorgexAgent:
             }
         return None
 
+    def _guardrail_block(self, call: dict):
+        """Return a blocked-result dict if `call` would edit a guardrail-critical
+        file, else None. Only active when protected_paths is set (Gate G)."""
+        if not self.protected_paths:
+            return None
+        if call.get("name") not in ("Write", "Edit"):
+            return None
+        path = (call.get("args") or {}).get("file_path")
+        if path and is_protected(path, self.protected_paths):
+            return {
+                "error": "blocked: editing a guardrail-critical file requires human approval",
+                "verdict": "PROTECTED_PATH",
+                "reason": f"{path} is a protected guardrail file (Gate G)",
+            }
+        return None
+
     def run_isolated_task(self, task: str, branch: str = None, worktree_path: str = None,
-                          base: str = "HEAD", test_gate: dict = None, **run_kwargs) -> dict:
+                          base: str = "HEAD", test_gate: dict = None,
+                          protect_guardrails: bool = False, **run_kwargs) -> dict:
         """Run a task in an ISOLATED git worktree (Gate A) — the safe way to let
         korgex edit a repo autonomously. Creates a worktree on a throwaway branch,
         points all tools + the workspace guard at it, optionally enforces a test
-        gate, and LEAVES the branch for human review (never auto-merges). Returns
-        the run result plus {worktree, branch}.
+        gate (Gate B) and a guardrail fence (Gate G), and LEAVES the branch for
+        human review (never auto-merges). Returns the run result plus {worktree,
+        branch, merge_gate} — merge_gate flags whether the resulting diff is
+        auto-mergeable or requires human review (touches guardrail code).
         """
         from src import workspace as W
+        from src.guardrails import classify_diff, DEFAULT_PROTECTED
 
+        repo_root = self.repo_root
         branch = branch or ("korgex/" + W._slug(task)[:40])
-        wt = W.create_worktree(self.repo_root, branch, worktree_path=worktree_path, base=base)
+        wt = W.create_worktree(repo_root, branch, worktree_path=worktree_path, base=base)
 
-        prev = (self.workspace_root, self.repo_root, self.test_gate)
+        prev = (self.workspace_root, self.repo_root, self.test_gate, self.protected_paths)
         self.workspace_root = wt
         self.repo_root = wt  # tools resolve here; bash runs here
         if test_gate is not None:
             self.test_gate = test_gate
+        if protect_guardrails:
+            self.protected_paths = DEFAULT_PROTECTED
         try:
             result = self.run_task(task, **run_kwargs)
+            changed = W.changed_paths(wt)
         finally:
-            self.workspace_root, self.repo_root, self.test_gate = prev
+            self.workspace_root, self.repo_root, self.test_gate, self.protected_paths = prev
 
         result["worktree"] = wt
         result["branch"] = branch
+        result["merge_gate"] = classify_diff(changed)
         return result
 
     def _run_subagent(self, args: dict, parent_seq) -> dict:

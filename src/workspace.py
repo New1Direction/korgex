@@ -67,6 +67,23 @@ def create_worktree(repo_root: str, branch: str, worktree_path: str = None,
     return wt
 
 
+def changed_paths(worktree: str) -> list:
+    """Repo-relative paths the agent changed in the worktree (modified + new),
+    from `git status --porcelain`. Feeds the Gate G merge gate."""
+    # --untracked-files=all so a new file in a new dir is listed individually
+    # (plain --porcelain collapses it to the directory, hiding the real path).
+    out = subprocess.run(["git", "-C", worktree, "status", "--porcelain", "--untracked-files=all"],
+                         capture_output=True, text=True).stdout
+    paths = []
+    for line in out.splitlines():
+        if len(line) > 3:
+            p = line[3:].strip().strip('"')
+            if " -> " in p:  # rename: take the destination
+                p = p.split(" -> ", 1)[1]
+            paths.append(p)
+    return paths
+
+
 def remove_worktree(repo_root: str, worktree_path: str) -> None:
     """Remove a worktree and prune the registration. Best-effort; never raises."""
     subprocess.run(["git", "-C", repo_root, "worktree", "remove", "--force", worktree_path],
