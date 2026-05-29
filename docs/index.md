@@ -11,3 +11,4 @@ Welcome to Korgex — an autonomous AI software engineer that integrates with yo
 - [CLI Reference](/docs/cli-reference) — Command-line interface documentation
 - [Tools Reference](/docs/tools-reference) — Complete tool surface documentation
 - [Korgex vs The Rest](/docs/comparison) — How Korgex compares to other coding agents
+- [Self-Coding Bench](/docs/self-coding-bench) — Live reliability data: can Korgex be trusted to edit its own code?
