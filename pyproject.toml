@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "korgex"
-version = "0.6.1"
+version = "0.6.2"
 description = "Autonomous AI coding agent — provider-agnostic, MCP-native, plan-first"
 readme = "README.md"
 license = { text = "MIT" }
@@ -36,6 +36,7 @@ dependencies = [
     "websockets>=11.0",
     "httpx>=0.24.0",
     "pyyaml>=6.0",
+    "requests>=2.25.0",
 ]
 
 [project.optional-dependencies]
