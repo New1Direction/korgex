@@ -146,7 +146,7 @@ class _ScriptedAgent(KorgexAgent):
     def _get_client(self):
         return object()
 
-    def _call(self, client, messages, tools, output_schema=None):
+    def _call(self, client, messages, tools, output_schema=None, system_prompt=None):
         self.calls.append({"output_schema": output_schema})
         return self._responses.pop(0)
 

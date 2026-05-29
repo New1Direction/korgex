@@ -261,7 +261,12 @@ class KorgexAgent:
             base_url=os.environ.get("KORGEX_API_URL", "https://api.openai.com/v1"),
         )
 
-    def _call(self, client, messages: list, tools: list, output_schema: dict = None) -> object:
+    def _call(self, client, messages: list, tools: list, output_schema: dict = None,
+              system_prompt: str = None) -> object:
+        # `system_prompt` is passed explicitly (not read off self) so concurrent
+        # run_task calls on one agent instance can't clobber each other's prompt.
+        sp = system_prompt if system_prompt is not None else self.system_prompt
+
         # Schema-constrained final answer: force a non-streamed, structured reply.
         # (You can't render a partial validated object, so streaming is bypassed
         # when output_schema is set.)
@@ -270,7 +275,7 @@ class KorgexAgent:
             extra = build_request_kwargs(output_schema, self.provider)
             if self.provider == "anthropic":
                 return client.messages.create(
-                    model=self.model, system=self.system_prompt,
+                    model=self.model, system=sp,
                     messages=messages, max_tokens=4096, **extra,
                 )
             return client.chat.completions.create(
@@ -279,14 +284,14 @@ class KorgexAgent:
 
         # Interactive streaming paths
         if self.interactive and self.provider == "anthropic":
-            return self._call_anthropic_streaming(client, messages, tools)
+            return self._call_anthropic_streaming(client, messages, tools, sp)
         if self.interactive and self.provider == "openai":
             return self._call_openai_streaming(client, messages, tools)
 
         # Non-streaming
         if self.provider == "anthropic":
             return client.messages.create(
-                model=self.model, system=self.system_prompt,
+                model=self.model, system=sp,
                 messages=messages, tools=tools, max_tokens=4096,
             )
         return client.chat.completions.create(
@@ -294,13 +299,14 @@ class KorgexAgent:
             tools=tools, max_tokens=4096,
         )
 
-    def _call_anthropic_streaming(self, client, messages: list, tools: list):
+    def _call_anthropic_streaming(self, client, messages: list, tools: list,
+                                  system_prompt: str = None):
         """Stream Anthropic messages through the InteractiveSession renderer."""
         from src.interactive import SSEMessage, SSEEvent
         session = self._get_session()
 
         with client.messages.stream(
-            model=self.model, system=self.system_prompt,
+            model=self.model, system=(system_prompt if system_prompt is not None else self.system_prompt),
             messages=messages, tools=tools, max_tokens=4096,
         ) as stream:
             for event in stream:
@@ -455,8 +461,12 @@ class KorgexAgent:
                  parent_seq: int = None, tools_filter=None) -> dict:
         korg = self.ledger if self.ledger is not None else _korg()
         hooks = self.hooks if self.hooks is not None else load_hooks(self.repo_root)
-        # Memory injection: assemble the effective prompt from base + AGENTS.md + memory.
-        self.system_prompt = self._assemble_system_prompt()
+        # Memory injection: assemble base + AGENTS.md + memory. Held in a LOCAL and
+        # threaded through _call so concurrent run_task calls (korgantic fan-out)
+        # can't clobber each other via shared self.system_prompt. The attribute is
+        # still updated for introspection/back-compat, but is never the read source.
+        sys_prompt = self._assemble_system_prompt()
+        self.system_prompt = sys_prompt
 
         # UserPromptSubmit hooks may inject context (advisory; cannot block).
         # The ledger records the ORIGINAL prompt; only the model's view is augmented.
@@ -476,7 +486,7 @@ class KorgexAgent:
             messages = [{"role": "user", "content": effective_prompt}]
         else:
             messages = [
-                {"role": "system", "content": self.system_prompt},
+                {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": effective_prompt},
             ]
 
@@ -498,7 +508,7 @@ class KorgexAgent:
             for i in range(max_iter):
                 # ── korg: time the LLM round-trip ──────────────────────────
                 _llm_t0 = time.monotonic()
-                response = self._call(client, messages, tools_payload)
+                response = self._call(client, messages, tools_payload, system_prompt=sys_prompt)
                 _llm_ms = int((time.monotonic() - _llm_t0) * 1000)
 
                 tool_calls = self._extract_tool_calls(response)
@@ -530,7 +540,7 @@ class KorgexAgent:
                     if output_schema is not None:
                         return self._finalize_structured(
                             client, messages, response, output_schema,
-                            llm_seq, korg, i + 1, prompt_seq,
+                            llm_seq, korg, i + 1, prompt_seq, sys_prompt,
                         )
                     # Reuse round_text we already extracted above; saves a
                     # second pass over response.content.
@@ -701,7 +711,7 @@ class KorgexAgent:
 
     def _finalize_structured(self, client, messages: list, last_response,
                              output_schema: dict, prior_llm_seq, korg,
-                             iterations: int, root_seq=None) -> dict:
+                             iterations: int, root_seq=None, system_prompt=None) -> dict:
         """Coerce the conversation's final answer into a schema-conforming object.
 
         Runs a forced structured call, validates client-side, retries once with
@@ -722,7 +732,8 @@ class KorgexAgent:
         obj = None
         errors = ["no structured object returned"]
         for _attempt in range(2):  # initial + one retry
-            resp = self._call(client, convo, [], output_schema=output_schema)
+            resp = self._call(client, convo, [], output_schema=output_schema,
+                              system_prompt=system_prompt)
             obj = extract(resp, self.provider)
             errors = validate(obj, output_schema) if obj is not None else \
                 ["no structured object returned"]

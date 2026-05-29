@@ -603,6 +603,10 @@ class ThreadSafeLedger:
     footgun); wrapping the Python client here makes every record_* call atomic,
     so concurrent writers can't collide a seq or drop an event — the causal DAG
     stays well-formed. Same three-method API, so it's a drop-in for run_task.
+
+    ASSUMPTION: callers must route ALL ledger writes through this wrapper (i.e.
+    through self.ledger). A direct call to the inner client bypasses the lock and
+    can corrupt the DAG. run_task satisfies this — it only writes via self.ledger.
     """
 
     def __init__(self, inner) -> None:
