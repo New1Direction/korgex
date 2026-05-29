@@ -287,6 +287,20 @@ korgex --mode execute "implement the plan we just made"
 
 korgex includes a native MCP (Model Context Protocol) client. Any MCP server in your `mcp.json` becomes part of the agent's tool surface.
 
+### As an MCP server (verify / audit / import from any host)
+
+korgex also *is* an MCP server — `korgex mcp-server` exposes the verifiable-cognition substrate over JSON-RPC/stdio so any MCP host (Claude Desktop, Cursor, …) can call:
+
+- **`korg_verify`** — prove a korg-ledger journal is tamper-evident-intact;
+- **`korg_audit`** — audit the host agent's own Claude Code logs (import + verify), zero-config;
+- **`korg_import`** — import a vendor session transcript into a verifiable chained ledger.
+
+Wire it into your host's MCP config:
+
+```json
+{ "mcpServers": { "korg-ledger": { "command": "korgex", "args": ["mcp-server"] } } }
+```
+
 ### Configure
 
 Place an `mcp.json` in your repo root (matches the VS Code convention):
