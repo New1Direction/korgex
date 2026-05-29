@@ -20,7 +20,47 @@ Architecture:
 import json
 import os
 import re
-from typing import Optional
+from typing import Callable, Optional
+
+
+def auto_heal_to_green(first_gate: dict, *, run_gate: Callable[[], dict],
+                       heal_fn: Callable[[str], None],
+                       record_event: Callable[..., int],
+                       max_attempts: int = 3,
+                       triggered_by: Optional[int] = None) -> dict:
+    """Drive a RED test gate back to green, recording a verifiable repair trail.
+
+    Given an already-failing `first_gate` ({passed, exit_code, output}), repeat
+    up to `max_attempts`: call `heal_fn(failure_output)` (which spawns a healing
+    subagent / applies a fix), re-run the gate via `run_gate()`, and record a
+    `heal.attempt` event. On the first green, record `heal.resolved` and return;
+    if attempts are exhausted while still red, record `heal.exhausted`.
+
+    `record_event(tool_name, args, result, success, triggered_by) -> seq_id` is
+    the ledger sink — because it's hash-chained, the whole repair becomes an
+    auditable, replayable chain. Events are causally linked: the first attempt is
+    triggered_by the red gate, each subsequent event by the prior one.
+
+    Returns the final gate result.
+    """
+    gate = first_gate
+    last_seq = triggered_by
+    for attempt in range(1, max_attempts + 1):
+        heal_fn(gate.get("output", ""))
+        gate = run_gate()
+        last_seq = record_event(
+            "heal.attempt",
+            {"attempt": attempt, "max_attempts": max_attempts},
+            {"verdict": "PASSED" if gate["passed"] else "FAILED",
+             "exit_code": gate["exit_code"]},
+            gate["passed"], last_seq)
+        if gate["passed"]:
+            record_event("heal.resolved", {"attempts": attempt},
+                         {"exit_code": 0}, True, last_seq)
+            return gate
+    record_event("heal.exhausted", {"attempts": max_attempts},
+                 {"exit_code": gate["exit_code"]}, False, last_seq)
+    return gate
 
 
 class TDDHealer:

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Auto-heal-to-green on a red test gate.** When the in-loop test gate (Gate B) goes red and healing is enabled (`agent.heal_attempts > 0` + `heal_fn`), korgex auto-spawns a healing subagent with the failure log and re-runs the gate, bounded, until red→green or attempts exhausted (`src/self_healing.auto_heal_to_green`). Each attempt and the final `heal.resolved`/`heal.exhausted` verdict is recorded as a hash-chained ledger event, causally linked off the red gate — so a self-repair is itself a verifiable, replayable trail (korgex's analog of thumper's recovery loop). Opt-in; default off.
 - **`korg-ledger@v1` — frozen spec + reference + conformance vectors** (`spec/korg-ledger-v1/`). The tamper-evident hash-chain is extracted out of korgex into a dependency-free reference module (`src/ledger_spec.py`) that korgex now *imports* rather than owns, a normative `SPEC.md` (canonicalization, preimage, chaining, HMAC, verify algorithm), and language-agnostic golden vectors (intact / HMAC / tampered) with **frozen tip hashes** — the cross-implementation oracle for porting the chain into the Rust core. Standalone `conformance.py` harness (exit 0/1) + `_generate_vectors.py` regenerator. This turns "korgex has a hash-chain" into "korg has an open, conformance-tested ledger standard."
 
 ### Changed
