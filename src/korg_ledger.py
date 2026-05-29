@@ -365,13 +365,17 @@ class KorgLedgerClient:
 
         self._get_writer().enqueue(body)
 
-    def record_user_prompt(self, prompt: str) -> int | None:
+    def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int | None:
         """
-        Emit the root AgentToolCall for a user prompt synchronously.
+        Emit the user_prompt event synchronously.
 
-        This is the only synchronous call because we need the seq_id to wire
-        triggered_by on the first LLM event. Blocks for at most timeout_secs.
-        Returns the assigned seq_id, or None if korg is unavailable.
+        This is synchronous because we need the seq_id to wire triggered_by on
+        the first LLM event. Blocks for at most timeout_secs. Returns the
+        assigned seq_id, or None if korg is unavailable.
+
+        `triggered_by` is None for a top-level session (a true root), or the
+        parent's seq_id when this prompt is a SUBAGENT spawned by another run —
+        that chains the whole multi-agent tree into one causal DAG.
         """
         return self._post_sync(
             tool_name="user_prompt",
@@ -379,7 +383,7 @@ class KorgLedgerClient:
             result={},
             success=True,
             duration_ms=0,
-            triggered_by=None,
+            triggered_by=triggered_by,
         )
 
     def record_llm_call(
@@ -549,8 +553,15 @@ class KorgBridgeClient:
             payload_refs=payload_refs,
         )
 
-    def record_user_prompt(self, prompt: str) -> int:
-        return self._bridge.record_user_prompt(prompt)
+    def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int:
+        # Subagent roots pass the parent's seq so the multi-agent run is one DAG.
+        # Forward-compatible: older bridges without the param degrade to a root.
+        if triggered_by is None:
+            return self._bridge.record_user_prompt(prompt)
+        try:
+            return self._bridge.record_user_prompt(prompt, triggered_by)
+        except TypeError:
+            return self._bridge.record_user_prompt(prompt)
 
     def record_llm_call(
         self,
@@ -581,6 +592,74 @@ class KorgBridgeClient:
 # ---------------------------------------------------------------------------
 
 _default_client: "KorgLedgerClient | KorgBridgeClient | None" = None
+
+
+class ThreadSafeLedger:
+    """Serializes all writes to an inner ledger client behind one lock.
+
+    The concurrency contract for korgantic's parallel() fan-out: N subagents
+    write ONE journal at once. The Rust registry's seq_id assignment is a
+    non-atomic `last_seq_id += 1` guarded only by an external mutex (a known
+    footgun); wrapping the Python client here makes every record_* call atomic,
+    so concurrent writers can't collide a seq or drop an event — the causal DAG
+    stays well-formed. Same three-method API, so it's a drop-in for run_task.
+
+    ASSUMPTION: callers must route ALL ledger writes through this wrapper (i.e.
+    through self.ledger). A direct call to the inner client bypasses the lock and
+    can corrupt the DAG. run_task satisfies this — it only writes via self.ledger.
+    """
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self._lock = threading.RLock()
+
+    def record_user_prompt(self, prompt, triggered_by=None):
+        with self._lock:
+            return self._inner.record_user_prompt(prompt, triggered_by=triggered_by)
+
+    def record_llm_call(self, **kwargs):
+        with self._lock:
+            return self._inner.record_llm_call(**kwargs)
+
+    def record_tool_call(self, **kwargs):
+        with self._lock:
+            return self._inner.record_tool_call(**kwargs)
+
+
+def verify_dag(events: list) -> list:
+    """Check a list of ledger events forms a well-formed causal DAG.
+
+    Returns a list of error strings ([] == valid). Invariants:
+      - seq_ids are unique;
+      - every triggered_by points to an existing seq_id that is STRICTLY EARLIER.
+    The strictly-earlier rule is what makes rewind-by-truncation sound: cutting
+    at seq N can never orphan a survivor, because a survivor's parent (< its own
+    seq ≤ N) also survives.
+    """
+    errors = []
+    seqs = [e.get("seq_id") for e in events]
+    if len(seqs) != len(set(seqs)):
+        errors.append("duplicate seq_id present")
+    seqset = set(seqs)
+    for e in events:
+        tb = e.get("triggered_by")
+        if tb is None:
+            continue
+        sid = e.get("seq_id")
+        if tb not in seqset:
+            errors.append(f"seq {sid}: triggered_by {tb} does not exist")
+        elif sid is not None and tb >= sid:
+            errors.append(f"seq {sid}: triggered_by {tb} is not strictly earlier")
+    return errors
+
+
+def rewind_events(events: list, target_seq: int) -> list:
+    """Truncate events to seq_id <= target_seq (mirrors the registry's rewind).
+
+    Pure; preserves order. Sound for branched DAGs precisely because edges point
+    strictly backward (see verify_dag) — no survivor is ever left dangling.
+    """
+    return [e for e in events if (e.get("seq_id") is None or e["seq_id"] <= target_seq)]
 
 
 def get_default_client() -> "KorgLedgerClient | KorgBridgeClient":

@@ -248,8 +248,20 @@ SUBCOMMANDS = {
 
 
 def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
-                   mode: str = None, mcp: bool = False, quiet: bool = False) -> int:
+                   mode: str = None, mcp: bool = False, quiet: bool = False,
+                   output_schema_path: str = None, effort: str = None) -> int:
     """Spawn the agent loop on a naked prompt. Returns a shell exit code."""
+    output_schema = None
+    if output_schema_path:
+        try:
+            import json as _json
+            with open(output_schema_path) as f:
+                output_schema = _json.load(f)
+        except Exception as e:
+            print(f"korgex: could not read --output-schema {output_schema_path}: {e}",
+                  file=sys.stderr)
+            return 2
+
     try:
         from src.agent import KorgexAgent
     except Exception as e:
@@ -271,7 +283,17 @@ def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
     try:
         agent = KorgexAgent(model=model, mode=mode,
                               interactive=interactive, load_mcp=mcp)
-        result = agent.run_task(prompt)
+        if effort:
+            # korgantic max-power mode: effort-scaled workflow chain.
+            kr = agent.run_korgantic_task(prompt, effort=effort)
+            print(f"\nkorgantic[{kr['effort']}] — phases: {' → '.join(kr['phases_run'])}")
+            if kr.get("findings"):
+                print(f"  confirmed findings: {len(kr['findings'])}")
+            missing = (kr.get("artifacts") or {}).get("completeness")
+            if missing:
+                print(f"  completeness gaps: {len(missing)}")
+            return 0
+        result = agent.run_task(prompt, output_schema=output_schema)
     except RuntimeError as e:
         print(f"korgex: {e}", file=sys.stderr)
         return 2
@@ -319,6 +341,15 @@ def _build_prompt_parser():
     p.add_argument("--quiet", "-q", action="store_true",
                    help="Disable streaming TUI; print only the final result")
     p.add_argument("--resume", action="store_true", help="Resume the last session")
+    p.add_argument("--output-schema",
+                   help="Path to a JSON Schema; the final answer is forced to "
+                        "conform and is validated before returning (good for CI/piping).")
+    p.add_argument("--effort",
+                   choices=["auto", "low", "medium", "high", "xhigh", "ultracode"],
+                   help="korgantic max-power mode: scale the effort. Chains "
+                        "understand→design→implement→review with adversarial verify, "
+                        "multi-modal sweep, completeness critic, loop-until-dry. "
+                        "ultracode = token cost is not a constraint.")
     p.add_argument("prompt_words", nargs="*", help="Task description for the agent")
     return p
 
@@ -366,7 +397,8 @@ def main():
         return 0
     return run_agent_shim(" ".join(args.prompt_words),
                           model=args.model, resume=args.resume,
-                          mode=args.mode, mcp=args.mcp, quiet=args.quiet)
+                          mode=args.mode, mcp=args.mcp, quiet=args.quiet,
+                          output_schema_path=args.output_schema, effort=args.effort)
 
 
 if __name__ == "__main__":
