@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-05-29
+
 ### Added
 - **`korgex audit` — zero-config verifiable audit of the agent you already run.** Auto-discovers your Claude Code sessions (`~/.claude/projects/**/*.jsonl`), imports the latest into a korg-ledger@v1 chained journal, verifies it, and reports a forensic summary (event count, activity breakdown, tamper-status). No setup, no buy-in — point it at logs you already have and get an instant tamper-evident audit. `import_adapters.discover_claude_code_sessions()` + the `audit` subcommand. The adoption on-ramp for the verifiable-cognition substrate.
 
