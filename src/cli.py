@@ -263,6 +263,37 @@ def cmd_verify():
     return 1
 
 
+def cmd_drift():
+    """Scan persistent memories for drift against their recorded source baselines."""
+    from src import memory as M
+    from src import memory_drift as D
+
+    M.init_memory(project_root=os.getcwd())
+    memories = M.list_memories()
+    if not memories:
+        print("  No memories to scan.")
+        return 0
+
+    report = D.scan(memories, repo_root=os.getcwd())
+    n = len(memories)
+    fresh, drifted = len(report["fresh"]), len(report["drifted"])
+    missing, unanchored = len(report["missing"]), len(report["unanchored"])
+
+    if not report["has_drift"]:
+        extra = f" ({unanchored} unanchored)" if unanchored else ""
+        print(f"  ✓ {n} memories checked — no drift "
+              f"({fresh} fresh){extra}")
+        return 0
+
+    print(f"  ✗ memory DRIFT — {drifted} drifted, {missing} missing "
+          f"of {n} ({fresh} fresh, {unanchored} unanchored):")
+    for v in report["verdicts"]:
+        if v.get("status") in ("drifted", "missing"):
+            print(f"      - {v['name']}: {v['status']} — {v['reason']}")
+    print("    reconcile (keep / refresh / discard) is recorded to the ledger.")
+    return 1
+
+
 # ── Entry Point ──────────────────────────────────────────────────────────
 
 import argparse
@@ -276,6 +307,7 @@ SUBCOMMANDS = {
     "stop":              cmd_stop,
     "install-extension": cmd_install_extension,
     "verify":            cmd_verify,
+    "drift":             cmd_drift,
 }
 
 
