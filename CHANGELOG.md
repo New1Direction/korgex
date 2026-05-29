@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-29
+
+### Added
+- **Tamper-evident hash-chain ledger + `korgex verify`.** Every journal entry is hash-linked (`prev_hash`/`entry_hash`) into a chain; `korgex verify [journal]` walks it and proves the run was not edited, deleted, reordered, or spliced after the fact, localizing any tamper to the offending `seq_id` (exit 0/1, CI-friendly). With `KORGEX_LEDGER_HMAC_KEY` set the chain is tamper-*proof*, not just tamper-evident. The ledger stops being a log you trust and becomes a record you can check — the core of korgex's verifiable-cognition positioning.
+- **Ledger-native memory-drift + `korgex drift`.** Memories anchor a sha256 baseline of their source at write time; `korgex drift` scans for drift as an exact content-hash signal, and the keep/refresh/discard reconcile decision is recorded as a `memory_reconcile` event on the tamper-evident chain — an auditable, replayable answer to the trust-hierarchy problem incumbents punt on.
+- **`KORGEX_PROVIDER` transport override.** Force the transport (`openai`|`anthropic`) independent of the model id, so Claude/Gemini models can be driven through any OpenAI-compatible gateway (e.g. OpenRouter) on the same provider-agnostic loop.
+- `--introspect` emits a `korg:introspect@v1` document describing the running agent.
+
+### Fixed
+- **Strict-provider-valid tool schemas.** Array/object tool parameters now preserve their `items`/`properties`, so strict providers (Gemini) accept korgex's tool definitions instead of 400-ing the request. Caught by a real Gemini run, not a fixture.
+- **Blob store follows the journal path.** Content-addressed blobs are written beside the journal (tracking `KORG_JOURNAL_PATH`) instead of a cwd-relative `.korg/blobs`, so isolated runs no longer leak into the source checkout. Caught live by the self-coding bench's `no_escape` invariant.
+
 ### Changed
-- README refreshed: v0.3.2 install link, korg/korgchat/thumper cross-references documented.
-- `.gitignore` extended for transient artifacts (`.hypothesis/`, `ecosystem_audit_*.html`).
+- README install link bumped to v0.4.0 / `korgex-0.4.0-py3-none-any.whl`; korg/korgchat/thumper cross-references documented.
+- New `docs/self-coding-bench.md`: live reliability data across five third-party models (`glm-5.1`, `qwen3.7-max`, `gemini-3.5-flash`, `claude-sonnet-4.6`, `claude-opus-4.7`) — all 2/2 on the harder bands with zero invariant violations.
+- `src/__init__.__version__` now derives from package metadata (was a stale hardcoded `2.0.0`).
+- `.gitignore` extended for transient artifacts (`.korg/`, `.hypothesis/`, `ecosystem_audit_*.html`).
 
 ## [0.3.2] — 2026-05-27
 

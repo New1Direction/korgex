@@ -23,5 +23,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.agent import KorgexAgent, print_tool_schemas
 
-__version__ = "2.0.0"
+try:  # single source of truth is pyproject.toml; read it via package metadata
+    from importlib.metadata import version as _pkg_version
+    __version__ = _pkg_version("korgex")
+except Exception:
+    __version__ = "0.0.0+dev"
 __all__ = ["KorgexAgent", "print_tool_schemas"]
