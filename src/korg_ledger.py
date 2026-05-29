@@ -733,10 +733,18 @@ class ThreadSafeLedger:
 # "has anyone touched the bytes since they were written?".
 # ---------------------------------------------------------------------------
 
-GENESIS_HASH = "0" * 64
-
-# These fields ARE the hash / signature, so they're excluded from the preimage.
-_HASH_FIELDS = ("entry_hash",)
+# The tamper-evident hash-chain is the korg-ledger@v1 spec — owned by the
+# reference module, not by korgex. We import it so korgex (and the Rust core,
+# idea #2) verify against ONE definition + the same conformance vectors.
+from src.ledger_spec import (  # noqa: E402,F401  (re-exported for back-compat)
+    GENESIS_HASH,
+    SPEC_VERSION,
+    canonicalize,
+    chain_hash,
+    rewind_events,
+    verify_chain,
+    verify_dag,
+)
 
 
 def _ledger_hmac_key() -> bytes | None:
@@ -744,50 +752,6 @@ def _ledger_hmac_key() -> bytes | None:
     (unforgeable without the key); absent → tamper-EVIDENT against a trusted tip."""
     k = os.environ.get("KORG_LEDGER_HMAC_KEY")
     return k.encode("utf-8") if k else None
-
-
-def chain_hash(event: dict, key: bytes | None = None) -> str:
-    """Compute an event's chain hash.
-
-    Preimage = canonical JSON of the event with its hash field(s) removed.
-    prev_hash IS part of the preimage — that's what links each entry to the one
-    before it, so a delete/insert/reorder breaks the next link. With `key`, the
-    digest is HMAC-SHA256; otherwise plain SHA-256.
-    """
-    preimage = {k: v for k, v in event.items() if k not in _HASH_FIELDS}
-    data = _canonical_bytes(preimage)
-    if key is not None:
-        return hmac.new(key, data, hashlib.sha256).hexdigest()
-    return hashlib.sha256(data).hexdigest()
-
-
-def verify_chain(events: list, key: bytes | None = None) -> list:
-    """Recompute the hash-chain and report tampering. Returns [] iff intact.
-
-    Each error is localized to a seq_id. Catches:
-      - content edits      → entry_hash no longer matches the recomputed hash;
-      - delete/insert/reorder → an event's prev_hash no longer equals the prior
-        event's entry_hash (broken link).
-    With `key`, recomputation uses HMAC, so a tail rewritten without the key
-    fails even though it is internally self-consistent.
-    """
-    errors = []
-    expected_prev = GENESIS_HASH
-    for e in events:
-        sid = e.get("seq_id")
-        stored = e.get("entry_hash")
-        if stored is None:
-            errors.append(f"seq {sid}: missing entry_hash (event is not chained)")
-            expected_prev = None
-            continue
-        if e.get("prev_hash") != expected_prev:
-            errors.append(
-                f"seq {sid}: prev_hash breaks the chain "
-                f"(an event was inserted, deleted, or reordered)")
-        if chain_hash(e, key=key) != stored:
-            errors.append(f"seq {sid}: entry_hash mismatch (content was tampered)")
-        expected_prev = stored
-    return errors
 
 
 def verify_journal_file(path: str, key: bytes | None = None) -> list:
@@ -799,42 +763,6 @@ def verify_journal_file(path: str, key: bytes | None = None) -> list:
         if line:
             events.append(json.loads(line))
     return verify_dag(events) + verify_chain(events, key=key)
-
-
-def verify_dag(events: list) -> list:
-    """Check a list of ledger events forms a well-formed causal DAG.
-
-    Returns a list of error strings ([] == valid). Invariants:
-      - seq_ids are unique;
-      - every triggered_by points to an existing seq_id that is STRICTLY EARLIER.
-    The strictly-earlier rule is what makes rewind-by-truncation sound: cutting
-    at seq N can never orphan a survivor, because a survivor's parent (< its own
-    seq ≤ N) also survives.
-    """
-    errors = []
-    seqs = [e.get("seq_id") for e in events]
-    if len(seqs) != len(set(seqs)):
-        errors.append("duplicate seq_id present")
-    seqset = set(seqs)
-    for e in events:
-        tb = e.get("triggered_by")
-        if tb is None:
-            continue
-        sid = e.get("seq_id")
-        if tb not in seqset:
-            errors.append(f"seq {sid}: triggered_by {tb} does not exist")
-        elif sid is not None and tb >= sid:
-            errors.append(f"seq {sid}: triggered_by {tb} is not strictly earlier")
-    return errors
-
-
-def rewind_events(events: list, target_seq: int) -> list:
-    """Truncate events to seq_id <= target_seq (mirrors the registry's rewind).
-
-    Pure; preserves order. Sound for branched DAGs precisely because edges point
-    strictly backward (see verify_dag) — no survivor is ever left dangling.
-    """
-    return [e for e in events if (e.get("seq_id") is None or e["seq_id"] <= target_seq)]
 
 
 def get_default_client():
