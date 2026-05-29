@@ -47,8 +47,8 @@ def _looks_anthropic(model_id: str) -> bool:
     return "claude" in m or m.startswith("anthropic/")
 
 
-# Read-only tool subset handed to non-mutating subagents.
-_READONLY_SUBAGENT_TOOLS = ["Read", "Grep", "Glob"]
+# Read-only tool subset handed to non-mutating subagents (Recall is read-only).
+_READONLY_SUBAGENT_TOOLS = ["Read", "Grep", "Glob", "Recall"]
 
 # Map the Agent tool's model alias → a concrete model id.
 _MODEL_ALIASES = {
@@ -113,6 +113,10 @@ class KorgexAgent:
         # nested KorgexAgent. Overridable in tests / for custom subagent runtimes.
         self.subagent_factory = None
 
+        # Effective system prompt. Recomputed per run_task from the base prompt +
+        # project instructions (AGENTS.md/CLAUDE.md) + persistent memory index.
+        self.system_prompt = SYSTEM_PROMPT
+
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
         if interactive is None:
@@ -128,6 +132,41 @@ class KorgexAgent:
 
         # Lazy: only construct the session when actually streaming
         self._session = None
+
+    def _assemble_system_prompt(self) -> str:
+        """Base prompt + project instructions + persistent memory index.
+
+        Reads AGENTS.md/CLAUDE.md and an EXISTING memory store — never creates a
+        memory dir as a side effect of running a task.
+        """
+        parts = [SYSTEM_PROMPT]
+
+        # Project instructions: AGENTS.md (preferred) or CLAUDE.md.
+        for fname in ("AGENTS.md", "CLAUDE.md"):
+            path = os.path.join(self.repo_root, fname)
+            if os.path.isfile(path):
+                try:
+                    content = open(path).read().strip()
+                except OSError:
+                    content = ""
+                if content:
+                    parts.append(f"# Project instructions ({fname})\n\n{content}")
+                break
+
+        # Persistent memory index, if one already exists.
+        for mem_root in (os.path.join(self.repo_root, ".korgex", "memory"),
+                         os.path.join(os.path.expanduser("~"), ".korgex", "memory")):
+            idx = os.path.join(mem_root, "MEMORY.md")
+            if os.path.isfile(idx):
+                try:
+                    content = open(idx).read().strip()
+                except OSError:
+                    content = ""
+                if content and content != "# Memory Index":
+                    parts.append(f"# Memory\n\n{content[:3000]}")
+                break
+
+        return "\n\n".join(parts)
 
     def _get_session(self):
         """Create the InteractiveSession on demand (avoids Rich import in non-TTY runs)."""
@@ -231,7 +270,7 @@ class KorgexAgent:
             extra = build_request_kwargs(output_schema, self.provider)
             if self.provider == "anthropic":
                 return client.messages.create(
-                    model=self.model, system=SYSTEM_PROMPT,
+                    model=self.model, system=self.system_prompt,
                     messages=messages, max_tokens=4096, **extra,
                 )
             return client.chat.completions.create(
@@ -247,7 +286,7 @@ class KorgexAgent:
         # Non-streaming
         if self.provider == "anthropic":
             return client.messages.create(
-                model=self.model, system=SYSTEM_PROMPT,
+                model=self.model, system=self.system_prompt,
                 messages=messages, tools=tools, max_tokens=4096,
             )
         return client.chat.completions.create(
@@ -261,7 +300,7 @@ class KorgexAgent:
         session = self._get_session()
 
         with client.messages.stream(
-            model=self.model, system=SYSTEM_PROMPT,
+            model=self.model, system=self.system_prompt,
             messages=messages, tools=tools, max_tokens=4096,
         ) as stream:
             for event in stream:
@@ -416,6 +455,8 @@ class KorgexAgent:
                  parent_seq: int = None, tools_filter=None) -> dict:
         korg = self.ledger if self.ledger is not None else _korg()
         hooks = self.hooks if self.hooks is not None else load_hooks(self.repo_root)
+        # Memory injection: assemble the effective prompt from base + AGENTS.md + memory.
+        self.system_prompt = self._assemble_system_prompt()
 
         # UserPromptSubmit hooks may inject context (advisory; cannot block).
         # The ledger records the ORIGINAL prompt; only the model's view is augmented.
@@ -435,7 +476,7 @@ class KorgexAgent:
             messages = [{"role": "user", "content": effective_prompt}]
         else:
             messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": effective_prompt},
             ]
 
