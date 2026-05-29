@@ -22,7 +22,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
-from src.sandbox import SandboxManager
+
+def _default_agent_factory(task: "SubTask"):
+    """Build a real, non-interactive KorgexAgent for a subtask.
+
+    Lazy import keeps swarm importable without pulling the whole agent stack and
+    avoids any import cycle with agent.py.
+    """
+    from src.agent import KorgexAgent
+    return KorgexAgent(repo_root=task.repo_root, interactive=False)
 
 
 @dataclass
@@ -95,44 +103,47 @@ Rules:
 
 
 class SubagentWorker:
-    """A subagent that runs a specialized task in its own sandbox."""
-    
-    def __init__(self, task: SubTask, sandbox_mode: str = None):
+    """A subagent that runs a specialized task as a real, isolated agent run.
+
+    Previously this piped the prompt into a bare `python3` (which executed no
+    LLM at all). It now constructs a real KorgexAgent and runs the task, so the
+    swarm performs actual work and every subagent's events land in the shared
+    korg ledger.
+    """
+
+    def __init__(self, task: SubTask, sandbox_mode: str = None, agent_factory=None):
         self.task = task
-        self.sandbox = SandboxManager.get(sandbox_mode)
+        # Retained for API compatibility; execution no longer gates on a sandbox.
+        self.sandbox_mode = sandbox_mode
+        self.agent_factory = agent_factory
         self.prompt = AGENT_PROMPTS.get(task.agent_type, AGENT_PROMPTS["test"])
-    
+
     def run(self) -> SubTaskResult:
-        """Execute the sub-task."""
+        """Execute the sub-task by running a real agent."""
         start = time.time()
-        
         try:
-            # Setup sandbox with the repo
-            self.sandbox.setup(self.task.repo_root)
-            
-            # Build the subagent task
-            cmd = f"""cat << 'PROMPT' | python3
-{self.prompt}
+            factory = self.agent_factory or _default_agent_factory
+            agent = factory(self.task)
+            full_prompt = (
+                f"{self.prompt}\n\nTASK: {self.task.description}\n\n"
+                f"CONTEXT: {json.dumps(self.task.context)}"
+            )
+            result = agent.run_task(full_prompt)
 
-TASK: {self.task.description}
-
-CONTEXT: {json.dumps(self.task.context)}
-PROMPT
-"""
-            result = self.sandbox.run(cmd)
-            
             duration = time.time() - start
+            success = bool(result.get("success"))
+            output = str(result.get("result", ""))
             return SubTaskResult(
                 task_id=self.task.id,
                 agent_type=self.task.agent_type,
                 description=self.task.description,
-                success=result.get("exit_code", -1) == 0,
-                output=result.get("stdout", ""),
-                summary=result.get("stdout", "")[:500],
+                success=success,
+                output=output,
+                summary=output[:500],
                 duration_seconds=round(duration, 1),
-                error=result.get("stderr") if result.get("exit_code", 0) != 0 else None,
+                error=None if success else output,
             )
-            
+
         except Exception as e:
             return SubTaskResult(
                 task_id=self.task.id,
@@ -144,24 +155,23 @@ PROMPT
                 duration_seconds=round(time.time() - start, 1),
                 error=str(e),
             )
-        finally:
-            self.sandbox.cleanup()
 
 
 class AgentSwarm:
     """Orchestrates multiple subagents in parallel."""
     
-    def __init__(self, max_parallel: int = 5, sandbox_mode: str = None):
+    def __init__(self, max_parallel: int = 5, sandbox_mode: str = None, agent_factory=None):
         self.max_parallel = max_parallel
         self.sandbox_mode = sandbox_mode
-    
+        self.agent_factory = agent_factory
+
     def run_concurrent(self, tasks: list[SubTask]) -> list[SubTaskResult]:
-        """Run multiple sub-tasks concurrently in their own sandboxes."""
+        """Run multiple sub-tasks concurrently as real agent runs."""
         results = []
-        
+
         with ThreadPoolExecutor(max_workers=self.max_parallel) as executor:
             futures = {
-                executor.submit(SubagentWorker(task, self.sandbox_mode).run): task
+                executor.submit(SubagentWorker(task, self.sandbox_mode, self.agent_factory).run): task
                 for task in tasks
             }
             
@@ -190,7 +200,7 @@ class AgentSwarm:
         """Run sub-tasks one at a time."""
         results = []
         for task in tasks:
-            worker = SubagentWorker(task, self.sandbox_mode)
+            worker = SubagentWorker(task, self.sandbox_mode, self.agent_factory)
             result = worker.run()
             results.append(result)
             status = "✅" if result.success else "❌"
