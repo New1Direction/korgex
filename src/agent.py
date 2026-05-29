@@ -158,6 +158,13 @@ class KorgexAgent:
         # mutated files, the suite runs and a red result forces success=False.
         self.test_gate = None
 
+        # Auto-heal (idea #8, opt-in / explicit): when the test gate is red and
+        # heal_attempts > 0, spawn heal_fn(failure_output, cwd) and re-run the
+        # gate up to heal_attempts times. Each attempt + the verdict is recorded
+        # to the (hash-chained) ledger as a verifiable repair trail.
+        self.heal_attempts = 0
+        self.heal_fn = None
+
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
         if interactive is None:
@@ -744,9 +751,9 @@ class KorgexAgent:
             return result
 
         from src.test_gate import run_test_gate
-        g = run_test_gate(gate["command"], cwd=(self.workspace_root or self.repo_root),
-                          timeout=gate.get("timeout", 600))
-        korg.record_tool_call(
+        cwd = self.workspace_root or self.repo_root
+        g = run_test_gate(gate["command"], cwd=cwd, timeout=gate.get("timeout", 600))
+        gate_seq = korg.record_tool_call(
             tool_name="test_gate",
             args={"command": gate["command"]},
             result={"verdict": "PASSED" if g["passed"] else "FAILED",
@@ -754,6 +761,21 @@ class KorgexAgent:
             success=g["passed"], duration_ms=0, triggered_by=prompt_seq,
         )
         result = dict(result)
+
+        # idea #8: on red, attempt a bounded auto-heal-to-green, recording each
+        # attempt as a chained ledger event. Opt-in (heal_attempts + heal_fn set).
+        if not g["passed"] and self.heal_attempts and self.heal_fn:
+            from src.self_healing import auto_heal_to_green
+            g = auto_heal_to_green(
+                g,
+                run_gate=lambda: run_test_gate(gate["command"], cwd=cwd,
+                                               timeout=gate.get("timeout", 600)),
+                heal_fn=lambda output: self.heal_fn(output, cwd),
+                record_event=lambda tn, a, r, s, tb: korg.record_tool_call(
+                    tool_name=tn, args=a, result=r, success=s, duration_ms=0, triggered_by=tb),
+                max_attempts=self.heal_attempts, triggered_by=gate_seq,
+            )
+
         result["test_gate"] = {"passed": g["passed"], "exit_code": g["exit_code"],
                                "output": g["output"][:4000]}
         if not g["passed"]:
