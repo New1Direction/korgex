@@ -232,6 +232,37 @@ def cmd_install_extension():
         print(f"    Install failed:\n{result.stderr}")
 
 
+def cmd_verify():
+    """Prove the cognition ledger is intact (hash-chain + causal DAG)."""
+    from src.korg_ledger import verify_journal_file, _ledger_hmac_key
+
+    argv = sys.argv[1:]
+    path = None
+    if "verify" in argv:
+        rest = [a for a in argv[argv.index("verify") + 1:] if not a.startswith("-")]
+        if rest:
+            path = rest[0]
+    path = path or os.environ.get(
+        "KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+
+    if not Path(path).exists():
+        print(f"  No ledger journal at {path}")
+        print(f"  (set KORG_JOURNAL_PATH or pass: korgex verify <path>)")
+        return 1
+
+    n = sum(1 for ln in Path(path).read_text().splitlines() if ln.strip())
+    errors = verify_journal_file(path, key=_ledger_hmac_key())
+    if not errors:
+        keyed = " (HMAC-keyed)" if _ledger_hmac_key() else ""
+        print(f"  ✓ ledger intact — {n} events, hash-chain verified{keyed}")
+        print(f"    {path}")
+        return 0
+    print(f"  ✗ ledger TAMPERED — {len(errors)} problem(s) in {path}:")
+    for e in errors:
+        print(f"      - {e}")
+    return 1
+
+
 # ── Entry Point ──────────────────────────────────────────────────────────
 
 import argparse
@@ -244,6 +275,7 @@ SUBCOMMANDS = {
     "status":            cmd_status,
     "stop":              cmd_stop,
     "install-extension": cmd_install_extension,
+    "verify":            cmd_verify,
 }
 
 
@@ -325,7 +357,11 @@ def _build_subcommand_parser():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", metavar="SUBCOMMAND")
     for name, fn in SUBCOMMANDS.items():
-        sub.add_parser(name, help=(fn.__doc__ or "").strip().split("\n")[0])
+        sp = sub.add_parser(name, help=(fn.__doc__ or "").strip().split("\n")[0])
+        if name == "verify":
+            sp.add_argument("path", nargs="?",
+                            help="Journal JSONL to verify "
+                                 "(default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
     return p
 
 
@@ -388,8 +424,7 @@ def main():
         if not args.command:
             _build_subcommand_parser().print_help()
             return 0
-        SUBCOMMANDS[args.command]()
-        return 0
+        return SUBCOMMANDS[args.command]() or 0
 
     args = _build_prompt_parser().parse_args(argv)
     if not args.prompt_words:
