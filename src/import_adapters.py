@@ -19,6 +19,7 @@ and hash-chain via the shared spec.
 from __future__ import annotations
 
 import json
+import os
 
 from src import ledger_spec as S
 
@@ -74,6 +75,21 @@ def parse_claude_code(lines: list) -> list:
                         "payload": {"tool_name": b.get("name", "tool"), "args": b.get("input") or {}},
                     })
     return actions
+
+
+def discover_claude_code_sessions(root: str | None = None) -> list:
+    """Find Claude Code session transcripts (newest first).
+
+    Defaults to `~/.claude/projects/**/*.jsonl` — the logs a Claude Code user
+    already has. Returns absolute paths sorted by mtime (most recent first), so
+    `korgex audit` can grab the latest session with zero configuration.
+    """
+    import glob
+    base = root or os.path.join(os.path.expanduser("~"), ".claude", "projects")
+    paths = [p for p in glob.glob(os.path.join(base, "**", "*.jsonl"), recursive=True)
+             if os.path.isfile(p)]
+    paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return paths
 
 
 ADAPTERS = {
