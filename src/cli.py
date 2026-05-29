@@ -294,6 +294,44 @@ def cmd_drift():
     return 1
 
 
+def cmd_import():
+    """Replay another vendor's session transcript into a korg-ledger@v1 chained journal."""
+    from src import import_adapters as IA
+
+    argv = sys.argv[1:]
+    rest, out = [], None
+    if "import" in argv:
+        toks = argv[argv.index("import") + 1:]
+        i = 0
+        while i < len(toks):
+            t = toks[i]
+            if t in ("--out", "-o"):
+                out = toks[i + 1] if i + 1 < len(toks) else None
+                i += 2
+                continue
+            if not t.startswith("-"):
+                rest.append(t)
+            i += 1
+
+    if len(rest) < 2:
+        print("  usage: korgex import <vendor> <transcript> [--out journal.jsonl]")
+        print(f"  vendors: {', '.join(sorted(IA.ADAPTERS))}")
+        return 2
+
+    vendor, transcript = rest[0], rest[1]
+    out = out or (transcript.rsplit(".", 1)[0] + ".korg.jsonl")
+    try:
+        summary = IA.import_transcript(transcript, vendor=vendor, out_path=out)
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        print(f"  import failed: {exc}")
+        return 1
+
+    status = "✓ verified intact" if summary["verified"] else f"✗ {summary['errors']}"
+    print(f"  imported {summary['events']} events from '{vendor}' → {summary['out_path']}")
+    print(f"  chain: {status}    ·    inspect: korgex verify {summary['out_path']}")
+    return 0 if summary["verified"] else 1
+
+
 # ── Entry Point ──────────────────────────────────────────────────────────
 
 import argparse
@@ -308,6 +346,7 @@ SUBCOMMANDS = {
     "install-extension": cmd_install_extension,
     "verify":            cmd_verify,
     "drift":             cmd_drift,
+    "import":            cmd_import,
 }
 
 
@@ -394,6 +433,10 @@ def _build_subcommand_parser():
             sp.add_argument("path", nargs="?",
                             help="Journal JSONL to verify "
                                  "(default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+        elif name == "import":
+            sp.add_argument("vendor", nargs="?", help="claude-code")
+            sp.add_argument("transcript", nargs="?", help="path to the vendor session transcript")
+            sp.add_argument("--out", "-o", help="output journal path (default: <transcript>.korg.jsonl)")
     return p
 
 
