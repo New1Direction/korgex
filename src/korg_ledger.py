@@ -65,6 +65,7 @@ Actor identity convention:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -606,24 +607,33 @@ class LocalJournalClient:
             "KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl")))
         self.source_agent = source_agent or _agent_identity()
         self._lock = threading.Lock()
-        self._seq = self._recover_max_seq()
+        self._key = _ledger_hmac_key()
+        self._seq, self._last_hash = self._recover_state()
 
-    def _recover_max_seq(self) -> int:
+    def _recover_state(self) -> tuple:
+        """Recover (max_seq, chain_head_hash) so a restart continues the same
+        hash-chain instead of forking a fresh one from GENESIS."""
         if not self.path.exists():
-            return 0
-        mx = 0
+            return 0, GENESIS_HASH
+        mx, last_hash = 0, GENESIS_HASH
         try:
             for line in self.path.read_text().splitlines():
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    mx = max(mx, int(json.loads(line).get("seq_id", 0)))
-                except (json.JSONDecodeError, ValueError, TypeError):
+                    ev = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
                     continue
+                try:
+                    mx = max(mx, int(ev.get("seq_id", 0)))
+                except (ValueError, TypeError):
+                    pass
+                if ev.get("entry_hash"):
+                    last_hash = ev["entry_hash"]
         except OSError:
-            return 0
-        return mx
+            return 0, GENESIS_HASH
+        return mx, last_hash
 
     def _append(self, tool_name, args, result, success, duration_ms, triggered_by) -> int:
         with self._lock:
@@ -645,6 +655,9 @@ class LocalJournalClient:
             }
             if triggered_by is not None:
                 event["triggered_by"] = triggered_by
+            event["prev_hash"] = self._last_hash
+            event["entry_hash"] = chain_hash(event, key=self._key)
+            self._last_hash = event["entry_hash"]
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.path, "a") as f:
                 f.write(json.dumps(event) + "\n")
@@ -703,6 +716,80 @@ class ThreadSafeLedger:
     def record_tool_call(self, **kwargs):
         with self._lock:
             return self._inner.record_tool_call(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Tamper-evident hash-chain — turns a well-formed DAG into a *provably intact*
+# one. verify_dag answers "is the causal structure sound?"; verify_chain answers
+# "has anyone touched the bytes since they were written?".
+# ---------------------------------------------------------------------------
+
+GENESIS_HASH = "0" * 64
+
+# These fields ARE the hash / signature, so they're excluded from the preimage.
+_HASH_FIELDS = ("entry_hash",)
+
+
+def _ledger_hmac_key() -> bytes | None:
+    """Optional HMAC key (KORG_LEDGER_HMAC_KEY). Present → chain is tamper-PROOF
+    (unforgeable without the key); absent → tamper-EVIDENT against a trusted tip."""
+    k = os.environ.get("KORG_LEDGER_HMAC_KEY")
+    return k.encode("utf-8") if k else None
+
+
+def chain_hash(event: dict, key: bytes | None = None) -> str:
+    """Compute an event's chain hash.
+
+    Preimage = canonical JSON of the event with its hash field(s) removed.
+    prev_hash IS part of the preimage — that's what links each entry to the one
+    before it, so a delete/insert/reorder breaks the next link. With `key`, the
+    digest is HMAC-SHA256; otherwise plain SHA-256.
+    """
+    preimage = {k: v for k, v in event.items() if k not in _HASH_FIELDS}
+    data = _canonical_bytes(preimage)
+    if key is not None:
+        return hmac.new(key, data, hashlib.sha256).hexdigest()
+    return hashlib.sha256(data).hexdigest()
+
+
+def verify_chain(events: list, key: bytes | None = None) -> list:
+    """Recompute the hash-chain and report tampering. Returns [] iff intact.
+
+    Each error is localized to a seq_id. Catches:
+      - content edits      → entry_hash no longer matches the recomputed hash;
+      - delete/insert/reorder → an event's prev_hash no longer equals the prior
+        event's entry_hash (broken link).
+    With `key`, recomputation uses HMAC, so a tail rewritten without the key
+    fails even though it is internally self-consistent.
+    """
+    errors = []
+    expected_prev = GENESIS_HASH
+    for e in events:
+        sid = e.get("seq_id")
+        stored = e.get("entry_hash")
+        if stored is None:
+            errors.append(f"seq {sid}: missing entry_hash (event is not chained)")
+            expected_prev = None
+            continue
+        if e.get("prev_hash") != expected_prev:
+            errors.append(
+                f"seq {sid}: prev_hash breaks the chain "
+                f"(an event was inserted, deleted, or reordered)")
+        if chain_hash(e, key=key) != stored:
+            errors.append(f"seq {sid}: entry_hash mismatch (content was tampered)")
+        expected_prev = stored
+    return errors
+
+
+def verify_journal_file(path: str, key: bytes | None = None) -> list:
+    """verify_chain over a JSONL journal on disk. Also runs verify_dag, so a
+    single call proves both structural soundness AND byte-level integrity."""
+    events = []
+    for line in Path(path).read_text().splitlines():
+        line = line.strip()
+        if line:
+            events.append(json.loads(line))
+    return verify_dag(events) + verify_chain(events, key=key)
 
 
 def verify_dag(events: list) -> list:
