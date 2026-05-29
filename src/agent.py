@@ -72,6 +72,22 @@ def subagent_tools(subagent_type: str) -> list:
     return [name for name in USER_TOOLS.keys() if name != "Agent"]
 
 
+def _resolve_params(mode: str) -> dict:
+    """Per-mode generation params (max_tokens / thinking budget / temperature).
+
+    Wires MODE_PARAMS (previously dead code) into the loop. No mode → the prior
+    default (max_tokens=4096) so non-mode behavior is unchanged.
+    """
+    if mode:
+        try:
+            from src.model_router import MODE_PARAMS
+            if mode in MODE_PARAMS:
+                return dict(MODE_PARAMS[mode])
+        except Exception:
+            pass
+    return {"max_tokens": 4096}
+
+
 def _resolve_model(model: str, mode: str) -> str:
     """Pick the active model.
 
@@ -102,6 +118,9 @@ class KorgexAgent:
         self.model = _resolve_model(model, mode)
         self.repo_root = repo_root or os.getcwd()
         self.provider = "anthropic" if _looks_anthropic(self.model) else "openai"
+
+        # Per-mode generation params (max_tokens / thinking budget / temperature).
+        self.params = _resolve_params(mode)
 
         # Injectable ledger client. None → resolve the process default lazily in
         # run_task. A subagent is handed its parent's ledger so events from the
@@ -276,25 +295,45 @@ class KorgexAgent:
             base_url=os.environ.get("KORGEX_API_URL", "https://api.openai.com/v1"),
         )
 
+    def _gen_kwargs(self) -> dict:
+        """Per-mode generation kwargs for the active provider. max_tokens always;
+        Anthropic gets a thinking budget if the mode sets one (temperature is
+        omitted then — they're mutually exclusive); otherwise temperature."""
+        p = self.params or {}
+        kw = {"max_tokens": p.get("max_tokens", 4096)}
+        if self.provider == "anthropic":
+            th = p.get("thinking")
+            if th and th.get("budget_tokens"):
+                kw["thinking"] = {"type": "enabled", "budget_tokens": th["budget_tokens"]}
+            elif p.get("temperature") is not None:
+                kw["temperature"] = p["temperature"]
+        else:  # openai-compatible — no thinking param
+            if p.get("temperature") is not None:
+                kw["temperature"] = p["temperature"]
+        return kw
+
     def _call(self, client, messages: list, tools: list, output_schema: dict = None,
               system_prompt: str = None) -> object:
         # `system_prompt` is passed explicitly (not read off self) so concurrent
         # run_task calls on one agent instance can't clobber each other's prompt.
         sp = system_prompt if system_prompt is not None else self.system_prompt
+        gen = self._gen_kwargs()
 
         # Schema-constrained final answer: force a non-streamed, structured reply.
         # (You can't render a partial validated object, so streaming is bypassed
-        # when output_schema is set.)
+        # when output_schema is set.) Thinking is dropped here — a forced single
+        # tool call doesn't need a thinking budget and can conflict with it.
         if output_schema is not None:
             from src.structured_output import build_request_kwargs
             extra = build_request_kwargs(output_schema, self.provider)
+            max_tokens = gen.get("max_tokens", 4096)
             if self.provider == "anthropic":
                 return client.messages.create(
                     model=self.model, system=sp,
-                    messages=messages, max_tokens=4096, **extra,
+                    messages=messages, max_tokens=max_tokens, **extra,
                 )
             return client.chat.completions.create(
-                model=self.model, messages=messages, max_tokens=4096, **extra,
+                model=self.model, messages=messages, max_tokens=max_tokens, **extra,
             )
 
         # Interactive streaming paths
@@ -307,11 +346,11 @@ class KorgexAgent:
         if self.provider == "anthropic":
             return client.messages.create(
                 model=self.model, system=sp,
-                messages=messages, tools=tools, max_tokens=4096,
+                messages=messages, tools=tools, **gen,
             )
         return client.chat.completions.create(
             model=self.model, messages=messages,
-            tools=tools, max_tokens=4096,
+            tools=tools, **gen,
         )
 
     def _call_anthropic_streaming(self, client, messages: list, tools: list,
