@@ -43,3 +43,5 @@ Thumbs.db
 
 # Audit reports (transient, regenerated)
 ecosystem_audit_*.html
+# korg ledger blob store / local journal (must never enter the tree)
+.korg/

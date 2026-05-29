@@ -96,7 +96,16 @@ _DEFAULT_BLOB_DIR = Path(".korg") / "blobs"
 
 
 def _blob_dir() -> Path:
-    return Path(os.environ.get("KORG_BLOB_DIR", str(_DEFAULT_BLOB_DIR)))
+    """Where content-addressed payloads live. KORG_BLOB_DIR wins; else blobs sit
+    NEXT TO the journal (KORG_JOURNAL_PATH parent) so a run with an out-of-repo
+    journal doesn't leak blobs into a cwd-relative .korg (the no_escape leak the
+    self-coding bench caught live); else the default .korg/blobs."""
+    if os.environ.get("KORG_BLOB_DIR"):
+        return Path(os.environ["KORG_BLOB_DIR"])
+    journal = os.environ.get("KORG_JOURNAL_PATH")
+    if journal:
+        return Path(journal).parent / "blobs"
+    return _DEFAULT_BLOB_DIR
 
 
 def _korg_url() -> str:

@@ -22,6 +22,7 @@ cognition ledger you can prove is intact" (the moat).
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -175,6 +176,27 @@ def test_local_journal_writes_a_verifiable_chain(tmp_path):
     # Tamper a persisted line → chain breaks.
     events[1]["args"]["model"] = "evil"
     assert L.verify_chain(events)
+
+
+def test_blob_dir_follows_journal_path(tmp_path, monkeypatch):
+    # Blobs must live next to the journal, NOT in a cwd-relative .korg — else a
+    # run with KORG_JOURNAL_PATH set still leaks content-addressed payloads into
+    # the source checkout (the no_escape violation the bench caught live).
+    monkeypatch.delenv("KORG_BLOB_DIR", raising=False)
+    monkeypatch.setenv("KORG_JOURNAL_PATH", str(tmp_path / "sub" / "journal.jsonl"))
+    assert L._blob_dir() == tmp_path / "sub" / "blobs"
+
+
+def test_blob_dir_honors_explicit_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("KORG_BLOB_DIR", str(tmp_path / "b"))
+    monkeypatch.setenv("KORG_JOURNAL_PATH", str(tmp_path / "j" / "journal.jsonl"))
+    assert L._blob_dir() == Path(str(tmp_path / "b"))
+
+
+def test_blob_dir_default_when_nothing_set(monkeypatch):
+    monkeypatch.delenv("KORG_BLOB_DIR", raising=False)
+    monkeypatch.delenv("KORG_JOURNAL_PATH", raising=False)
+    assert L._blob_dir() == Path(".korg") / "blobs"
 
 
 def test_local_journal_continues_chain_across_restart(tmp_path):
