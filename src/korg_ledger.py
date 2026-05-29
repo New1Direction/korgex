@@ -588,10 +588,89 @@ class KorgBridgeClient:
 
 
 # ---------------------------------------------------------------------------
+# Local append-only JSONL journal (Gate D — durable, no silent no-op).
+# When neither the Rust bridge nor a korg server is available, events are still
+# persisted to a local JSONL file with real, monotonic seq_ids — so root_seq is
+# never None, the causal DAG always exists, rewind/audit work offline, and the
+# recall reader (src/recall.py) can read it back. Same 3-method API.
+# ---------------------------------------------------------------------------
+
+
+class LocalJournalClient:
+    """Synchronous, file-backed ledger. Durable across restarts (seq counter is
+    recovered from the file). The on-disk shape is the flat event dict the recall
+    reader normalizes (tool_name/args/result/triggered_by/seq_id)."""
+
+    def __init__(self, journal_path: str | None = None, source_agent: str | None = None) -> None:
+        self.path = Path(journal_path or os.environ.get(
+            "KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl")))
+        self.source_agent = source_agent or _agent_identity()
+        self._lock = threading.Lock()
+        self._seq = self._recover_max_seq()
+
+    def _recover_max_seq(self) -> int:
+        if not self.path.exists():
+            return 0
+        mx = 0
+        try:
+            for line in self.path.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    mx = max(mx, int(json.loads(line).get("seq_id", 0)))
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    continue
+        except OSError:
+            return 0
+        return mx
+
+    def _append(self, tool_name, args, result, success, duration_ms, triggered_by) -> int:
+        with self._lock:
+            self._seq += 1
+            seq = self._seq
+            payload_refs: list[dict] = []
+            safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
+            safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
+            event: dict[str, Any] = {
+                "schema_version": SCHEMA_VERSION,
+                "seq_id": seq,
+                "source_agent": self.source_agent,
+                "tool_name": tool_name,
+                "args": safe_args,
+                "result": safe_result,
+                "payload_refs": payload_refs,
+                "success": success,
+                "duration_ms": duration_ms,
+            }
+            if triggered_by is not None:
+                event["triggered_by"] = triggered_by
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a") as f:
+                f.write(json.dumps(event) + "\n")
+            return seq
+
+    def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int:
+        return self._append("user_prompt", {"prompt": prompt}, {}, True, 0, triggered_by)
+
+    def record_llm_call(self, model, prompt_tokens, completion_tokens, duration_ms,
+                        triggered_by, assistant_text=None) -> int:
+        result: dict[str, Any] = {"completion_tokens": completion_tokens}
+        if assistant_text is not None:
+            result["text"] = assistant_text
+        return self._append("llm_inference", {"model": model, "prompt_tokens": prompt_tokens},
+                            result, True, duration_ms, triggered_by)
+
+    def record_tool_call(self, tool_name, args, result, success, duration_ms,
+                         triggered_by=None) -> int:
+        return self._append(tool_name, args, result, success, int(duration_ms), triggered_by)
+
+
+# ---------------------------------------------------------------------------
 # Module-level default client (lazily initialised)
 # ---------------------------------------------------------------------------
 
-_default_client: "KorgLedgerClient | KorgBridgeClient | None" = None
+_default_client: "KorgLedgerClient | KorgBridgeClient | LocalJournalClient | None" = None
 
 
 class ThreadSafeLedger:
@@ -662,12 +741,13 @@ def rewind_events(events: list, target_seq: int) -> list:
     return [e for e in events if (e.get("seq_id") is None or e["seq_id"] <= target_seq)]
 
 
-def get_default_client() -> "KorgLedgerClient | KorgBridgeClient":
+def get_default_client():
     """Return the process-wide default ledger client (created on first call).
 
-    Prefers the in-process Bridge when korg_bridge is importable; falls back
-    to the HTTP client otherwise. Set KORGEX_LEDGER=http to force the HTTP
-    path (useful when debugging the network protocol)."""
+    Durability ladder (Gate D — never a silent no-op): in-process Bridge if the
+    korg_bridge extension is importable → HTTP client if a korg server is actually
+    reachable → otherwise a LocalJournalClient that persists to a local JSONL file
+    with real seq_ids. Force a path with KORGEX_LEDGER=bridge|http|local."""
     global _default_client
     if _default_client is None:
         force = os.environ.get("KORGEX_LEDGER", "auto").lower()
@@ -675,12 +755,20 @@ def get_default_client() -> "KorgLedgerClient | KorgBridgeClient":
             _default_client = KorgLedgerClient()
         elif force == "bridge":
             _default_client = KorgBridgeClient()
+        elif force == "local":
+            _default_client = LocalJournalClient()
         else:
             try:
                 _default_client = KorgBridgeClient()
                 logger.info("[korg] using in-process bridge for ledger writes")
             except ImportError:
-                _default_client = KorgLedgerClient()
-                logger.info("[korg] korg_bridge not installed; falling back to HTTP ledger client")
+                http = KorgLedgerClient()
+                if http._is_available():
+                    _default_client = http
+                    logger.info("[korg] korg_bridge not installed; using HTTP ledger client")
+                else:
+                    _default_client = LocalJournalClient()
+                    logger.info("[korg] no bridge/server; using durable local JSONL journal at %s",
+                                _default_client.path)
     return _default_client
 
