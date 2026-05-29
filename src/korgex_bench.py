@@ -159,6 +159,21 @@ SEED_TASKS = [
                "branched DAG correctly and verify_dag passes on the result.",
         verify_command="python3 -m pytest tests/ -q",
     ),
+    Task(
+        # Discriminating: a precise behavioral oracle, not just "suite green".
+        # `korgex import <unknown-vendor>` currently exits 1 (cmd_import catches
+        # the ValueError); the task asks for a friendly exit code 2. Red before,
+        # green only if the agent changes the right branch in cli.cmd_import.
+        id="cross-module-import-exit-code",
+        band="cross-module",
+        prompt="`korgex import <vendor> <transcript>` should exit with code 2 (a usage error) "
+               "when given an unknown vendor, instead of the current exit code 1. Make that "
+               "change in the CLI and keep all existing tests green.",
+        verify_command=(
+            "python3 -m src.cli import nosuchvendor /dev/null >/dev/null 2>&1; "
+            "[ $? -eq 2 ]"
+        ),
+    ),
 ]
 
 

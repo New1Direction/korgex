@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Gate F — live-LLM self-coding bench in CI** (`.github/workflows/self-coding-bench.yml`): a manual-dispatch workflow that runs korgex-bench end-to-end against a live model (via the `KORGEX_API_KEY` secret), asserts the three zero-invariants (no_escape / no_green_on_red / durable_ledger), then verifies the bench journal is intact. The reproducible "trust number" gate — no-op (green) when the secret is absent. Plus a more discriminating seed task with a precise behavioral oracle (`korgex import <unknown-vendor>` should exit 2), not just "suite green".
+
 ## [0.6.0] — 2026-05-29
 
 ### Added
