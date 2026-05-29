@@ -22,6 +22,7 @@ from src.tool_abstraction import USER_TOOLS, route_tool_call
 import src.tools_impl  # noqa: F401
 from src.korg_ledger import get_default_client as _korg
 from src.hooks import load_hooks, run_event
+from src.workspace import path_within
 
 
 SYSTEM_PROMPT = """You are Korgex, an extremely skilled software engineer. Your purpose is to assist users by completing coding tasks: solving bugs, implementing features, writing tests, and refactoring code.
@@ -116,6 +117,14 @@ class KorgexAgent:
         # Effective system prompt. Recomputed per run_task from the base prompt +
         # project instructions (AGENTS.md/CLAUDE.md) + persistent memory index.
         self.system_prompt = SYSTEM_PROMPT
+
+        # Workspace isolation (Gate A): when set, Write/Edit whose resolved path
+        # escapes this root are blocked. Set by run_isolated_task to a worktree.
+        self.workspace_root = None
+
+        # Test gate (Gate B): {"command": "pytest -q ..."} → after a run that
+        # mutated files, the suite runs and a red result forces success=False.
+        self.test_gate = None
 
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
@@ -504,6 +513,7 @@ class KorgexAgent:
         prompt_seq = korg.record_user_prompt(prompt, triggered_by=parent_seq)
         # ────────────────────────────────────────────────────────────────────
 
+        mutated = False  # did any file-mutating tool run? gates the test-gate
         try:
             for i in range(max_iter):
                 # ── korg: time the LLM round-trip ──────────────────────────
@@ -538,21 +548,37 @@ class KorgexAgent:
                     # Schema-constrained finish: do a final structured pass so
                     # the answer is a validated object on the ledger, not prose.
                     if output_schema is not None:
-                        return self._finalize_structured(
+                        return self._finish(self._finalize_structured(
                             client, messages, response, output_schema,
                             llm_seq, korg, i + 1, prompt_seq, sys_prompt,
-                        )
+                        ), korg, prompt_seq, mutated)
                     # Reuse round_text we already extracted above; saves a
                     # second pass over response.content.
-                    return {
+                    return self._finish({
                         "success": True,
                         "result": round_text or "(no output)",
                         "iterations": i + 1,
                         "root_seq": prompt_seq,
-                    }
+                    }, korg, prompt_seq, mutated)
 
                 messages.append(self._assistant_turn(response))
                 for call in tool_calls:
+                    # ── Workspace boundary guard (Gate A): hard safety ───────
+                    # When isolated, a Write/Edit whose resolved path escapes the
+                    # workspace root is blocked outright and recorded as a
+                    # WORKSPACE_VIOLATION verdict — a self-edit can't corrupt
+                    # anything outside its worktree.
+                    ws_block = self._workspace_block(call)
+                    if ws_block is not None:
+                        korg.record_tool_call(
+                            tool_name="workspace.guard",
+                            args={"tool": call["name"], "path": call["args"].get("file_path")},
+                            result=ws_block,
+                            success=False, duration_ms=0, triggered_by=llm_seq,
+                        )
+                        messages.append(self._tool_result_turn(call["id"], ws_block))
+                        continue  # the write never happens
+
                     # ── PreToolUse gate: deterministic, ledger-native ────────
                     # A matching hook can block the call. Every verdict (allow or
                     # deny) is recorded as its own causal event carrying the
@@ -597,6 +623,8 @@ class KorgexAgent:
                     # All tool calls from the same LLM batch share triggered_by=llm_seq.
                     # They are siblings in the causal tree, not chained to each other.
                     _success = "error" not in tool_result if isinstance(tool_result, dict) else True
+                    if call["name"] in ("Write", "Edit", "Bash") and _success:
+                        mutated = True  # a file-mutating tool ran → arm the test gate
                     korg.record_tool_call(
                         tool_name=call["name"],
                         args=call["args"],
@@ -630,22 +658,97 @@ class KorgexAgent:
                 # Advance the LLM trigger for the next round-trip to the last llm_seq
                 prompt_seq = llm_seq
 
-            return {
+            return self._finish({
                 "success": False,
                 "result": f"max iterations reached ({max_iter})",
                 "iterations": max_iter,
                 "root_seq": prompt_seq,
-            }
+            }, korg, prompt_seq, mutated)
         finally:
             if session:
                 session.stop()
 
+    def _finish(self, result: dict, korg, prompt_seq, mutated: bool) -> dict:
+        """Apply the test gate (Gate B) on a successful, file-mutating run.
+
+        Runs the configured test command in the workspace; a red result flips
+        success to False (the edit is NOT accepted) and records a verdict event.
+        No gate, no edits, or an already-failed run → returned unchanged.
+        """
+        gate = self.test_gate
+        if not (gate and gate.get("command") and mutated and result.get("success")):
+            return result
+
+        from src.test_gate import run_test_gate
+        g = run_test_gate(gate["command"], cwd=(self.workspace_root or self.repo_root),
+                          timeout=gate.get("timeout", 600))
+        korg.record_tool_call(
+            tool_name="test_gate",
+            args={"command": gate["command"]},
+            result={"verdict": "PASSED" if g["passed"] else "FAILED",
+                    "exit_code": g["exit_code"], "output": g["output"][:4000]},
+            success=g["passed"], duration_ms=0, triggered_by=prompt_seq,
+        )
+        result = dict(result)
+        result["test_gate"] = {"passed": g["passed"], "exit_code": g["exit_code"],
+                               "output": g["output"][:4000]}
+        if not g["passed"]:
+            result["success"] = False
+            result["result"] = (f"test gate failed (exit {g['exit_code']}) — edit not "
+                                f"accepted. Output:\n{g['output'][:2000]}")
+        return result
+
     def _dispatch_call(self, call: dict, parent_seq) -> dict:
         """Run one tool call. The Agent tool spawns a real nested subagent;
-        every other tool routes to its in-process / MCP handler."""
+        every other tool routes to its in-process / MCP handler. File/Bash tools
+        resolve under the workspace root (the isolated worktree) when set."""
         if call["name"] == "Agent":
             return self._run_subagent(call["args"], parent_seq)
-        return route_tool_call(call["name"], call["args"])
+        return route_tool_call(call["name"], call["args"],
+                               repo_root=self.workspace_root or self.repo_root)
+
+    def _workspace_block(self, call: dict):
+        """Return a blocked-result dict if `call` would write outside the
+        workspace root, else None. Only active when workspace_root is set."""
+        if not self.workspace_root:
+            return None
+        if call.get("name") not in ("Write", "Edit"):
+            return None
+        path = (call.get("args") or {}).get("file_path")
+        if path and not path_within(self.workspace_root, path):
+            return {
+                "error": "blocked: write outside the isolated workspace",
+                "verdict": "WORKSPACE_VIOLATION",
+                "reason": f"{path} resolves outside workspace_root {self.workspace_root}",
+            }
+        return None
+
+    def run_isolated_task(self, task: str, branch: str = None, worktree_path: str = None,
+                          base: str = "HEAD", test_gate: dict = None, **run_kwargs) -> dict:
+        """Run a task in an ISOLATED git worktree (Gate A) — the safe way to let
+        korgex edit a repo autonomously. Creates a worktree on a throwaway branch,
+        points all tools + the workspace guard at it, optionally enforces a test
+        gate, and LEAVES the branch for human review (never auto-merges). Returns
+        the run result plus {worktree, branch}.
+        """
+        from src import workspace as W
+
+        branch = branch or ("korgex/" + W._slug(task)[:40])
+        wt = W.create_worktree(self.repo_root, branch, worktree_path=worktree_path, base=base)
+
+        prev = (self.workspace_root, self.repo_root, self.test_gate)
+        self.workspace_root = wt
+        self.repo_root = wt  # tools resolve here; bash runs here
+        if test_gate is not None:
+            self.test_gate = test_gate
+        try:
+            result = self.run_task(task, **run_kwargs)
+        finally:
+            self.workspace_root, self.repo_root, self.test_gate = prev
+
+        result["worktree"] = wt
+        result["branch"] = branch
+        return result
 
     def _run_subagent(self, args: dict, parent_seq) -> dict:
         """Spawn a real nested KorgexAgent for the Agent tool.
