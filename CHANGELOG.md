@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-29
+
 ### Added
 - **Cross-vendor import adapters + `korgex import`.** Replay another vendor's session transcript (Claude Code JSONL to start) into a korg-ledger@v1 chained journal — `src/import_adapters.py` parses the transcript, reconstructs causal `triggered_by` links from parent pointers, and hash-chains the events via the shared `ledger_spec`. The output verifies under `korgex verify`. `korgex import claude-code <transcript>` proven on a real 5,475-line session → 2,319 verifiable events. This makes korg the neutral audit substrate *under* any vendor, not another agent beside them.
 - **Auto-heal-to-green on a red test gate.** When the in-loop test gate (Gate B) goes red and healing is enabled (`agent.heal_attempts > 0` + `heal_fn`), korgex auto-spawns a healing subagent with the failure log and re-runs the gate, bounded, until red→green or attempts exhausted (`src/self_healing.auto_heal_to_green`). Each attempt and the final `heal.resolved`/`heal.exhausted` verdict is recorded as a hash-chained ledger event, causally linked off the red gate — so a self-repair is itself a verifiable, replayable trail (korgex's analog of thumper's recovery loop). Opt-in; default off.
