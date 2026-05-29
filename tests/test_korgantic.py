@@ -65,15 +65,21 @@ def test_adversarial_verify_confirms_when_quorum_not_refuted():
 
 
 def test_adversarial_verify_kills_when_majority_refute():
-    calls = {"i": 0}
+    import threading
+    lock = threading.Lock()
+    state = {"i": 0}
 
     def runner(role, prompt, output_schema=None):
-        calls["i"] += 1
-        # 2 of 3 refute → only 1 not-refuted < quorum 2 → killed
-        return {"success": True, "result": {"refuted": calls["i"] <= 2}}
+        # Lock the counter so exactly 3 distinct i values are assigned even though
+        # skeptics now run concurrently — 2 of 3 refute regardless of order.
+        with lock:
+            state["i"] += 1
+            i = state["i"]
+        return {"success": True, "result": {"refuted": i <= 2}}
 
     v = K.adversarial_verify("dubious finding", runner, n=3, quorum=2)
-    assert v["confirmed"] is False
+    assert v["confirmed"] is False           # only 1 not-refuted < quorum 2 → killed
+    assert v["not_refuted"] == 1             # order-independent: exactly one survived
 
 
 def test_loop_until_dry_stops_after_consecutive_empty_rounds():

@@ -147,3 +147,62 @@ def test_rewind_truncation_preserves_dag_integrity():
     assert verify_dag(survivors) == []
     # everything causally downstream of the cut is gone
     assert all(e["seq_id"] <= 3 for e in survivors)
+
+
+# ── 5. concurrent run_task must not share system-prompt state ──────────────
+
+class _FakeLedger:
+    def record_user_prompt(self, prompt, triggered_by=None):
+        return 1
+
+    def record_llm_call(self, **kw):
+        return 2
+
+    def record_tool_call(self, **kw):
+        return None
+
+
+def test_concurrent_run_task_each_sees_its_own_system_prompt():
+    """The production korgantic runner is self.run_task on ONE agent instance,
+    invoked concurrently by the sweep + verification fan-out. Each call must use
+    the system prompt assembled on ITS thread — never another thread's."""
+    from types import SimpleNamespace
+    from src.agent import KorgexAgent
+
+    captured = {}
+
+    class _A(KorgexAgent):
+        def __init__(self, **kw):
+            kw.setdefault("model", "gpt-4o")
+            kw.setdefault("interactive", False)
+            super().__init__(**kw)
+            self.ledger = _FakeLedger()
+
+        def _assemble_system_prompt(self):
+            # distinct per thread → a clobber would make a thread see another's prompt
+            return f"SP::{threading.current_thread().name}"
+
+        def _get_client(self):
+            return object()
+
+        def _call(self, client, messages, tools, output_schema=None, system_prompt=None):
+            captured[threading.current_thread().name] = system_prompt
+            return SimpleNamespace(
+                usage=None,
+                choices=[SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=None))],
+            )
+
+    agent = _A()
+
+    def worker():
+        agent.run_task("a task")
+
+    threads = [threading.Thread(target=worker, name=f"w{i}") for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(captured) == 10
+    for name, sp in captured.items():
+        assert sp == f"SP::{name}", f"{name} saw a clobbered prompt: {sp}"

@@ -24,6 +24,10 @@ korgantic run is a single causal DAG in the ledger — rewindable per phase.
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 EFFORT_LEVELS = ["auto", "low", "medium", "high", "xhigh", "ultracode"]
 
 # Per-level behavior. phase_count and verifiers are deliberately non-decreasing.
@@ -101,19 +105,21 @@ def resolve_effort(name: str, task: str = "") -> tuple:
 # ── quality patterns (pure, over an injected runner) ──────────────────────
 
 def adversarial_verify(claim, runner, n: int = 3, quorum: int = 2) -> dict:
-    """Spawn n skeptics, each prompted to REFUTE the claim (default refuted if unsure).
+    """Spawn n skeptics CONCURRENTLY, each prompted to REFUTE the claim.
 
     The claim survives only if at least `quorum` skeptics fail to refute it.
+    Skeptics are independent and the aggregation is a count, so order doesn't
+    matter — safe to fan out. A skeptic that errors (None) counts as refuted:
+    a crash must never let a dubious finding through.
     """
-    votes = []  # list of `refuted` booleans
-    for _ in range(max(1, n)):
-        r = runner(
-            "verify",
-            f"Try to REFUTE this finding. Default refuted=true if you are unsure. Finding: {claim}",
-            output_schema=VERDICT_SCHEMA,
-        )
-        obj = (r or {}).get("result") or {}
-        votes.append(bool(obj.get("refuted", True)))
+    n = max(1, n)
+    prompt = (f"Try to REFUTE this finding. Default refuted=true if you are "
+              f"unsure. Finding: {claim}")
+    results = parallel([
+        (lambda: runner("verify", prompt, output_schema=VERDICT_SCHEMA))
+        for _ in range(n)
+    ])
+    votes = [bool(((r or {}).get("result") or {}).get("refuted", True)) for r in results]
     not_refuted = sum(1 for v in votes if not v)
     return {"confirmed": not_refuted >= quorum, "votes": votes,
             "n": n, "quorum": quorum, "not_refuted": not_refuted}
@@ -158,8 +164,13 @@ def parallel(thunks, max_workers: int = 8) -> list:
             i = futures[fut]
             try:
                 results[i] = fut.result()
-            except Exception:
-                results[i] = None  # error isolation: one bad agent ≠ a failed batch
+            except Exception as exc:
+                # Error isolation: one bad thunk ≠ a failed batch. But LOG it —
+                # a silent None is indistinguishable from a legitimate result and
+                # would hide real bugs (and silently drop findings downstream).
+                logger.warning("[korgantic] parallel thunk %d raised %s: %s",
+                               i, type(exc).__name__, exc)
+                results[i] = None
     return results
 
 
@@ -229,19 +240,30 @@ def run_korgantic(task: str, effort: str, runner) -> dict:
         artifacts["implement"] = [runner("implement", f"Implement: {task}")]
 
     findings = []
+    verification_errors = 0
     if "review" in prof["phases"]:
         phases_run.append("review")
         review = runner("review", f"Review the implementation of: {task}",
                         output_schema=FINDINGS_SCHEMA)
         raw = ((review or {}).get("result") or {}).get("findings", []) or []
-        for f in raw:
-            if prof["verifiers"]:
-                verdict = adversarial_verify(_finding_text(f), runner,
-                                             prof["verifiers"], prof["verify_quorum"])
-                if verdict["confirmed"]:
+        if prof["verifiers"]:
+            # Verify findings concurrently; each finding's skeptics also fan out.
+            verdicts = parallel([
+                (lambda ff=f: adversarial_verify(
+                    _finding_text(ff), runner, prof["verifiers"], prof["verify_quorum"]))
+                for f in raw
+            ])
+            for f, verdict in zip(raw, verdicts):
+                if verdict is None:
+                    # Verification itself errored (distinct from a refuted finding):
+                    # surface it rather than silently dropping the finding.
+                    verification_errors += 1
+                    logger.warning("[korgantic] verification errored for finding: %s",
+                                   _finding_text(f))
+                elif verdict.get("confirmed"):
                     findings.append({**f, "verdict": verdict})
-            else:
-                findings.append(f)
+        else:
+            findings.extend(raw)
 
     if prof["critic"]:
         phases_run.append("completeness")
@@ -251,6 +273,7 @@ def run_korgantic(task: str, effort: str, runner) -> dict:
         "effort": level,
         "phases_run": phases_run,
         "findings": findings,
+        "verification_errors": verification_errors,
         "artifacts": artifacts,
         "token_budget": prof["token_budget"],
     }
