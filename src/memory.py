@@ -109,8 +109,14 @@ def _validate_frontmatter(name: str, description: str, mem_type: str) -> Optiona
     return None
 
 
-def save_memory(name: str, description: str, mem_type: str, body: str) -> dict:
-    """Save a memory to its own file. Immutable: never edit in-place."""
+def save_memory(name: str, description: str, mem_type: str, body: str,
+                source: str = None) -> dict:
+    """Save a memory to its own file. Immutable: never edit in-place.
+
+    If `source` is given (a file path, or "fact:<text>"), the memory is anchored
+    to a sha256 baseline of that source at write time. memory_drift.scan() can
+    then detect when the source has moved on and flag the memory as drifted.
+    """
     error = _validate_frontmatter(name, description, mem_type)
     if error:
         return {"success": False, "error": error}
@@ -129,20 +135,26 @@ def save_memory(name: str, description: str, mem_type: str, body: str) -> dict:
     if os.path.exists(filepath):
         return {"success": False, "error": f"Memory '{name}' already exists. Delete it first (immutable design)."}
     
+    anchor = ""
+    if source:
+        from src.memory_drift import compute_baseline
+        source_sha = compute_baseline(source)
+        anchor = f'source: "{source}"\nsource_sha: {source_sha}\n'
+
     content = f"""---
 name: {name}
 description: {description}
 metadata:
   type: {mem_type}
 created: {datetime.now().isoformat()}
----
+{anchor}---
 
 {body}
 
 ---
 _Links: [[{name}]]_
 """
-    
+
     with open(filepath, "w") as f:
         f.write(content)
     
@@ -241,6 +253,8 @@ def _parse_memory_file(filepath: str) -> Optional[dict]:
         "description": frontmatter.get("description", ""),
         "type": frontmatter.get("metadata", {}).get("type", "unknown"),
         "created": frontmatter.get("created", ""),
+        "source": frontmatter.get("source"),
+        "source_sha": frontmatter.get("source_sha"),
         "body": body,
         "file": os.path.basename(filepath),
     }
