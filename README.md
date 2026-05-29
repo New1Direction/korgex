@@ -52,7 +52,7 @@ Requires Python ≥ 3.10.
 ### From GitHub Release
 
 ```bash
-pip install https://github.com/New1Direction/korgex/releases/download/v0.6.2/korgex-0.6.2-py3-none-any.whl
+pip install https://github.com/New1Direction/korgex/releases/download/v0.6.3/korgex-0.6.3-py3-none-any.whl
 ```
 
 ### From source
@@ -308,6 +308,9 @@ Wire it into your host's MCP config:
 ```json
 { "mcpServers": { "korg-ledger": { "command": "korgex", "args": ["mcp-server"] } } }
 ```
+
+Listed in the [MCP Registry](https://registry.modelcontextprotocol.io/) —
+`mcp-name: io.github.New1Direction/korg-ledger`
 
 ### Configure
 

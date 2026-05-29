@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-05-29
+
+### Added
+- **Listed in the official MCP Registry** (`io.github.New1Direction/korg-ledger`). The registry validates package ownership by requiring the marker `mcp-name: io.github.New1Direction/korg-ledger` in the PyPI package README — added here (a released version's README can't be edited in place, hence the patch bump). `server.json` migrated to the current `2025-12-11` schema with a ≤100-char description. `korg-ledger` is now discoverable from any MCP host via the registry, pointing at `pypi:korgex`.
+
 ## [0.6.2] — 2026-05-29
 
 ### Fixed
