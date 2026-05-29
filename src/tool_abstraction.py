@@ -339,13 +339,16 @@ _TOOL_ROUTING = {
 }
 
 
-def route_tool_call(tool_name: str, params: dict) -> dict:
+def route_tool_call(tool_name: str, params: dict, repo_root: str = None) -> dict:
     """Route a user-facing tool call to the appropriate handler.
 
     Dispatch order:
       1. If the tool was registered from an MCP server → call that server.
       2. Otherwise → look up in _TOOL_ROUTING and call the native handler,
          dropping kwargs the handler doesn't accept and injecting context.
+
+    `repo_root` is injected into the handler's context so file tools resolve
+    relative to it (e.g. an isolated worktree). Defaults to the cwd.
     """
     if tool_name in _MCP_TOOLS:
         try:
@@ -374,7 +377,7 @@ def route_tool_call(tool_name: str, params: dict) -> dict:
     accepted = set(sig.parameters.keys())
     filtered = {k: v for k, v in mapped.items() if k in accepted}
     if "context" in accepted:
-        filtered.setdefault("context", {"repo_root": os.getcwd()})
+        filtered.setdefault("context", {"repo_root": repo_root or os.getcwd()})
 
     try:
         return handler(**filtered)
