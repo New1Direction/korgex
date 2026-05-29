@@ -673,21 +673,31 @@ class KorgexAgent:
         get a read-only tool surface; implement gets the full toolset.
         """
         from src.korgantic import run_korgantic
+        from src.korg_ledger import ThreadSafeLedger
 
-        korg = self.ledger if self.ledger is not None else _korg()
-        root_seq = korg.record_user_prompt(f"[korgantic:{effort}] {task}")
+        base = self.ledger if self.ledger is not None else _korg()
+        # Wrap in a thread-safe ledger so concurrent phases (multi-modal sweep,
+        # fan-out) can't race seq/triggered_by and corrupt the causal DAG.
+        safe = ThreadSafeLedger(base)
+        prev_ledger = self.ledger
+        self.ledger = safe
         read_only = {"understand", "design", "review", "verify", "critic"}
 
-        def runner(role, prompt, output_schema=None):
-            tools_filter = subagent_tools("explore") if role in read_only else None
-            return self.run_task(
-                prompt, output_schema=output_schema,
-                parent_seq=root_seq, tools_filter=tools_filter,
-            )
+        try:
+            root_seq = safe.record_user_prompt(f"[korgantic:{effort}] {task}")
 
-        result = run_korgantic(task, effort, runner)
-        result["root_seq"] = root_seq
-        return result
+            def runner(role, prompt, output_schema=None):
+                tools_filter = subagent_tools("explore") if role in read_only else None
+                return self.run_task(
+                    prompt, output_schema=output_schema,
+                    parent_seq=root_seq, tools_filter=tools_filter,
+                )
+
+            result = run_korgantic(task, effort, runner)
+            result["root_seq"] = root_seq
+            return result
+        finally:
+            self.ledger = prev_ledger
 
     def _finalize_structured(self, client, messages: list, last_response,
                              output_schema: dict, prior_llm_seq, korg,

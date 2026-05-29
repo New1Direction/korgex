@@ -139,12 +139,41 @@ def loop_until_dry(round_fn, dry_threshold: int = 2, max_rounds: int = 10) -> li
     return results
 
 
+def parallel(thunks, max_workers: int = 8) -> list:
+    """Run zero-arg thunks concurrently and gather results in submission order.
+
+    A barrier: returns once all complete. Per-thunk error isolation — a thunk
+    that raises resolves to None rather than failing the batch. Safe to fan out
+    agents IFF they write through a ThreadSafeLedger (see korg_ledger).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    thunks = list(thunks)
+    if not thunks:
+        return []
+    results = [None] * len(thunks)
+    with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(thunks)))) as ex:
+        futures = {ex.submit(th): i for i, th in enumerate(thunks)}
+        for fut in futures:
+            i = futures[fut]
+            try:
+                results[i] = fut.result()
+            except Exception:
+                results[i] = None  # error isolation: one bad agent ≠ a failed batch
+    return results
+
+
 def multi_modal_sweep(lenses, runner, base_prompt: str) -> list:
-    """Run one understand-agent per lens — each blind to the others' angle."""
-    return [
-        runner("understand", f"[{lens} lens] Analyze for this task: {base_prompt}")
+    """Run one understand-agent per lens CONCURRENTLY — each blind to the others.
+
+    Lenses are independent, so this is a genuine fan-out. `l=lens` binds the loop
+    var per-thunk (avoids late-binding closure capture).
+    """
+    thunks = [
+        (lambda l=lens: runner("understand", f"[{l} lens] Analyze for this task: {base_prompt}"))
         for lens in lenses
     ]
+    return parallel(thunks)
 
 
 def completeness_critic(task, runner) -> list:
