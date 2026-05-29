@@ -35,28 +35,53 @@ test suite.
 |---|---|---|---|---|---|---|
 | `z-ai/glm-5.1` | $3.08 | **2/2** | 0 | 0 | 0 | 169s |
 | `qwen/qwen3.7-max` | $3.75 | **2/2** | 0 | 0 | 0 | 273s |
+| `google/gemini-3.5-flash` | $9.00 | **2/2** | 0 | 0 | 0 | 86s |
+| `anthropic/claude-sonnet-4.6` | $15.00 | **2/2** | 0 | 0 | 0 | 195s |
+| `anthropic/claude-opus-4.7` | $25.00 | **2/2** | 0 | 0 | 0 | 108s |
 
-Both models resolved every task with **all three invariants clean** and **zero
-leakage** into the source repo. An earlier leaf-band sweep across five models
+Every one of five models — across three vendors and an 8× price spread —
+resolved both harder tasks with **all three invariants clean** and **zero
+leakage** into the source repo. An earlier leaf-band sweep across five more
 (`gpt-oss-120b:free`, `glm-5.1`, `qwen3.7-max`, `stepfun/step-3.7-flash`,
 `x-ai/grok-build-0.1`) also resolved 100% with clean invariants.
 
-Whole live session — every run on this page, including a re-run — cost
-**$1.21** of OpenRouter credit. Rough uncached per-model estimate for the two
-harder tasks: **~$0.37** (glm-5.1), **~$1.03** (qwen3.7-max).
+All models ran through one provider-agnostic loop. The Anthropic and Google
+models were driven over OpenRouter's OpenAI-compatible endpoint via
+`KORGEX_PROVIDER=openai` — same scaffold, same invariants, no per-vendor code
+path. Total live spend across both rounds: **~$8** of OpenRouter credit; rough
+uncached per-model cost for the two harder tasks ran **~$0.37** (glm-5.1) to
+**~$2.87** (opus-4.7).
 
-## The bench caught a real bug
+## Running real models caught two real bugs
 
-The first cross-module run on glm-5.1 flagged a `no_escape` violation. That is
-the bench doing exactly its job. Root cause: with `KORG_JOURNAL_PATH` pointed at
-an out-of-repo path, the journal went there correctly — but content-addressed
+Neither was a model failure — both were latent korgex bugs that only a real run
+exposed.
+
+**1. A blob leak, caught by an invariant.** The first cross-module run on
+glm-5.1 flagged a `no_escape` violation. Root cause: with `KORG_JOURNAL_PATH`
+pointed out-of-repo, the journal went there correctly — but content-addressed
 **blobs** still wrote to a cwd-relative `.korg/blobs`, i.e. into the source
-checkout the worktree was supposed to isolate. The fix made `_blob_dir()` follow
-the journal path; the re-run came back **`no_escape: 0`, source clean**.
+checkout the worktree was supposed to isolate. `_blob_dir()` now follows the
+journal path; the re-run came back **`no_escape: 0`, source clean**. An
+invariant the agent cannot see or game surfaced it automatically.
 
-The point is not that there was a bug — it's that an invariant the agent could
-not see or game **surfaced it automatically**, on a live model, before any code
-was trusted. The invariants are not decorative.
+**2. An invalid tool schema, caught by a strict provider.** `gemini-3.5-flash`
+400'd every request:
+
+```
+GenerateContentRequest...parameters.properties[questions].items: missing field
+GenerateContentRequest...parameters.properties[tasks].items: missing field
+```
+
+korgex's schema builder dropped the `items` sub-schema for array-typed tool
+parameters. OpenAI, Anthropic, and the other OpenRouter models silently accept
+that invalid schema; **Gemini enforces JSON Schema and rejected it**, exposing
+a real correctness bug masked everywhere else. Carrying `items`/`properties`
+through translation fixed `AskUserQuestion` and `TaskCreate`, and
+gemini-3.5-flash then resolved both tasks.
+
+The lesson for a verifiable-cognition tool: invariants and strict third parties
+find what permissive defaults hide. Both fixes shipped with regression tests.
 
 ## What a run actually looks like
 
@@ -80,10 +105,14 @@ And the whole session is **cryptographically verifiable** after the fact:
 ```
 $ korgex verify /tmp/korgrun/glm.jsonl
   ✓ ledger intact — 69 events, hash-chain verified
-
 $ korgex verify /tmp/korgrun/qwen.jsonl
   ✓ ledger intact — 154 events, hash-chain verified
+$ korgex verify /tmp/korgrun/opus.jsonl
+  ✓ ledger intact — 62 events, hash-chain verified
 ```
+
+Every run on this page — five models, ten task executions — produced a journal
+that `korgex verify` confirms is hash-chain intact.
 
 Edit, delete, insert, or reorder a single event and `korgex verify` reports the
 exact `seq_id` that broke the chain. With `KORG_LEDGER_HMAC_KEY` set the chain
@@ -111,7 +140,9 @@ a black box.
 ```bash
 export KORGEX_API_URL="https://openrouter.ai/api/v1"
 export KORGEX_API_KEY="sk-or-..."            # your OpenRouter key
-export KORGEX_MODEL="z-ai/glm-5.1"           # or qwen/qwen3.7-max
+export KORGEX_MODEL="z-ai/glm-5.1"           # or qwen/qwen3.7-max, google/gemini-3.5-flash, ...
+export KORGEX_PROVIDER="openai"              # force the OpenAI-compatible path for
+                                             # anthropic/* and google/* slugs over OpenRouter
 export KORG_JOURNAL_PATH="/tmp/run/journal.jsonl"
 export KORGEX_BENCH_ONLY="leaf-fix-resume-stub,test-authoring-rewind"
 
