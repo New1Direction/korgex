@@ -234,6 +234,25 @@ This is useful when:
     {"name": "query", "type": "string", "description": "Search query describing what you want to do", "required": True},
 ])
 
+register_user_tool("Recall", """
+Recall what happened in PAST sessions from the korg ledger. korgex records every
+prompt, inference, and tool call to a causal journal — this searches it.
+
+Use this when:
+- The user references prior work ("how did I fix X last time?", "what did we decide about Y?")
+- You want to reuse a procedure that already worked instead of re-deriving it
+- You need context from a session before this one
+
+Results are reconciled against the LIVE workspace: each hit that references a file
+is checked for drift (content changed / file gone since it was recorded). TRUST
+CURRENT STATE OVER STALE MEMORY — if a result is flagged drift=true, re-Read the
+file before acting on the recalled detail.
+""".strip(), [
+    {"name": "query", "type": "string", "description": "What to recall (natural language or keywords)", "required": True},
+    {"name": "top_n", "type": "integer", "description": "Max results to return", "default": 5},
+    {"name": "mode", "type": "string", "description": "Ranking mode", "default": "auto", "enum": ["auto", "semantic", "substring"]},
+])
+
 
 def get_user_tool_schemas() -> list[dict]:
     """Return all user-facing tool schemas in Claude Code-compatible format."""
@@ -316,6 +335,7 @@ _TOOL_ROUTING = {
               "param_map": {"pattern": "pattern"}},
     "Glob":  {"handler": "tool_list_files",                "module": "src.tools_impl",
               "param_map": {"path": "path"}},
+    "Recall": {"handler": "tool_recall",                   "module": "src.recall"},
 }
 
 
