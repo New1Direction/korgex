@@ -38,6 +38,11 @@ def register_user_tool(name: str, description: str, params: list[dict],
                 "description": p.get("description", ""),
                 **({"default": p["default"]} if "default" in p else {}),
                 **({"enum": p["enum"]} if "enum" in p else {}),
+                # Carry array/object sub-schemas through — an array property with
+                # no `items` is invalid JSON Schema; strict providers (Gemini)
+                # reject the whole request.
+                **({"items": p["items"]} if "items" in p else {}),
+                **({"properties": p["properties"]} if "properties" in p else {}),
             } for p in params},
             "required": [p["name"] for p in params if p.get("required", False)],
             "additionalProperties": False,
