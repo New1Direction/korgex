@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`korgex <prompt>` crashed on a clean install (no PyYAML).** The idea-#5 memory-recall wiring made every `run_task` import `src.memory` → `yaml`, but PyYAML was never a declared dependency — fatal (`ModuleNotFoundError`) on any environment without it (regression shipped in v0.5.0–v0.6.0; **caught by the new Gate F CI run, which the local suite masked** because PyYAML was present locally). Fix: declare `pyyaml` as a dependency, and make `_recall_and_reconcile` fail-safe so the memory subsystem can never crash the agent loop (degrades to no recall).
+
 ### Added
 - **Gate F — live-LLM self-coding bench in CI** (`.github/workflows/self-coding-bench.yml`): a manual-dispatch workflow that runs korgex-bench end-to-end against a live model (via the `KORGEX_API_KEY` secret), asserts the three zero-invariants (no_escape / no_green_on_red / durable_ledger), then verifies the bench journal is intact. The reproducible "trust number" gate — no-op (green) when the secret is absent. Plus a more discriminating seed task with a precise behavioral oracle (`korgex import <unknown-vendor>` should exit 2), not just "suite green".
 
