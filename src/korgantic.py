@@ -25,6 +25,7 @@ korgantic run is a single causal DAG in the ledger — rewindable per phase.
 from __future__ import annotations
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,39 @@ def parallel(thunks, max_workers: int = 8) -> list:
                                i, type(exc).__name__, exc)
                 results[i] = None
     return results
+
+
+def run_best_of_n(prompt, agent_runner, repo_root: str, n: int = 3,
+                  worktree_base: str = None, branch_prefix: str = "korgex/bon") -> dict:
+    """Run the SAME task n times concurrently, each in its OWN isolated worktree,
+    and pick a winner that passed its gate. Inference-time scaling for reliability.
+
+    `agent_runner(prompt, worktree) -> result` runs one attempt (with the test
+    gate active, so result["success"] reflects gate-pass). Each attempt's branch
+    persists for review/merge; worktrees are cleaned up. Winner selection prefers
+    an auto-mergeable passing attempt, else any passing attempt.
+    """
+    from src import workspace as W
+    from src.guardrails import classify_diff
+
+    def attempt(i: int) -> dict:
+        branch = f"{branch_prefix}-{i}"
+        wt_path = os.path.join(worktree_base, f"bon_{i}") if worktree_base else None
+        wt = W.create_worktree(repo_root, branch, worktree_path=wt_path)
+        try:
+            result = agent_runner(prompt, wt) or {}
+            merge_gate = classify_diff(W.changed_paths(wt))
+            return {"attempt": i, "branch": branch,
+                    "passed": bool(result.get("success")),
+                    "result": result, "merge_gate": merge_gate}
+        finally:
+            W.remove_worktree(repo_root, wt)  # branch persists; worktree dir removed
+
+    attempts = [a for a in parallel([(lambda i=i: attempt(i)) for i in range(n)]) if a]
+    winners = [a for a in attempts if a["passed"]]
+    winner = (next((w for w in winners if w["merge_gate"]["auto_mergeable"]), None)
+              or (winners[0] if winners else None))
+    return {"n": n, "attempts": attempts, "winner": winner, "passed_count": len(winners)}
 
 
 def multi_modal_sweep(lenses, runner, base_prompt: str) -> list:
