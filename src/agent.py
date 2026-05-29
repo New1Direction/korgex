@@ -664,6 +664,31 @@ class KorgexAgent:
             "root_seq": child_result.get("root_seq"),
         }
 
+    def run_korgantic_task(self, task: str, effort: str = "auto") -> dict:
+        """Max-power mode: run the effort-scaled korgantic workflow chain.
+
+        Each phase (understand/design/implement/review/verify/critic) runs as a
+        run_task chained under ONE korgantic root seq, so the whole run is a
+        single causal DAG in the ledger — rewindable per phase. Analysis phases
+        get a read-only tool surface; implement gets the full toolset.
+        """
+        from src.korgantic import run_korgantic
+
+        korg = self.ledger if self.ledger is not None else _korg()
+        root_seq = korg.record_user_prompt(f"[korgantic:{effort}] {task}")
+        read_only = {"understand", "design", "review", "verify", "critic"}
+
+        def runner(role, prompt, output_schema=None):
+            tools_filter = subagent_tools("explore") if role in read_only else None
+            return self.run_task(
+                prompt, output_schema=output_schema,
+                parent_seq=root_seq, tools_filter=tools_filter,
+            )
+
+        result = run_korgantic(task, effort, runner)
+        result["root_seq"] = root_seq
+        return result
+
     def _finalize_structured(self, client, messages: list, last_response,
                              output_schema: dict, prior_llm_seq, korg,
                              iterations: int, root_seq=None) -> dict:
