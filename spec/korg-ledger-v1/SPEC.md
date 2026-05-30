@@ -1,6 +1,6 @@
 # korg-ledger@v1 — Tamper-Evident Cognition Ledger
 
-**Status:** FROZEN · **Version:** `korg-ledger@v1` · **Reference:** [`src/ledger_spec.py`](../../src/ledger_spec.py) · **Conformance:** [`conformance.json`](./conformance.json)
+**Status:** FROZEN · **Version:** `korg-ledger@v1` · **Reference:** [`src/ledger_spec.py`](../../src/ledger_spec.py) · **Conformance:** [`conformance.json`](./conformance.json) · **Event shapes:** [`EVENTS.md`](./EVENTS.md)
 
 This document is the normative definition of korg's tamper-evident event ledger.
 It is intentionally small and language-agnostic. Any implementation — the Rust
@@ -19,7 +19,9 @@ are the tie-breaker.
 An event is a JSON object. The chain is defined over two reserved fields; all
 other fields are opaque application payload (korgex uses `seq_id`, `tool_name`,
 `args`, `result`, `success`, `duration_ms`, `triggered_by`, `source_agent`,
-`schema_version`, …).
+`schema_version`, …). The cross-subsystem meaning of those payload fields — the
+shared event vocabulary korgex, korgchat, and thumper all emit so one journal
+can hold their events interleaved — is specified in [`EVENTS.md`](./EVENTS.md).
 
 | Field | Type | Meaning |
 |---|---|---|
