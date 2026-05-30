@@ -497,6 +497,52 @@ def cmd_diag():
     return 1 if any(d.get("severity") == 1 for d in diags) else 0
 
 
+def cmd_bus():
+    """Verifiable agent message bus — agents coordinate over a tamper-evident korg-ledger journal."""
+    from src import bus as B
+
+    argv = sys.argv[1:]
+    toks = argv[argv.index("bus") + 1:] if "bus" in argv else []
+    journal = os.environ.get("KORG_BUS_JOURNAL") or os.path.join(
+        os.path.expanduser("~"), ".korg", "bus.jsonl")
+    if not toks:
+        print("  usage: korgex bus <send|inbox|history|members> …")
+        print("    korgex bus send <from> <to> <message>")
+        print("    korgex bus inbox <agent>")
+        return 1
+
+    action, rest = toks[0], toks[1:]
+    if action == "send":
+        if len(rest) < 3:
+            print("  usage: korgex bus send <from> <to> <message>")
+            return 1
+        seq = B.send(journal, rest[0], rest[1], " ".join(rest[2:]))
+        print(f"  ✓ #{seq}  {rest[0]} → {rest[1]}  (chained + verifiable)")
+        return 0
+    if action == "inbox":
+        if not rest:
+            print("  usage: korgex bus inbox <agent>")
+            return 1
+        msgs = B.inbox(journal, rest[0])
+        if not msgs:
+            print(f"  no unread for {rest[0]}")
+            return 0
+        for m in msgs:
+            print(f"  #{m['seq']}  {m['from']} → {m['to']}:  {m['body']}")
+        B.mark_read(journal, rest[0], [m["seq"] for m in msgs])
+        return 0
+    if action == "history":
+        for m in B.history(journal):
+            print(f"  #{m['seq']}  {m['from']} → {m['to']}:  {m['body']}")
+        return 0
+    if action == "members":
+        mem = B.members(journal)
+        print("  " + (", ".join(mem) if mem else "(none yet)"))
+        return 0
+    print(f"  unknown bus action: {action}")
+    return 1
+
+
 def cmd_mcp_server():
     """Run the korg-ledger MCP server (JSON-RPC over stdio) — verify/audit/import for any MCP host."""
     from src.mcp_server import serve
@@ -522,6 +568,7 @@ SUBCOMMANDS = {
     "audit":             cmd_audit,
     "trajectory":        cmd_trajectory,
     "diag":              cmd_diag,
+    "bus":               cmd_bus,
     "mcp-server":        cmd_mcp_server,
 }
 
@@ -626,6 +673,8 @@ def _build_subcommand_parser():
                             help="append the trajectory here (default: <journal>.trajectory.jsonl)")
         elif name == "diag":
             sp.add_argument("file", nargs="?", help="source file to check with its language server")
+        elif name == "bus":
+            sp.add_argument("args", nargs="*", help="<send|inbox|history|members> …")
     return p
 
 
