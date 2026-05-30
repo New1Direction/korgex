@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-29
+
+### Added
+- **`korgex audit --html` — a self-verifying, shareable audit report.** Turns `korgex audit` from terminal text into a single self-contained HTML file that **re-verifies the korg-ledger@v1 hash chain in the recipient's own browser** — no need to trust the tool that produced it. It carries a plain-English narrative of what the agent did, a visual of the chain, and a live **tamper test** that edits one recorded event and shows the chain break, localized by `seq` — turning tamper-evidence from a claim into something you can feel. No network calls (an audit artifact must not phone home). The embedded verifier (`src/assets/korg_verify.js`) is the same reference algorithm as the Python and Rust cores, proven against the frozen conformance vectors **and** on real multi-thousand-event sessions (the in-browser recomputed tip matches the Python journal, zero false positives). The zero-buy-in adoption on-ramp: point it at logs you already have, get a proof you can hand to anyone.
+
 ## [0.6.3] — 2026-05-29
 
 ### Added
