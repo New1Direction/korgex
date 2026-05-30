@@ -21,6 +21,7 @@ from src.tool_abstraction import USER_TOOLS, route_tool_call
 # tools_impl must be imported so its @register_tool decorators populate the registry
 import src.tools_impl  # noqa: F401
 from src.korg_ledger import get_default_client as _korg
+from src import edit_policy as _EP
 from src.hooks import load_hooks, run_event
 from src.workspace import path_within
 from src.guardrails import is_protected
@@ -164,6 +165,18 @@ class KorgexAgent:
         # to the (hash-chained) ledger as a verifiable repair trail.
         self.heal_attempts = 0
         self.heal_fn = None
+
+        # Edit-approval policy (consulted before any file-mutating tool runs).
+        # WORKSPACE = auto-approve inside the repo/tmp, confirm sensitive +
+        # outside-repo; SESSION = auto-approve; ASK = confirm every edit. Hard-
+        # blocked paths (.git/.ssh/.gnupg) are always refused. Every decision is
+        # recorded to the ledger; an approved edit in an isolated worktree is
+        # checkpointed-before-mutation (revertable). $KORGEX_EDIT_POLICY overrides.
+        self.edit_policy = (os.environ.get("KORGEX_EDIT_POLICY") or _EP.WORKSPACE).strip().lower()
+        # Optional confirmer(path)->bool for interactive approval; None → the
+        # headless fail-safe (sensitive blocked; ordinary outside-workspace
+        # proceeds-and-records so automation isn't broken).
+        self._edit_confirmer = None
 
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
@@ -700,6 +713,15 @@ class KorgexAgent:
                         messages.append(self._tool_result_turn(call["id"], gr_block))
                         continue  # the agent can't edit its own guardrails
 
+                    # ── Edit-approval policy + checkpoint-before-mutation ────
+                    # Consult the policy before any file-mutating tool; the gate
+                    # records its own verdict event and snapshots the workspace
+                    # before an approved edit (in an isolated worktree).
+                    ep_block = self._edit_policy_block(call, korg, llm_seq)
+                    if ep_block is not None:
+                        messages.append(self._tool_result_turn(call["id"], ep_block))
+                        continue  # the edit was refused by the approval policy
+
                     # ── PreToolUse gate: deterministic, ledger-native ────────
                     # A matching hook can block the call. Every verdict (allow or
                     # deny) is recorded as its own causal event carrying the
@@ -874,6 +896,45 @@ class KorgexAgent:
                 "reason": f"{path} is a protected guardrail file (Gate G)",
             }
         return None
+
+    def _edit_policy_block(self, call: dict, korg, llm_seq):
+        """Edit-approval gate. For a file-mutating tool: consult the policy, record
+        the decision to the ledger, and checkpoint the workspace BEFORE an approved
+        mutation. Returns a blocked-result dict if the edit is refused, else None.
+        Non-file-mutating calls pass straight through (returns None, records nothing)."""
+        args = call.get("args") or {}
+        path = _EP.mutating_path(call.get("name"), args)
+        if path is None:
+            return None
+        proceed, action, reason = _EP.guard_decision(
+            path, policy=self.edit_policy, cwd=self.repo_root,
+            interactive=self.interactive, confirmer=self._edit_confirmer,
+        )
+        sha = self._checkpoint_before_mutation(path) if proceed else None
+        korg.record_tool_call(
+            tool_name="edit_policy",
+            args={"tool": call.get("name"), "path": path, "policy": self.edit_policy},
+            result={"action": action, "reason": reason, "allowed": proceed, "checkpoint": sha},
+            success=proceed, duration_ms=0, triggered_by=llm_seq,
+        )
+        if not proceed:
+            return {"error": "edit refused by approval policy",
+                    "verdict": action.upper().replace("-", "_"), "reason": reason}
+        return None
+
+    def _checkpoint_before_mutation(self, path: str):
+        """Best-effort git snapshot before a mutation so the edit is revertable.
+        Only active in an ISOLATED worktree (workspace_root set) — where checkpoint
+        commits land on a throwaway branch, never the user's working branch. Returns
+        the checkpoint SHA, or None (non-fatal; the decision is still recorded)."""
+        root = self.workspace_root
+        if not root:
+            return None
+        try:
+            from src.workspace import git_checkpoint
+            return git_checkpoint(root, message=f"korgex-pre-edit:{os.path.basename(path)}")
+        except Exception:
+            return None
 
     def run_isolated_task(self, task: str, branch: str = None, worktree_path: str = None,
                           base: str = "HEAD", test_gate: dict = None,
