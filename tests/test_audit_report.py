@@ -64,6 +64,45 @@ def test_embedded_verifier_catches_tampering():
     assert any(e.get("seq") == 2 for e in result["errors"]), result["errors"]
 
 
+def test_embedded_verifier_rejects_regenerated_chain_against_anchored_tip():
+    """A fully regenerated forgery (edit a body, then re-link + re-hash the whole
+    chain so it is internally consistent) slips past the naive check but MUST be
+    caught by the JS verifier when an anchored tip is supplied. This is the
+    browser side of the $1k-bounty's safety: forging requires a second preimage."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not available to exercise the in-browser verifier")
+    genuine = _load_vector("basic-intact.jsonl")
+    genuine_tip = genuine[-1]["entry_hash"]
+    driver = textwrap.dedent(
+        f"""
+        const v = require({json.dumps(str(JS_ASSET))});
+        const events = {json.dumps(genuine)};
+        const GEN = {json.dumps(genuine_tip)};
+        (async () => {{
+          // forge: change the first event, then re-link + re-hash the entire chain
+          events[0].args = Object.assign({{}}, events[0].args, {{ body: 'FORGED' }});
+          let prev = v.GENESIS;
+          for (const e of events) {{
+            e.prev_hash = prev;
+            delete e.entry_hash;
+            e.entry_hash = await v.chainHash(e);
+            prev = e.entry_hash;
+          }}
+          const naive = await v.verifyChain(events);          // internally consistent now
+          const anchored = await v.verifyChain(events, GEN);  // anchored tip must catch it
+          process.stdout.write(JSON.stringify({{ naive, anchored }}));
+        }})();
+        """
+    )
+    out = subprocess.run([node, "-e", driver], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, f"node failed: {out.stderr}"
+    res = json.loads(out.stdout)
+    assert res["naive"] == [], "regenerated chain is internally consistent — naive check passes"
+    assert res["anchored"], "anchored tip must reject the regenerated forgery"
+    assert any("tip" in (e.get("why") or "").lower() for e in res["anchored"]), res["anchored"]
+
+
 def test_report_is_self_contained_and_embeds_events_and_verifier():
     from src.audit_report import render_html
 
