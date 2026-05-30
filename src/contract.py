@@ -24,6 +24,7 @@ import json
 import os
 
 from src import sealed_envelope as SE
+from src import signing as SG
 from src.korg_ledger import LocalJournalClient
 
 OFFER = "contract.offer"
@@ -60,12 +61,18 @@ def accept(journal_path: str, frm: str, offer_seq: int) -> int:
         ACCEPT, {"from": frm}, {}, True, 0, triggered_by=offer_seq)
 
 
-def commit(journal_path: str, frm: str, deliverable, *, salt: str | None = None) -> tuple[int, str]:
+def commit(journal_path: str, frm: str, deliverable, *, salt: str | None = None,
+           sign_with: str | None = None) -> tuple[int, str]:
     """Seal the deliverable before the deadline. Records only the commit hash (the work
-    stays hidden). Returns ``(seq_id, salt)`` — the deliverer keeps the salt to reveal."""
+    stays hidden). With ``sign_with`` (the deliverer's Ed25519 private key) the seal is
+    SIGNED — the event carries the deliverer's pubkey + a signature over the commit, so
+    'who sealed this' is provable, not an unsigned name. Returns ``(seq_id, salt)``."""
     commit_hash, salt = SE.seal(deliverable, salt)
-    seq = _client(journal_path).record_tool_call(
-        COMMIT, {"from": frm, "commit": commit_hash}, {}, True, 0)
+    args = {"from": frm, "commit": commit_hash}
+    if sign_with is not None:
+        args["pubkey"] = SG.public_of(sign_with)
+        args["sig"] = SG.sign_tip(sign_with, commit_hash)   # sign the seal hash (32 bytes)
+    seq = _client(journal_path).record_tool_call(COMMIT, args, {}, True, 0)
     return seq, salt
 
 
@@ -101,18 +108,25 @@ def verdict(journal_path: str) -> dict:
     deadline_ev = deadlines[0] if deadlines else None
 
     if commit_ev is None:
-        return {"status": "DEFAULTED", "why": "no deliverable was sealed"}
-    if deadline_ev is not None and commit_ev["seq_id"] > deadline_ev["seq_id"]:
-        return {"status": "DEFAULTED", "why": "sealed only after the deadline"}
-    if not reveals:
-        return {"status": "PENDING", "why": "sealed but not yet revealed"}
+        return {"status": "DEFAULTED", "why": "no deliverable was sealed", "signed_by": None}
 
+    # who sealed it? a valid signature over the commit binds the seal to a key (not a name)
+    ca = commit_ev["args"]
+    signed_by = (ca["pubkey"] if ca.get("pubkey") and ca.get("sig")
+                 and SG.verify_tip(ca["pubkey"], ca["commit"], ca["sig"]) else None)
+
+    def out(status: str, why: str) -> dict:
+        return {"status": status, "why": why, "signed_by": signed_by}
+
+    if deadline_ev is not None and commit_ev["seq_id"] > deadline_ev["seq_id"]:
+        return out("DEFAULTED", "sealed only after the deadline")
+    if not reveals:
+        return out("PENDING", "sealed but not yet revealed")
     rev = reveals[0]["args"]
-    if not SE.verify(rev["deliverable"], rev["salt"], commit_ev["args"]["commit"]):
-        return {"status": "FRAUD", "why": "the revealed deliverable does not match what was sealed"}
+    if not SE.verify(rev["deliverable"], rev["salt"], ca["commit"]):
+        return out("FRAUD", "the revealed deliverable does not match what was sealed")
     if not tests:
-        return {"status": "REVEALED", "why": "reveal matches the seal; awaiting acceptance test"}
+        return out("REVEALED", "reveal matches the seal; awaiting acceptance test")
     if not tests[0]["args"]["passed"]:
-        return {"status": "FAILED", "why": "deliverable does not pass the acceptance criteria"}
-    return {"status": "SETTLED",
-            "why": "sealed before the deadline, reveal matches the seal, passed acceptance"}
+        return out("FAILED", "deliverable does not pass the acceptance criteria")
+    return out("SETTLED", "sealed before the deadline, reveal matches the seal, passed acceptance")

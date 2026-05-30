@@ -89,3 +89,30 @@ def test_reveal_survives_secret_redaction(tmp_path):
     C.reveal(j, "seller", cseq, "the deliverable text", salt)
     rev = [e for e in _events(j) if e["tool_name"] == C.REVEAL][0]["args"]
     assert rev["salt"] == salt and rev["deliverable"] == "the deliverable text"
+
+
+def test_a_signed_commit_proves_authorship(tmp_path):
+    """With a per-party key, the seal is SIGNED — 'who delivered' stops being a claim."""
+    from src import signing as SG
+    j = str(tmp_path / "deal.jsonl")
+    priv, pub = SG.generate_keypair()
+    o = C.offer(j, "korgex", "codex", "task", "criteria")
+    C.accept(j, "codex", o)
+    cseq, salt = C.commit(j, "codex", "the work", sign_with=priv)
+    C.mark_deadline(j, "korgex")
+    C.reveal(j, "codex", cseq, "the work", salt)
+    C.record_test(j, "korgex", cseq, True)
+    v = C.verdict(j)
+    assert v["status"] == "SETTLED"
+    assert v["signed_by"] == pub                  # codex's key provably sealed it
+
+
+def test_an_unsigned_commit_has_no_proven_signer(tmp_path):
+    j = str(tmp_path / "deal.jsonl")
+    o = C.offer(j, "korgex", "codex", "task", "criteria")
+    C.accept(j, "codex", o)
+    cseq, salt = C.commit(j, "codex", "the work")
+    C.mark_deadline(j, "korgex")
+    C.reveal(j, "codex", cseq, "the work", salt)
+    C.record_test(j, "korgex", cseq, True)
+    assert C.verdict(j)["signed_by"] is None       # an unsigned name proves nothing about who
