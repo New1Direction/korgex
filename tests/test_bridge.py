@@ -414,3 +414,89 @@ def test_mcp_connect_discover_call_against_stub_server():
 
     client.disconnect()
     assert not client.is_connected()
+
+
+# ── 9. Journal write → on-disk → ledger_spec.verify_chain round-trip ───────
+# Closes the gap: until now NOTHING took events through the real production
+# write path (LocalJournalClient._append, which stamps prev_hash/entry_hash via
+# ledger_spec.chain_hash) and then re-verified the bytes ON DISK with the spec
+# verifier. The conformance vectors are hand-stamped by a test helper, not by
+# the client — so a divergence between how the client writes and how the spec
+# verifies would never be caught. These tests run the round-trip end-to-end,
+# and deliberately push NON-BMP / surrogate-pair content through it, the exact
+# code path most likely to silently diverge.
+
+
+def test_local_journal_roundtrips_through_verify_chain(tmp_path, monkeypatch):
+    from src import ledger_spec as S
+    from src.korg_ledger import LocalJournalClient
+
+    monkeypatch.delenv("KORG_LEDGER_HMAC_KEY", raising=False)  # SHA-256 path
+    jp = tmp_path / "journal.jsonl"
+    c = LocalJournalClient(journal_path=str(jp))
+    s1 = c.record_user_prompt("add a function")
+    s2 = c.record_llm_call(model="m", prompt_tokens=10, completion_tokens=4,
+                           duration_ms=12, triggered_by=s1)
+    c.record_tool_call("Write", {"path": "a.py"}, {"ok": True}, True, 3, triggered_by=s2)
+
+    # Re-read the bytes that actually landed on disk and verify with the SPEC
+    # module (not the client's own re-export) — proves write and verify agree.
+    on_disk = [json.loads(line) for line in jp.read_text().splitlines() if line.strip()]
+    assert len(on_disk) == 3
+    assert S.verify_chain(on_disk) == [], "freshly written journal must verify clean"
+    assert S.verify_dag(on_disk) == []
+
+
+def test_local_journal_roundtrips_non_bmp_content_through_verify(tmp_path, monkeypatch):
+    """Surrogate-pair content survives the full write→disk→verify round-trip.
+
+    A U+10000+ codepoint canonicalizes to a UTF-16 surrogate pair; if the client
+    wrote the file in a way that didn't match ledger_spec.canonicalize (e.g. raw
+    UTF-8 vs \\uXXXX), the on-disk entry_hash would fail re-verification. This is
+    the production-path twin of the nonbmp-intact conformance vector."""
+    from src import ledger_spec as S
+    from src.korg_ledger import LocalJournalClient
+
+    monkeypatch.delenv("KORG_LEDGER_HMAC_KEY", raising=False)  # SHA-256 path
+    jp = tmp_path / "journal.jsonl"
+    c = LocalJournalClient(journal_path=str(jp))
+    s1 = c.record_user_prompt("make it \U0001F600 in 中文 \U00010000")  # emoji + CJK + astral
+    c.record_tool_call("Write",
+                       {"path": "中文.py", "snippet": "# \U0001F600 \U00010000"},
+                       {"ok": True, "note": "done \U0001F4A9"}, True, 4, triggered_by=s1)
+
+    raw = jp.read_bytes()
+    # The on-disk journal is itself ASCII (\uXXXX-escaped) — byte-stable cross-platform.
+    assert raw.isascii(), "journal on disk must be ASCII-only (escaped non-BMP)"
+    assert b"\\ud83d\\ude00" in raw, "expected the U+1F600 surrogate pair on disk"
+
+    on_disk = [json.loads(line) for line in jp.read_text().splitlines() if line.strip()]
+    # The decisive assertion: the spec verifier reproduces the client's hashes
+    # over surrogate-pair content, byte-for-byte.
+    assert S.verify_chain(on_disk) == [], "non-BMP journal failed re-verification"
+    assert S.verify_dag(on_disk) == []
+    # And the non-BMP payload survived the round-trip intact (not mangled).
+    assert on_disk[0]["args"]["prompt"] == "make it \U0001F600 in 中文 \U00010000"
+
+
+def test_local_journal_non_bmp_tamper_is_detected(tmp_path, monkeypatch):
+    """Flipping one non-BMP codepoint in a persisted line breaks the chain."""
+    from src import ledger_spec as S
+    from src.korg_ledger import LocalJournalClient
+
+    monkeypatch.delenv("KORG_LEDGER_HMAC_KEY", raising=False)  # SHA-256 path
+    jp = tmp_path / "journal.jsonl"
+    c = LocalJournalClient(journal_path=str(jp))
+    c.record_user_prompt("emoji \U0001F600")
+    c.record_tool_call("Write", {"path": "x.py"}, {"ok": True}, True, 1, triggered_by=1)
+
+    lines = jp.read_text().splitlines()
+    obj = json.loads(lines[0])
+    obj["args"]["prompt"] = "emoji \U0001F4A9"  # swap grinning-face for pile-of-poo
+    lines[0] = json.dumps(obj)
+    jp.write_text("\n".join(lines) + "\n")
+
+    on_disk = [json.loads(line) for line in jp.read_text().splitlines() if line.strip()]
+    errors = S.verify_chain(on_disk)
+    assert errors, "a flipped non-BMP codepoint must break the hash-chain"
+    assert any("seq 1" in e for e in errors)

@@ -193,6 +193,15 @@ class KorgexAgent:
             from src.lsp import post_tool_plugin
             self.plugins.register("post_tool", post_tool_plugin)
 
+        # Opt-in LSP ENFORCEMENT (Gate L): promote diagnostics from advisory to a
+        # hard-block. With $KORGEX_LSP_ENFORCE on, a Write/Edit that introduces a
+        # SEVERITY-1 (error) diagnostic is REFUSED — the file is reverted to its
+        # pre-edit state and a verifiable `lsp.enforce` policy event is recorded,
+        # so the model must fix-or-revert before proceeding. Default OFF: the
+        # diagnostics still get folded into the result as before, nothing is vetoed.
+        self.lsp_enforce = os.environ.get(
+            "KORGEX_LSP_ENFORCE", "").strip().lower() in ("1", "true", "yes", "on")
+
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
         if interactive is None:
@@ -768,6 +777,11 @@ class KorgexAgent:
                             continue  # the tool never runs
 
                     self.plugins.invoke("pre_tool", call)
+                    # Snapshot the file's pre-edit bytes so LSP enforcement (Gate L)
+                    # can revert a vetoed mutation. None = file did not exist (a
+                    # create), so a revert means deleting it. Captured only when
+                    # enforcement is armed — zero cost otherwise.
+                    _pre_content = self._capture_pre_content(call) if self.lsp_enforce else None
                     if session:
                         # Show a transient spinner while the tool runs
                         with session.spinner(f"{call['name']}({_short_args(call['args'])})"):
@@ -794,12 +808,14 @@ class KorgexAgent:
                         triggered_by=llm_seq,
                     )
                     # ───────────────────────────────────────────────────────
+                    _all_diags: list = []
                     for _pr in self.plugins.invoke("post_tool", {"call": call, "result": tool_result}):
                         # Auto-diagnostics: fold a language server's findings into the
                         # edit's result (so the LLM sees the errors it just introduced)
                         # and record them as their own ledger event.
                         if isinstance(_pr, dict) and _pr.get("diagnostics"):
                             _diags = _pr["diagnostics"]
+                            _all_diags.extend(_diags)
                             if isinstance(tool_result, dict):
                                 tool_result = {**tool_result, "diagnostics": _diags}
                             korg.record_tool_call(
@@ -809,6 +825,15 @@ class KorgexAgent:
                                 success=not any(d.get("severity") == 1 for d in _diags),
                                 duration_ms=0, triggered_by=llm_seq,
                             )
+
+                    # ── LSP enforcement (Gate L): veto a severity-1 edit ─────
+                    # Opt-in. Promotes the advisory diagnostics above into a hard
+                    # block: a Write/Edit that introduced a language-server ERROR is
+                    # reverted to its pre-edit bytes and refused with a fix-or-revert
+                    # message, recorded as a verifiable `lsp.enforce` policy event.
+                    _veto = self._lsp_enforce_block(call, _all_diags, korg, llm_seq, _pre_content)
+                    if _veto is not None:
+                        tool_result = _veto
 
                     # ── PostToolUse hook (advisory; cannot undo the call) ────
                     if hooks:
@@ -954,6 +979,87 @@ class KorgexAgent:
             return {"error": "edit refused by approval policy",
                     "verdict": action.upper().replace("-", "_"), "reason": reason}
         return None
+
+    def _lsp_enforce_block(self, call: dict, diagnostics, korg, llm_seq, pre_content):
+        """LSP enforcement gate (Gate L) — opt-in hard-block on severity-1 errors.
+
+        After a file-mutating tool ran and a language server returned diagnostics,
+        this decides whether to VETO. It blocks only when ALL hold:
+          - enforcement is enabled (self.lsp_enforce / $KORGEX_LSP_ENFORCE);
+          - the tool is file-mutating (Write/Edit/MultiEdit/NotebookEdit);
+          - at least one diagnostic is SEVERITY 1 (an error, not a warning/hint).
+
+        On a veto it REVERTS the file to `pre_content` (or deletes it if the edit
+        created it: `pre_content is None`), records a verifiable `lsp.enforce`
+        policy event, and returns a fix-or-revert block dict for the tool result.
+        Otherwise returns None (advisory behavior is unchanged). Mirrors
+        `_edit_policy_block`: pure decision + one ledger event + a block dict."""
+        if not self.lsp_enforce:
+            return None
+        path = _EP.mutating_path(call.get("name"), call.get("args") or {})
+        if path is None or not diagnostics:
+            return None
+        errors = [d for d in diagnostics if d.get("severity") == 1]
+        if not errors:
+            return None  # warnings/hints are advisory — only errors veto
+
+        # Resolve under the workspace root exactly as the tools do, so the revert
+        # targets the same file that was written (matches _capture_pre_content).
+        root = self.workspace_root or self.repo_root
+        resolved = (os.path.join(root, path)
+                    if root and not os.path.isabs(path) else path)
+
+        # Revert the offending edit so a vetoed write never lands on disk.
+        action = self._revert_mutation(resolved, pre_content)
+
+        messages = [d.get("message", "") for d in errors[:5]]
+        block = {
+            "error": (f"edit refused: introduced {len(errors)} language-server "
+                      f"error(s) — fix the cause or revert. The change was reverted."),
+            "verdict": "LSP_SEVERITY_1",
+            "reason": f"severity-1 diagnostic(s) in {path}: " + "; ".join(messages),
+            "diagnostics": errors[:10],
+        }
+        korg.record_tool_call(
+            tool_name="lsp.enforce",
+            args={"tool": call.get("name"), "path": path},
+            result={"verdict": "REFUSED", "action": action,
+                    "error_count": len(errors), "messages": messages},
+            success=False, duration_ms=0, triggered_by=llm_seq,
+        )
+        return block
+
+    def _capture_pre_content(self, call: dict):
+        """Read a file-mutating tool's target BEFORE it runs, so a vetoed edit can
+        be reverted. Returns the current text, or None if the path is not a
+        mutating target or the file doesn't exist yet (a create → revert deletes).
+        Resolves under the workspace root when isolated, matching the tools."""
+        path = _EP.mutating_path(call.get("name"), call.get("args") or {})
+        if path is None:
+            return None
+        root = self.workspace_root or self.repo_root
+        if root and not os.path.isabs(path):
+            path = os.path.join(root, path)
+        try:
+            with open(path) as f:
+                return f.read()
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    def _revert_mutation(self, path: str, pre_content):
+        """Undo a file mutation: restore `pre_content`, or delete the file if the
+        edit created it (`pre_content is None`). Best-effort; returns the action
+        taken ("reverted" | "revert_failed") for the ledger record."""
+        try:
+            if pre_content is None:
+                if os.path.exists(path):
+                    os.remove(path)
+            else:
+                with open(path, "w") as f:
+                    f.write(pre_content)
+            return "reverted"
+        except OSError:
+            return "revert_failed"
 
     def _checkpoint_before_mutation(self, path: str):
         """Best-effort git snapshot before a mutation so the edit is revertable.

@@ -52,6 +52,13 @@ value of `"é"` serializes to the six-character escape `"é"`, never raw UTF-8.
 (See the conformance test `test_canonicalize_is_sorted_compact_ascii` for the
 exact byte-level assertion.)
 
+Codepoints above the BMP (≥ U+10000) escape as a **lower-case UTF-16 surrogate
+pair**, not a single `\u{...}`: e.g. U+1F600 → `😀`. This is the most
+common place a hand-written canonicalizer diverges, so it has its own frozen
+vector — `nonbmp-intact.jsonl` (emoji U+1F600, CJK U+4E2D, astral U+10000) — and
+the pinned check `test_surrogate_pair_canonicalization_is_pinned`. Reproduce that
+tip or you are not conformant.
+
 ## 3. `entry_hash`
 
 The **preimage** is the canonicalization of the event with its `entry_hash`
