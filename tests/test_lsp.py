@@ -68,3 +68,33 @@ def test_diagnostics_degrades_gracefully_when_no_server_is_available(tmp_path):
     f = tmp_path / "x.unknownlang"
     f.write_text("whatever")
     assert diagnostics(str(f)) == []  # no server for this ext → [] (never raises)
+
+
+def test_post_tool_plugin_diagnoses_a_successful_edit(monkeypatch):
+    from src import lsp
+    monkeypatch.setattr(lsp, "diagnostics", lambda p: [{"message": "oops", "severity": 1}])
+    out = lsp.post_tool_plugin({"call": {"name": "Write", "args": {"file_path": "a.py"}},
+                                "result": {"ok": True}})
+    assert out == {"file": "a.py", "diagnostics": [{"message": "oops", "severity": 1}]}
+
+
+def test_post_tool_plugin_skips_non_edits_failed_edits_and_clean_files(monkeypatch):
+    from src import lsp
+    monkeypatch.setattr(lsp, "diagnostics", lambda p: [{"message": "x", "severity": 1}])
+    assert lsp.post_tool_plugin({"call": {"name": "Read", "args": {"file_path": "a.py"}},
+                                 "result": {}}) is None
+    assert lsp.post_tool_plugin({"call": {"name": "Write", "args": {"file_path": "a.py"}},
+                                 "result": {"error": "failed"}}) is None
+    monkeypatch.setattr(lsp, "diagnostics", lambda p: [])
+    assert lsp.post_tool_plugin({"call": {"name": "Edit", "args": {"file_path": "a.py"}},
+                                 "result": {}}) is None
+
+
+def test_agent_registers_auto_diagnostics_only_when_enabled(monkeypatch, tmp_path):
+    from src.agent import KorgexAgent
+
+    monkeypatch.delenv("KORGEX_LSP_DIAGNOSTICS", raising=False)
+    assert KorgexAgent(repo_root=str(tmp_path)).plugins.count("post_tool") == 0
+
+    monkeypatch.setenv("KORGEX_LSP_DIAGNOSTICS", "1")
+    assert KorgexAgent(repo_root=str(tmp_path)).plugins.count("post_tool") >= 1

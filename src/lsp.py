@@ -182,3 +182,22 @@ def diagnostics(file_path: str, server_cmd: list | None = None, timeout: float =
     t.start()
     t.join(timeout)
     return result if not t.is_alive() else []
+
+
+def post_tool_plugin(payload: dict):
+    """A `post_tool` plugin: after a successful Write/Edit, diagnose the file.
+
+    Returns ``{"file", "diagnostics"}`` when the edit introduced language-server
+    findings, else None (so the agent sees its own errors mid-loop instead of
+    editing blind). Best-effort — no server installed ⇒ no findings ⇒ None.
+    """
+    call = payload.get("call") or {}
+    if call.get("name") not in ("Write", "Edit", "MultiEdit"):
+        return None
+    args = call.get("args") or {}
+    path = args.get("file_path") or args.get("path")
+    result = payload.get("result")
+    if not path or (isinstance(result, dict) and "error" in result):
+        return None  # don't diagnose a failed edit
+    diags = diagnostics(path)
+    return {"file": path, "diagnostics": diags} if diags else None

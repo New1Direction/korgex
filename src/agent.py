@@ -185,6 +185,14 @@ class KorgexAgent:
         # a plugin that raises is isolated and can never break the loop.
         self.plugins = PluginRegistry()
 
+        # Opt-in LSP auto-diagnostics: after a Write/Edit, a language server checks
+        # the file and its findings are folded back into the edit's result, so the
+        # agent sees the errors it just introduced mid-loop. Needs a server
+        # installed (no-op otherwise). $KORGEX_LSP_DIAGNOSTICS=1 enables it.
+        if os.environ.get("KORGEX_LSP_DIAGNOSTICS", "").strip().lower() in ("1", "true", "yes", "on"):
+            from src.lsp import post_tool_plugin
+            self.plugins.register("post_tool", post_tool_plugin)
+
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
         if interactive is None:
@@ -786,7 +794,21 @@ class KorgexAgent:
                         triggered_by=llm_seq,
                     )
                     # ───────────────────────────────────────────────────────
-                    self.plugins.invoke("post_tool", {"call": call, "result": tool_result})
+                    for _pr in self.plugins.invoke("post_tool", {"call": call, "result": tool_result}):
+                        # Auto-diagnostics: fold a language server's findings into the
+                        # edit's result (so the LLM sees the errors it just introduced)
+                        # and record them as their own ledger event.
+                        if isinstance(_pr, dict) and _pr.get("diagnostics"):
+                            _diags = _pr["diagnostics"]
+                            if isinstance(tool_result, dict):
+                                tool_result = {**tool_result, "diagnostics": _diags}
+                            korg.record_tool_call(
+                                tool_name="lsp.diagnostics",
+                                args={"file": _pr.get("file"), "tool": call["name"]},
+                                result={"count": len(_diags), "diagnostics": _diags[:10]},
+                                success=not any(d.get("severity") == 1 for d in _diags),
+                                duration_ms=0, triggered_by=llm_seq,
+                            )
 
                     # ── PostToolUse hook (advisory; cannot undo the call) ────
                     if hooks:
