@@ -660,6 +660,8 @@ class KorgexAgent:
             if self.provider != "anthropic" and messages and messages[0].get("role") == "system":
                 messages[0]["content"] = sys_prompt
 
+        self._bus_deliver_initial(messages, korg, prompt_seq)
+
         mutated = False  # did any file-mutating tool run? gates the test-gate
         try:
             for i in range(max_iter):
@@ -1074,6 +1076,34 @@ class KorgexAgent:
             return git_checkpoint(root, message=f"korgex-pre-edit:{os.path.basename(path)}")
         except Exception:
             return None
+
+    def _bus_deliver_initial(self, messages, korg, trigger_seq):
+        """Auto-deliver pending verifiable-bus messages into the prompt at task start,
+        so the agent acts on incoming coordination without being asked. Marks them
+        read and records a bus.deliver event. No-op unless a bus identity is set
+        ($KORG_BUS_JOURNAL + $KORG_BUS_AGENT). Best-effort — never breaks the loop."""
+        journal, me = os.environ.get("KORG_BUS_JOURNAL"), os.environ.get("KORG_BUS_AGENT")
+        if not (journal and me):
+            return
+        try:
+            from src import bus
+            unread = bus.inbox(journal, me)
+            if not unread:
+                return
+            bus.mark_read(journal, me, [m["seq"] for m in unread])
+            note = ("\n\n📨 Pending messages on the verifiable agent bus — act on these as "
+                    "needed and reply with the BusSend tool:\n"
+                    + "\n".join(f"- from {m['from']}: {m['body']}" for m in unread))
+            for msg in reversed(messages):
+                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                    msg["content"] += note
+                    break
+            korg.record_tool_call(tool_name="bus.deliver",
+                                  args={"agent": me, "count": len(unread)},
+                                  result={"from": [m["from"] for m in unread]},
+                                  success=True, duration_ms=0, triggered_by=trigger_seq)
+        except Exception:
+            pass
 
     def run_isolated_task(self, task: str, branch: str = None, worktree_path: str = None,
                           base: str = "HEAD", test_gate: dict = None,

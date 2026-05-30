@@ -75,3 +75,47 @@ def test_members_and_history_filtering(tmp_path):
     assert set(bus.members(j)) == {"alice", "bob", "carol"}
     assert len(bus.history(j)) == 2
     assert [m["body"] for m in bus.history(j, agent="carol")] == ["b"]
+
+
+# ── autonomous wiring: bus tools + start-of-task auto-delivery ──
+def test_bus_tools_round_trip_via_identity_env(tmp_path, monkeypatch):
+    from src import tools_impl as T
+    monkeypatch.setenv("KORG_BUS_JOURNAL", str(tmp_path / "bus.jsonl"))
+    monkeypatch.setenv("KORG_BUS_AGENT", "alice")
+    assert T.tool_bus_send("bob", "ping")["sent"] is True
+    monkeypatch.setenv("KORG_BUS_AGENT", "bob")
+    inb = T.tool_bus_inbox()
+    assert [m["body"] for m in inb["messages"]] == ["ping"]
+    assert T.tool_bus_inbox()["messages"] == []  # marked read on view
+
+
+def test_bus_tools_error_without_identity(monkeypatch):
+    from src import tools_impl as T
+    monkeypatch.delenv("KORG_BUS_JOURNAL", raising=False)
+    monkeypatch.delenv("KORG_BUS_AGENT", raising=False)
+    assert "error" in T.tool_bus_send("bob", "hi")
+    assert "error" in T.tool_bus_inbox()
+
+
+def test_agent_auto_delivers_pending_messages_into_the_prompt(tmp_path, monkeypatch):
+    j = str(tmp_path / "bus.jsonl")
+    bus.send(j, "codex", "alice", "the PR is ready for your review")
+    monkeypatch.setenv("KORG_BUS_JOURNAL", j)
+    monkeypatch.setenv("KORG_BUS_AGENT", "alice")
+    from src.agent import KorgexAgent
+
+    class FakeLedger:
+        def __init__(self):
+            self.events = []
+
+        def record_tool_call(self, **k):
+            self.events.append(k)
+            return 1
+
+    a = KorgexAgent(repo_root=str(tmp_path))
+    msgs = [{"role": "user", "content": "do the task"}]
+    led = FakeLedger()
+    a._bus_deliver_initial(msgs, led, 1)
+    assert "the PR is ready for your review" in msgs[0]["content"]  # injected into the prompt
+    assert led.events[-1]["tool_name"] == "bus.deliver"
+    assert bus.inbox(j, "alice") == []  # delivered → marked read

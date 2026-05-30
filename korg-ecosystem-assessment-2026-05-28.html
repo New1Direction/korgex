@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Korg Ecosystem — Strategic Assessment · 2026-05-28</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,900&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#f6f1e7;
+    --paper-2:#efe8d9;
+    --ink:#1b1815;
+    --ink-soft:#4a443c;
+    --ink-faint:#8a8175;
+    --rule:#d8cfbd;
+    --rule-strong:#c3b8a1;
+    --accent:#b6451d;        /* burnt signal orange */
+    --accent-deep:#8a3414;
+    --green:#3c6f52;
+    --green-bg:#e3ecdf;
+    --amber:#9a6a14;
+    --amber-bg:#f3e7cb;
+    --red:#9d3326;
+    --red-bg:#f1ddd6;
+    --grey:#6b6358;
+    --grey-bg:#e7e0d2;
+    --shadow:0 1px 2px rgba(40,30,18,.06), 0 14px 30px -18px rgba(40,30,18,.28);
+    --maxw:1080px;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(120% 120% at 100% 0%, #fbf7ee 0%, var(--paper) 42%, var(--paper-2) 100%);
+    color:var(--ink);
+    font-family:"Hanken Grotesk", sans-serif;
+    font-size:17px;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  /* faint ledger grid */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:linear-gradient(var(--rule) 1px, transparent 1px);
+    background-size:100% 30px;
+    opacity:.16;
+    pointer-events:none;
+    z-index:0;
+  }
+
+  .wrap{position:relative; z-index:1; max-width:var(--maxw); margin:0 auto; padding:0 28px;}
+
+  /* scroll progress */
+  #progress{position:fixed; top:0; left:0; height:3px; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent-deep)); z-index:50; transition:width .08s linear;}
+
+  a{color:var(--accent-deep); text-decoration-thickness:1px; text-underline-offset:2px;}
+
+  /* ---------- typography ---------- */
+  h1,h2,h3{font-family:"Fraunces", serif; font-weight:600; letter-spacing:-.01em; line-height:1.08;}
+  .kicker{font-family:"IBM Plex Mono", monospace; font-size:12.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent-deep);}
+  .seq{font-family:"IBM Plex Mono", monospace; font-size:12px; letter-spacing:.16em; color:var(--ink-faint); text-transform:uppercase;}
+  code, .mono{font-family:"IBM Plex Mono", monospace; font-size:.86em; background:var(--paper-2); border:1px solid var(--rule); border-radius:5px; padding:.06em .38em; color:var(--accent-deep);}
+
+  /* ---------- masthead ---------- */
+  header.masthead{padding:64px 0 30px;}
+  .topline{display:flex; flex-wrap:wrap; gap:14px; justify-content:space-between; align-items:baseline; border-bottom:2px solid var(--ink); padding-bottom:14px;}
+  .topline .brand{font-family:"Fraunces",serif; font-weight:900; font-size:21px; letter-spacing:-.02em;}
+  .topline .brand b{color:var(--accent);}
+  header h1{font-size:clamp(36px, 6.2vw, 68px); font-weight:900; margin:30px 0 0; max-width:16ch;}
+  header h1 em{font-style:normal; color:var(--accent); }
+  .dek{font-family:"Fraunces",serif; font-size:clamp(19px,2.4vw,25px); font-weight:400; color:var(--ink-soft); max-width:60ch; margin:20px 0 0; line-height:1.4;}
+
+  .meta-row{display:flex; flex-wrap:wrap; gap:26px; margin-top:34px; padding-top:20px; border-top:1px solid var(--rule);}
+  .meta-row .m{min-width:120px;}
+  .meta-row .m .lab{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-faint); display:block; margin-bottom:3px;}
+  .meta-row .m .val{font-weight:600; font-size:14.5px;}
+
+  /* ---------- verdict pullquote ---------- */
+  .verdict{position:relative; margin:46px 0 10px; padding:34px 34px 34px 40px; background:var(--ink); color:#f3ecdd; border-radius:14px; box-shadow:var(--shadow); overflow:hidden;}
+  .verdict::before{content:"❝"; position:absolute; top:-10px; left:14px; font-family:"Fraunces",serif; font-size:120px; color:rgba(182,69,29,.42); line-height:1;}
+  .verdict .lab{position:relative; font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.22em; text-transform:uppercase; color:#e0a273; margin-bottom:12px;}
+  .verdict p{position:relative; margin:0; font-family:"Fraunces",serif; font-size:clamp(20px,2.6vw,27px); line-height:1.42; font-weight:400;}
+  .verdict p strong{color:#fff; font-weight:600; background:linear-gradient(transparent 62%, rgba(182,69,29,.55) 62%);}
+
+  /* ---------- sections ---------- */
+  section{padding:52px 0 8px; border-top:1px solid var(--rule); margin-top:48px;}
+  .sec-head{display:flex; align-items:baseline; gap:16px; margin-bottom:26px;}
+  .sec-head h2{font-size:clamp(26px,3.4vw,38px); font-weight:600;}
+  .sec-head .seq{white-space:nowrap; padding-top:6px;}
+  .lede{font-size:18px; color:var(--ink-soft); max-width:66ch; margin:-10px 0 30px;}
+
+  /* ---------- component cards ---------- */
+  .grid{display:grid; gap:18px;}
+  .cols-2{grid-template-columns:repeat(2,1fr);}
+  .comp{background:rgba(255,253,247,.72); border:1px solid var(--rule); border-left:4px solid var(--ink); border-radius:12px; padding:20px 22px; box-shadow:var(--shadow); transition:transform .25s ease, box-shadow .25s ease;}
+  .comp:hover{transform:translateY(-3px); box-shadow:0 1px 2px rgba(40,30,18,.06), 0 22px 40px -20px rgba(40,30,18,.4);}
+  .comp h3{font-size:20px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+  .comp .path{font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--ink-faint); margin:2px 0 10px;}
+  .comp p{margin:0; font-size:15px; color:var(--ink-soft);}
+
+  /* maturity badges */
+  .badge{display:inline-block; font-family:"IBM Plex Mono",monospace; font-size:10.5px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; padding:3px 9px; border-radius:999px; border:1px solid transparent; vertical-align:middle;}
+  .b-beta{background:var(--green-bg); color:var(--green); border-color:#bcd1b6;}
+  .b-alpha{background:var(--amber-bg); color:var(--amber); border-color:#e3cf9d;}
+  .b-proto{background:var(--red-bg); color:var(--red); border-color:#e0bcb0;}
+  .b-mixed{background:var(--grey-bg); color:var(--grey); border-color:#d2c8b6;}
+
+  /* ---------- strengths ---------- */
+  .strengths{display:grid; grid-template-columns:repeat(2,1fr); gap:16px;}
+  .str{display:flex; gap:14px; padding:18px 20px; background:linear-gradient(180deg, rgba(227,236,223,.55), rgba(255,253,247,.55)); border:1px solid #c9d8c2; border-radius:12px;}
+  .str .ic{font-family:"Fraunces",serif; font-weight:900; font-size:22px; color:var(--green); line-height:1.2;}
+  .str h4{margin:0 0 4px; font-family:"Hanken Grotesk",sans-serif; font-size:16px; font-weight:700;}
+  .str p{margin:0; font-size:14px; color:var(--ink-soft);}
+
+  /* ---------- claims table ---------- */
+  .legend{display:flex; flex-wrap:wrap; gap:18px; margin:-8px 0 20px; font-family:"IBM Plex Mono",monospace; font-size:12px;}
+  .legend span{display:inline-flex; align-items:center; gap:7px; color:var(--ink-soft);}
+  .dot{width:11px; height:11px; border-radius:3px; display:inline-block;}
+  .d-green{background:var(--green);} .d-amber{background:var(--amber);} .d-red{background:var(--red);} .d-grey{background:var(--grey);}
+
+  .claim{display:grid; grid-template-columns:1fr; border:1px solid var(--rule); border-radius:12px; overflow:hidden; background:rgba(255,253,247,.72); box-shadow:var(--shadow); margin-bottom:14px;}
+  .claim .top{display:flex; flex-wrap:wrap; align-items:center; gap:14px; padding:15px 20px; border-bottom:1px solid var(--rule);}
+  .claim .top .ctitle{font-weight:700; font-size:16.5px; flex:1; min-width:200px;}
+  .claim .why{padding:14px 20px; font-size:14.5px; color:var(--ink-soft);}
+  .vbadge{font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:600; letter-spacing:.1em; padding:4px 11px; border-radius:6px; white-space:nowrap;}
+  .v-overstated{background:var(--red-bg); color:var(--red); border:1px solid #e0bcb0;}
+  .v-partial{background:var(--amber-bg); color:var(--amber); border:1px solid #e3cf9d;}
+  .v-real{background:var(--green-bg); color:var(--green); border:1px solid #bcd1b6;}
+  .v-missing{background:var(--grey-bg); color:var(--grey); border:1px solid #d2c8b6;}
+  .claim .left-edge{}
+  .claim[data-v="overstated"]{border-left:4px solid var(--red);}
+  .claim[data-v="partial"]{border-left:4px solid var(--amber);}
+  .claim[data-v="real"]{border-left:4px solid var(--green);}
+  .claim[data-v="missing"]{border-left:4px solid var(--grey);}
+
+  /* ---------- crux compare ---------- */
+  .crux{display:grid; grid-template-columns:1fr 1fr; gap:20px;}
+  .lane{border-radius:14px; padding:24px; box-shadow:var(--shadow); position:relative; overflow:hidden;}
+  .lane.taken{background:linear-gradient(180deg,#f1ddd6,#f6ece6); border:1px solid #e0bcb0;}
+  .lane.open{background:linear-gradient(180deg,#e3ecdf,#eef3ea); border:1px solid #bcd1b6;}
+  .lane .tag{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; display:inline-block; padding:4px 10px; border-radius:6px; margin-bottom:12px;}
+  .lane.taken .tag{background:var(--red); color:#fff;}
+  .lane.open .tag{background:var(--green); color:#fff;}
+  .lane h3{font-size:21px; margin:0 0 6px;}
+  .lane .sub{font-size:13.5px; color:var(--ink-soft); margin:0 0 14px; font-style:italic;}
+  .lane ul{margin:0; padding-left:18px;}
+  .lane li{font-size:14px; margin-bottom:8px; color:var(--ink-soft);}
+  .lane li b{color:var(--ink);}
+  .lane .timing{margin-top:14px; font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600;}
+  .lane.taken .timing{color:var(--red);}
+  .lane.open .timing{color:var(--green);}
+
+  /* ---------- steps ---------- */
+  .steps{counter-reset:step; display:grid; gap:14px;}
+  .step{display:grid; grid-template-columns:auto 1fr; gap:18px; align-items:start; background:rgba(255,253,247,.72); border:1px solid var(--rule); border-radius:12px; padding:18px 22px; box-shadow:var(--shadow); transition:transform .2s ease;}
+  .step:hover{transform:translateX(4px);}
+  .step .num{counter-increment:step; font-family:"Fraunces",serif; font-weight:900; font-size:30px; color:var(--rule-strong); min-width:42px; line-height:1;}
+  .step .num::before{content:counter(step,decimal-leading-zero);}
+  .step.starred{border:1px solid var(--accent); border-left:4px solid var(--accent); background:linear-gradient(180deg, rgba(182,69,29,.06), rgba(255,253,247,.7));}
+  .step.starred .num{color:var(--accent);}
+  .step h4{margin:0 0 6px; font-size:17px; font-family:"Hanken Grotesk",sans-serif; font-weight:700; display:flex; flex-wrap:wrap; gap:9px; align-items:center;}
+  .step p{margin:0; font-size:14.5px; color:var(--ink-soft);}
+  .tags{display:flex; gap:7px; flex-wrap:wrap; margin-left:auto;}
+  .t{font-family:"IBM Plex Mono",monospace; font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; padding:3px 8px; border-radius:5px; border:1px solid var(--rule);}
+  .t-hi{background:var(--red-bg); color:var(--red); border-color:#e0bcb0;}
+  .t-med{background:var(--amber-bg); color:var(--amber); border-color:#e3cf9d;}
+  .t-lo{background:var(--green-bg); color:var(--green); border-color:#bcd1b6;}
+  .t-now{background:var(--accent); color:#fff; border-color:var(--accent-deep);}
+
+  /* ---------- bottom line ---------- */
+  .bottomline{margin:52px 0 0; padding:38px 34px; background:var(--ink); color:#f3ecdd; border-radius:16px; box-shadow:var(--shadow);}
+  .bottomline .lab{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.22em; text-transform:uppercase; color:#e0a273; margin-bottom:14px;}
+  .bottomline p{margin:0 0 12px; font-family:"Fraunces",serif; font-size:clamp(19px,2.3vw,24px); line-height:1.45; font-weight:400;}
+  .bottomline p:last-child{margin-bottom:0;}
+  .bottomline b{color:#fff; font-weight:600;}
+  .bottomline .spine{color:#e0a273;}
+
+  footer{padding:40px 0 70px; text-align:center; color:var(--ink-faint); font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.06em;}
+  footer .rule{height:1px; background:var(--rule); margin-bottom:24px;}
+
+  /* ---------- reveal anim ---------- */
+  html.js .reveal{opacity:0; transform:translateY(22px); transition:opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1);}
+  html.js .reveal.in{opacity:1; transform:none;}
+
+  /* ---------- responsive ---------- */
+  @media (max-width:780px){
+    body{font-size:16px;}
+    .cols-2,.strengths,.crux{grid-template-columns:1fr;}
+    .verdict::before{font-size:90px;}
+    .step{grid-template-columns:auto 1fr;}
+    .meta-row{gap:18px;}
+  }
+
+  /* ---------- print ---------- */
+  @media print{
+    body{background:#fff; font-size:11pt;}
+    body::before, #progress{display:none;}
+    .verdict,.bottomline{background:#f2f2f2 !important; color:#111 !important; box-shadow:none;}
+    .verdict p strong{background:none; text-decoration:underline;}
+    .verdict::before{display:none;}
+    .comp,.step,.claim,.lane,.str{box-shadow:none; break-inside:avoid;}
+    section{break-inside:avoid;}
+    html.js .reveal{opacity:1 !important; transform:none !important;}
+    a{color:#111;}
+  }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<div class="wrap">
+
+  <!-- ===================== MASTHEAD ===================== -->
+  <header class="masthead">
+    <div class="topline">
+      <div class="brand"><b>Korg</b> · Ecosystem Dossier</div>
+      <div class="seq">Strategic Assessment · 2026-05-28</div>
+    </div>
+
+    <h1>The code is better than the pitch. The pitch points at the <em>wrong door.</em></h1>
+    <p class="dek">A grounded read of korg, korgex, korgchat &amp; the adapters — what's real, where the headline claims outrun the source, and the one lane Korg can actually lead.</p>
+
+    <div class="meta-row">
+      <div class="m"><span class="lab">Scope</span><span class="val">korg · korgex · korgchat · adapters</span></div>
+      <div class="m"><span class="lab">Method</span><span class="val">Code read + tests run + 2026 market scan</span></div>
+      <div class="m"><span class="lab">Rust core</span><span class="val">~34k LOC · 9 crates</span></div>
+      <div class="m"><span class="lab">Verdict</span><span class="val" style="color:var(--accent);">Re-aim, don't rebuild</span></div>
+    </div>
+
+    <div class="verdict reveal">
+      <div class="lab">The one-paragraph verdict</div>
+      <p>Korg is genuinely impressive solo-built engineering. The core ledger is <strong>real and well-tested</strong>; the cross-vendor capture and the recall→re-invoke loop are <strong>genuinely novel</strong>. But the headline claims — “deterministic,” “reversible,” “causally ordered” — outrun the code, and the go-to-market aims at the <strong>most crowded market in AI</strong>. The fix isn't to build more. It's to pick one identity, make the claims match the code, and re-aim at the lane nobody owns.</p>
+    </div>
+  </header>
+
+  <!-- ===================== THE MAP ===================== -->
+  <section>
+    <div class="sec-head"><span class="seq">seq · 01</span><h2>What's actually here</h2></div>
+    <p class="lede">Five surfaces, one shared causal ledger. The genuine core is smaller than the marketing — and stronger than its claims.</p>
+
+    <div class="grid cols-2">
+      <div class="comp reveal">
+        <h3>Korg — the ledger <span class="badge b-beta">Beta</span></h3>
+        <div class="path">crates/korg-registry</div>
+        <p>A real append-only event ledger: monotonic <code>seq_id</code>, <code>triggered_by</code> causal tree, HLC, pure projection folds, tested rewind + checkpoint. <b>This is the genuine core</b> — 21 green tests, atomic writes, mature error handling.</p>
+      </div>
+      <div class="comp reveal">
+        <h3>Korg — the runtime <span class="badge b-proto">Proto→Alpha</span></h3>
+        <div class="path">crates/korg-runtime · 18.5k LOC</div>
+        <p>Orchestration monolith: 4-persona swarm, speculative DAG, <code>.ktrans</code> Ed25519 provenance, recovery. The headline machinery <b>and the overclaims</b> both live here.</p>
+      </div>
+      <div class="comp reveal">
+        <h3>Adapters + recall + introspect <span class="badge b-beta">Beta / PoC</span></h3>
+        <div class="path">adapters/ · recall-mcp · introspect-mcp</div>
+        <p>Cross-vendor capture + semantic recall + the <code>recall→re-invoke</code> loop. <b>The real commercial wedge.</b> Solid for Claude Code; Codex/Grok are proof-of-concept.</p>
+      </div>
+      <div class="comp reveal">
+        <h3>korgex <span class="badge b-alpha">Alpha</span></h3>
+        <div class="path">~8.4k LOC · Python + VSCode</div>
+        <p>Provider-agnostic coding agent. Clean loop &amp; rigorous ledger client — but swarm, model-router, sandbox-by-default &amp; self-healing are stubbed or unwired. Reads as a dogfood vehicle.</p>
+      </div>
+      <div class="comp reveal" style="border-left-color:var(--green);">
+        <h3>KorgChat <span class="badge b-beta">Beta</span></h3>
+        <div class="path">~3k LOC · Python</div>
+        <p>Chat on the shared ledger — branching, recall, summarize. <b>Best-tested component</b> (149 tests). A sharp proof of the thesis, but a developer CLI, not a consumer product.</p>
+      </div>
+      <div class="comp reveal" style="border-left-color:var(--ink-faint);">
+        <h3>thumper <span class="badge b-mixed">Folded in</span></h3>
+        <div class="path">korg-runtime scheduler · thump adapter</div>
+        <p>Absorbed into the runtime's execution scheduler. No longer a standalone surface.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== STRENGTHS ===================== -->
+  <section>
+    <div class="sec-head"><span class="seq">seq · 02</span><h2>The assets that are genuinely yours</h2></div>
+    <p class="lede">Verified end-to-end. These are real, and competitors don't have them.</p>
+
+    <div class="strengths">
+      <div class="str reveal"><div class="ic">✚</div><div><h4>Zero-cooperation capture</h4><p>Reads the <code>~/.claude/projects/*.jsonl</code> files Claude Code already writes — so any user gets a <b>retroactive ledger</b> of every session with zero behavior change.</p></div></div>
+      <div class="str reveal"><div class="ic">↻</div><div><h4>The recall → re-invoke loop</h4><p>A recalled event's <code>tool_name</code> equals the MCP tool equals the CLI subcommand, via <code>korg:introspect@v1</code>. <b>No memory product does this</b> — they store facts, not a causal execution stream.</p></div></div>
+      <div class="str reveal"><div class="ic">▤</div><div><h4>One open ledger format</h4><p>Flat, greppable, version-controllable JSONL spanning Claude Code, Codex, Grok, korgex &amp; KorgChat in a single schema. The substrate, not a silo.</p></div></div>
+      <div class="str reveal"><div class="ic">✓</div><div><h4>Honest engineering culture</h4><p>Frank “known limitations,” a documented concurrency footgun, a dogfood-audit fix preserved in comments. The marketing throws this credibility away — the code keeps it.</p></div></div>
+    </div>
+  </section>
+
+  <!-- ===================== CLAIMS VS REALITY ===================== -->
+  <section>
+    <div class="sec-head"><span class="seq">seq · 03</span><h2>Where the claims outrun the code</h2></div>
+    <p class="lede">An adversarial pass graded the load-bearing claims against the source. A technical audience will check these in an afternoon — so they should be true.</p>
+
+    <div class="legend">
+      <span><i class="dot d-green"></i> Real / holds</span>
+      <span><i class="dot d-amber"></i> Partial</span>
+      <span><i class="dot d-red"></i> Overstated</span>
+      <span><i class="dot d-grey"></i> Missing</span>
+    </div>
+
+    <div class="claim reveal" data-v="overstated">
+      <div class="top"><span class="ctitle">“The first <em>deterministic</em> cognitive runtime”</span><span class="vbadge v-overstated">Overstated</span></div>
+      <div class="why">Determinism is confined to the read-side projection folds. The DAG executor runs <em>nothing</em> — it decides success via <code>!command.contains("fail")</code> and signs each run with a fresh random key. “Replay” re-renders a recorded log; it does not re-execute. The cognition (live LLMs), the append path (<code>Utc::now()</code> + <code>Uuid::v4()</code>) are non-deterministic.</div>
+    </div>
+
+    <div class="claim reveal" data-v="overstated">
+      <div class="top"><span class="ctitle">“Reversible — Git for cognition (Ctrl-R rewind)”</span><span class="vbadge v-overstated">Overstated</span></div>
+      <div class="why"><code>rewind()</code> = <code>events.retain(seq ≤ target)</code> — it truncates a log and <b>restores nothing in the real world</b>. Files, shell commands, network calls all persist. A real git-tree restore exists (<code>handle_operator_fork</code>) but is wired to a different path, not Ctrl-R — and it's destructive truncation, not Git's recoverable history.</div>
+    </div>
+
+    <div class="claim reveal" data-v="overstated">
+      <div class="top"><span class="ctitle">“Every decision is <em>causally ordered</em>”</span><span class="vbadge v-overstated">Overstated</span></div>
+      <div class="why">It's a <b>total order by <code>seq_id</code></b> (single-writer mutex). <code>triggered_by</code> is an advisory parent pointer, not the ordering. The HLC is informational and single-actor. A real vector clock exists — but in the blackboard subsystem, not the ledger.</div>
+    </div>
+
+    <div class="claim reveal" data-v="partial">
+      <div class="top"><span class="ctitle">Cross-vendor capture + semantic recall</span><span class="vbadge v-partial">Partial — holds</span></div>
+      <div class="why">Verified working across synthetic Claude/Codex/Grok sessions in one ledger. But only <b>Claude Code has live capture + one-command setup</b>; Codex/Grok are PoC libraries needing manual MITM, and their model-output text isn't even indexed. Recall is O(N) cosine with no disk cache and <b>no recency filter</b> — so “how did I fix this last week?” can't be served.</div>
+    </div>
+
+    <div class="claim reveal" data-v="missing">
+      <div class="top"><span class="ctitle">Tamper-evident JSON ledger (hash chain)</span><span class="vbadge v-missing">Missing</span></div>
+      <div class="why">The spec defines <code>ledger_hash</code> / <code>parent_hash</code> for tamper-evidence — <b>neither field exists</b> in the actual <code>EventMetadata</code>. The JSON ledger is not a hash chain; crypto lives only in the separate <code>.ktrans</code> layer. Closing this is the single fix that makes “verifiable” true.</div>
+    </div>
+  </section>
+
+  <!-- ===================== STRATEGIC CRUX ===================== -->
+  <section>
+    <div class="sec-head"><span class="seq">seq · 04</span><h2>The strategic crux</h2></div>
+    <p class="lede">The wedge you're selling is real — and already taken. The wedge you've actually built is open, and the market is moving toward it.</p>
+
+    <div class="crux">
+      <div class="lane taken reveal">
+        <span class="tag">Selling into — crowded &amp; late</span>
+        <h3>“Cross-vendor local memory you own”</h3>
+        <p class="sub">The most contested, best-funded sub-market in AI.</p>
+        <ul>
+          <li><b>Mem0 OpenMemory MCP</b> is a near-verbatim, better-funded, higher-benchmark instance of this exact pitch.</li>
+          <li>Native memory <b>portability shipped industry-wide</b> in a 30-day window (Mar 2026, GDPR Art. 20).</li>
+          <li>Replay/rewind is now <b>table stakes</b>: LangGraph Time-Travel, OpenAI Agents SDK, Temporal ($5B).</li>
+          <li>Korg's retrieval (substring + BGE-small) is commodity — no reranking, no recency.</li>
+        </ul>
+        <div class="timing">◷ ~9–12 months late</div>
+      </div>
+
+      <div class="lane open reveal">
+        <span class="tag">Should own — open &amp; early</span>
+        <h3>The verifiable cognition ledger</h3>
+        <p class="sub">Attributability + reversibility for multi-agent &amp; regulated work.</p>
+        <ul>
+          <li>One inspectable local artifact that is <b>crypto-signed + causally-ordered + replayable + workspace-reversible + cross-vendor</b>.</li>
+          <li><b>No incumbent combines all five.</b> Memory tools store facts; runtimes replay their own graphs only.</li>
+          <li>The MCP 2026 roadmap names <b>governance as THE open gap</b>; tamper-evident agent ledgers are nascent and fragmented.</li>
+          <li>“Memory” becomes one read-model over the ledger — a feature, not the headline.</li>
+        </ul>
+        <div class="timing">◷ ~6–9 months early</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== NEXT STEPS ===================== -->
+  <section>
+    <div class="sec-head"><span class="seq">seq · 05</span><h2>Next actionable steps</h2></div>
+    <p class="lede">Prioritized. The theme is <b>subtract, don't add</b>. Start with the two starred items — highest impact, lowest effort.</p>
+
+    <div class="steps">
+      <div class="step starred reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Pick one name &amp; one sentence — put the audit-ledger framing on the front door <span class="tags"><span class="t t-hi">Impact: High</span><span class="t t-lo">Effort: Low</span><span class="t t-now">Start here</span></span></h4>
+          <p>“Korg” means five things today (runtime / swarm / SWE-runtime / memory / Obsidian vault). Collapse to one: <em>“Korg — the verifiable cognition ledger. A tamper-evident, replayable, cross-vendor record of everything your agents do.”</em> Demote “cognitive hypervisor” to a how-it-works section.</p>
+        </div>
+      </div>
+
+      <div class="step starred reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Implement the <code>ledger_hash</code> / <code>parent_hash</code> chain on <code>EventMetadata</code> <span class="tags"><span class="t t-hi">Impact: High</span><span class="t t-med">Effort: Med</span><span class="t t-now">Start here</span></span></h4>
+          <p>SHA-256 over the canonical prior event so the JSONL itself is independently tamper-evident — instead of relying solely on the separate <code>.ktrans</code> layer. This single change makes “verifiable” literally true.</p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Wire Ctrl-R rewind to the real git-tree restore <span class="tags"><span class="t t-hi">Impact: High</span><span class="t t-med">Effort: Med</span></span></h4>
+          <p>Connect rewind to the <code>handle_operator_fork</code> path (<code>git read-tree --reset -u</code> + <code>git clean</code>) so it restores the workspace, and make it non-destructive by populating <code>branch_id</code>/<code>rewind_of</code>. Then “reversible like Git” is honest.</p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Make every claim match the code <span class="tags"><span class="t t-hi">Impact: High</span><span class="t t-lo">Effort: Low–Med</span></span></h4>
+          <p>Implement-or-delete the swarm (pipes prompts to bare <code>python3</code>), <code>model_router</code> (513 LOC dead code), and korgex's 5 phantom tools (advertised, return “Unknown tool”). Kill the “production-grade” overclaim, fix the <code>yvaehkorg.lol</code> vs <code>yaehkorg.lol</code> typo, and retire “gets smarter over time” until reconcile resolves more than 0/50.</p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Publish the ledger format + <code>korg:introspect@v1</code> as an open spec <span class="tags"><span class="t t-hi">Impact: High</span><span class="t t-med">Effort: Med</span></span></h4>
+          <p>Be the <em>format</em>, not another app. Get observability tools (LangSmith / Langfuse / Phoenix) and memory tools (Mem0 / Zep) to read &amp; write it. Defensibility comes from being the substrate everyone audits against — a race you can win.</p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Productize the recall → re-invoke loop <span class="tags"><span class="t t-med">Impact: Med</span><span class="t t-med">Effort: Med</span></span></h4>
+          <p>“Replay a past <em>successful procedure</em>,” not just recall a fact. Memory-only stores structurally can't do this. Make it your headline demo.</p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Compose with the durable-execution wave <span class="tags"><span class="t t-hi">Impact: High</span><span class="t t-hi">Effort: High</span></span></h4>
+          <p>Sit <em>beneath</em> LangGraph / Temporal / OpenAI Agents SDK as the tamper-evident, third-party-verifiable record layer for enterprise audit. That requires the multi-tenant / RBAC / networked story you haven't built — so it's the real roadmap, not the capability-marketplace track.</p>
+        </div>
+      </div>
+
+      <div class="step reveal">
+        <div class="num"></div>
+        <div>
+          <h4>Demote korgex &amp; KorgChat to reference implementations <span class="tags"><span class="t t-med">Impact: Med</span><span class="t t-lo">Effort: Low</span></span></h4>
+          <p>As standalone products they fight Claude Code / Cursor / ChatGPT and lose. As proof that one causal substrate hosts both autonomous agent work and interactive chat, they're invaluable. Stop framing korgex as a Cursor competitor.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== BOTTOM LINE ===================== -->
+  <div class="bottomline reveal">
+    <div class="lab">Bottom line</div>
+    <p>You've built something most teams of five couldn't. The failure mode isn't capability — it's <b>dispersion and overclaim</b>.</p>
+    <p>Be the <span class="spine">verifiable cognition ledger</span> — the open, tamper-evident, replayable, cross-vendor audit substrate for the agentic era. Make every claim true. Let recall, korgex, korgchat &amp; the runtime be <b>ribs hanging off that one spine</b>.</p>
+    <p>The market is moving toward you on governance and provenance. <b>Get there first — honestly — and you own a lane nobody else is standing in.</b></p>
+  </div>
+
+  <footer>
+    <div class="rule"></div>
+    Korg Ecosystem · Strategic Assessment · 2026-05-28 · grounded in source code, test runs &amp; current market scan
+  </footer>
+
+</div>
+
+<script>
+  document.documentElement.classList.add('js');
+
+  // scroll progress bar
+  var bar = document.getElementById('progress');
+  function onScroll(){
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    bar.style.width = (max > 0 ? (h.scrollTop / max) * 100 : 0) + '%';
+  }
+  document.addEventListener('scroll', onScroll, {passive:true});
+  onScroll();
+
+  // staggered reveal on scroll
+  var els = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e, i){
+        if (e.isIntersecting){
+          var sib = Array.prototype.slice.call(e.target.parentNode.children).indexOf(e.target);
+          e.target.style.transitionDelay = Math.min(sib, 5) * 70 + 'ms';
+          e.target.classList.add('in');
+          io.unobserve(e.target);
+        }
+      });
+    }, {threshold:0.12, rootMargin:'0px 0px -8% 0px'});
+    els.forEach(function(el){ io.observe(el); });
+  } else {
+    els.forEach(function(el){ el.classList.add('in'); });
+  }
+</script>
+</body>
+</html>
