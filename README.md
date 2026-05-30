@@ -52,7 +52,7 @@ Requires Python ≥ 3.10.
 ### From GitHub Release
 
 ```bash
-pip install https://github.com/New1Direction/korgex/releases/download/v0.6.3/korgex-0.6.3-py3-none-any.whl
+pip install https://github.com/New1Direction/korgex/releases/download/v0.7.0/korgex-0.7.0-py3-none-any.whl
 ```
 
 ### From source
@@ -161,6 +161,16 @@ On top of the chain, korgex tracks **memory drift**: a remembered fact is anchor
 # Scan persistent memories for drift against their recorded source baselines
 korgex drift
 #   ✗ memory DRIFT — 1 drifted … reconcile is recorded to the ledger    (exit 0 if none, 1 if drift)
+```
+
+**Audit logs you already have — and share the proof.** `korgex audit` imports a session you already ran (auto-discovers your Claude Code logs) into a verifiable chain. Add `--html` and you get a single self-contained file that **re-verifies itself in the recipient's browser** — including a live *tamper test* that breaks the chain on purpose so anyone can feel the evidence. No setup, no buy-in, no network calls.
+
+```bash
+# Zero-config: audit your latest Claude Code session → a shareable, self-verifying report
+korgex audit --html audit.html
+#   audited <session> → 2,319 ledger events
+#   chain:  ✓ INTACT — tamper-evident, cryptographically verifiable
+#   report: audit.html  ← open in any browser; it re-verifies itself
 ```
 
 See [Self-Coding Bench](docs/self-coding-bench.md) for live reliability data across five models.
