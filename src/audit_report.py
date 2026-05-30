@@ -242,7 +242,7 @@ function renderChain(evts, errs) {
 async function verifyAndRender() {
   stats(working);
   narrative(working);
-  const errs = await verifyChain(working);
+  const errs = await verifyChain(working, META.anchored_tip);  // anchored tip (if published) catches a fully-regenerated chain
   renderChain(working, errs);
   const v = $('verdict'), tag = $('verdictTag'), why = $('verdictWhy');
   if (errs.length === 0) {

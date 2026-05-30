@@ -119,3 +119,14 @@ def test_report_is_self_contained_and_embeds_events_and_verifier():
     # the session name and a live tamper-test control are present
     assert "demo-session.jsonl" in html
     assert "tamper" in html.lower()
+
+
+def test_anchored_tip_is_wired_into_the_self_verifying_report():
+    """The anti-backdating defense must actually reach the page: render_html embeds the
+    published tip and the in-browser verifier checks against it (the audit found this unwired)."""
+    from src.audit_report import render_html
+    events = _load_vector("basic-intact.jsonl")
+    tip = events[-1]["entry_hash"]
+    html = render_html(events, {"session": "demo", "vendor": "claude-code", "anchored_tip": tip})
+    assert tip in html                                            # the published tip is embedded
+    assert "verifyChain(working, META.anchored_tip" in html       # and the page verifies against it
