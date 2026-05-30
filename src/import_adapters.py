@@ -92,12 +92,53 @@ def discover_claude_code_sessions(root: str | None = None) -> list:
     return paths
 
 
+def parse_witness(lines: list) -> list:
+    """Normalize a witness tool-dispatch journal into ordered ledger actions.
+
+    The witness format is a generic append-only event log of tool calls — each
+    line an object with `tool`, `action`, optional `target`/`artifact`/
+    `artifact_hash`/`metadata`/`agent`/`hostname`/timestamps, and a `parent_id`
+    causal pointer. Inputs (action / target / metadata) → args; outputs
+    (artifact / artifact_hash / hostname / timestamps / agent) → result; and
+    `parent_id` → `triggered_by`, so existing lineage and artifact provenance are
+    carried onto the tamper-evident korg-ledger@v1 chain.
+    """
+    actions: list = []
+    for e in lines:
+        if not isinstance(e, dict) or not e.get("tool"):
+            continue
+        actions.append({
+            "op": "tool_call",
+            "uuid": e.get("id"),
+            "parent_uuid": e.get("parent_id"),
+            "payload": {
+                "tool_name": e["tool"],
+                "args": {
+                    "action": e.get("action"),
+                    "target": e.get("target"),
+                    "metadata": e.get("metadata") or {},
+                },
+                "result": {
+                    "artifact": e.get("artifact"),
+                    "artifact_hash": e.get("artifact_hash"),
+                    "hostname": e.get("hostname"),
+                    "agent": e.get("agent"),
+                    "timestamp": e.get("timestamp"),
+                    "timestamp_unix": e.get("timestamp_unix"),
+                },
+            },
+        })
+    return actions
+
+
 ADAPTERS = {
     "claude-code": parse_claude_code,
+    "witness": parse_witness,
 }
 
 _SOURCE_AGENTS = {
     "claude-code": "claude-code",
+    "witness": "witness",
 }
 
 
@@ -129,7 +170,7 @@ def to_ledger_events(actions: list, source_agent: str) -> list:
             result = {"text": payload.get("text", "")}
         else:  # tool_call → the tool's own name, like a native korgex tool event
             tool_name = payload.get("tool_name", "tool")
-            args, result = payload.get("args", {}), {}
+            args, result = payload.get("args", {}), payload.get("result", {})
 
         event = {
             "schema_version": SCHEMA_VERSION,
