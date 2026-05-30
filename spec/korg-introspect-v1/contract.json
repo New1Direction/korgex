@@ -1,0 +1,64 @@
+{
+  "spec_version": "korg-introspect@v1",
+  "schema_id": "korg:introspect@v1",
+  "_note": "Frozen cross-language contract for the korg:introspect@v1 wire document. This file is the oracle shared by the Python reference (src/introspect.py, tests/test_introspect_contract.py) and the TypeScript adapter (Korg/adapters/introspect-mcp-ts/src/discovery.ts::validateDocument, safety.ts::ALL_EFFECTS). Any legitimate wire change must update this file AND the corresponding consumer in lockstep, reviewed via this diff. Mirrors the spec/korg-ledger-v1/ frozen-oracle pattern.",
+  "document_keys": [
+    "binary",
+    "callables",
+    "callables_declared",
+    "exit_codes",
+    "schema",
+    "version"
+  ],
+  "callable_required_fields": [
+    "capabilities",
+    "command_id",
+    "input_schema",
+    "name"
+  ],
+  "callable_optional_fields": [
+    "description",
+    "surfaces"
+  ],
+  "capabilities_keys": [
+    "long_running",
+    "output_mode",
+    "reads_stdin",
+    "requires_project",
+    "side_effects",
+    "stateful",
+    "supports_output_path"
+  ],
+  "side_effects_vocabulary": [
+    "none",
+    "fs_read",
+    "fs_write",
+    "network",
+    "ledger_write"
+  ],
+  "output_mode_vocabulary": [
+    "none",
+    "stream",
+    "envelope",
+    "session"
+  ],
+  "command_ids": [
+    "korgex.agent",
+    "korgex.serve",
+    "korgex.dashboard",
+    "korgex.init",
+    "korgex.status",
+    "korgex.stop",
+    "korgex.install-extension"
+  ],
+  "exit_codes": {
+    "0": "success",
+    "1": "error.generic",
+    "2": "error.usage",
+    "3": "error.config",
+    "4": "error.io",
+    "5": "error.network",
+    "6": "error.user_interrupt",
+    "7": "error.dependency_missing"
+  }
+}
