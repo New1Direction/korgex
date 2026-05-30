@@ -34,6 +34,32 @@ BASE = [
      "result": {"ok": True}, "success": True, "duration_ms": 3, "triggered_by": 2},
 ]
 
+# Non-BMP / surrogate-pair vector — the code path the ASCII-only BASE never
+# exercises. canonicalize() escapes non-ASCII as \uXXXX, so a U+10000+ codepoint
+# becomes a UTF-16 SURROGATE PAIR (e.g. U+1F600 → 😀). That is the most
+# likely place a hand-written Rust/JS canonicalizer silently diverges from
+# Python's json.dumps (emitting \u{1F600}, the raw 4-byte UTF-8, or upper-case
+# hex would all break byte-for-byte equality). Pinning a frozen tip over these
+# bytes makes the surrogate-pair contract part of the conformance oracle.
+#   U+1F600  GRINNING FACE (emoji, astral plane → surrogate pair)
+#   U+4E2D   中 (CJK, BMP → single 中)
+#   U+10000  LINEAR B SYLLABLE B008 A (first astral codepoint → 𐀀)
+#   U+1F4A9  PILE OF POO (astral, in a result field too)
+BASE_NONBMP = [
+    {"schema_version": "1.0", "seq_id": 1, "source_agent": "agent:conformance",
+     "tool_name": "user_prompt",
+     "args": {"prompt": "make it \U0001F600 in 中文 \U00010000"},
+     "result": {}, "success": True, "duration_ms": 0},
+    {"schema_version": "1.0", "seq_id": 2, "source_agent": "agent:conformance",
+     "tool_name": "llm_inference", "args": {"model": "m中", "prompt_tokens": 7},
+     "result": {"completion_tokens": 3, "note": "ok \U0001F4A9"},
+     "success": True, "duration_ms": 9, "triggered_by": 1},
+    {"schema_version": "1.0", "seq_id": 3, "source_agent": "agent:conformance",
+     "tool_name": "Write",
+     "args": {"path": "中文.py", "snippet": "# \U0001F600 \U00010000"},
+     "result": {"ok": True}, "success": True, "duration_ms": 4, "triggered_by": 2},
+]
+
 
 def chain(events, key=None):
     """Stamp prev_hash/entry_hash onto a fresh copy of the events."""
@@ -58,6 +84,7 @@ def main():
 
     basic = chain(BASE)
     hmacv = chain(BASE, key=key)
+    nonbmp = chain(BASE_NONBMP)
 
     # tampered: edit event 2's content, keep its (now-stale) entry_hash
     tcontent = [dict(e) for e in basic]
@@ -68,6 +95,7 @@ def main():
 
     write_jsonl("basic-intact.jsonl", basic)
     write_jsonl("hmac-intact.jsonl", hmacv)
+    write_jsonl("nonbmp-intact.jsonl", nonbmp)
     write_jsonl("tampered-content.jsonl", tcontent)
     write_jsonl("tampered-deletion.jsonl", tdelete)
 
@@ -81,6 +109,8 @@ def main():
              "tip_entry_hash": basic[-1]["entry_hash"]},
             {"file": "hmac-intact.jsonl", "key": HMAC_KEY, "verify": "intact",
              "tip_entry_hash": hmacv[-1]["entry_hash"]},
+            {"file": "nonbmp-intact.jsonl", "key": None, "verify": "intact",
+             "tip_entry_hash": nonbmp[-1]["entry_hash"]},
             {"file": "tampered-content.jsonl", "key": None, "verify": "tampered",
              "error_contains": "seq 2"},
             {"file": "tampered-deletion.jsonl", "key": None, "verify": "tampered",
@@ -91,8 +121,9 @@ def main():
         json.dump(manifest, f, indent=2)
         f.write("\n")
     print("wrote vectors + conformance.json")
-    print("  basic tip:", basic[-1]["entry_hash"])
-    print("  hmac  tip:", hmacv[-1]["entry_hash"])
+    print("  basic  tip:", basic[-1]["entry_hash"])
+    print("  hmac   tip:", hmacv[-1]["entry_hash"])
+    print("  nonbmp tip:", nonbmp[-1]["entry_hash"])
 
 
 if __name__ == "__main__":

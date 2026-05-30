@@ -120,3 +120,44 @@ def test_hmac_vector_fails_without_the_key():
     assert hmac_vecs, "expected at least one HMAC conformance vector"
     events = _read_jsonl(hmac_vecs[0]["file"])
     assert S.verify_chain(events, key=None), "keyed chain wrongly verified without the key"
+
+
+# ── non-BMP / surrogate-pair conformance (the silent-divergence trap) ───────
+# The ASCII BASE vectors never exercise the surrogate-pair code path. A U+10000+
+# codepoint canonicalizes to a UTF-16 surrogate pair (\udXXX\udXXX), lower-case
+# hex, which is exactly where a hand-written Rust/JS canonicalizer most easily
+# diverges from Python's json.dumps. These tests pin that contract.
+
+def test_nonbmp_vector_is_registered():
+    vecs = [v for v in _load_vectors() if v["file"] == "nonbmp-intact.jsonl"]
+    assert vecs, "nonbmp-intact.jsonl must be registered in conformance.json"
+    assert vecs[0]["verify"] == "intact"
+    assert vecs[0].get("tip_entry_hash"), "non-BMP vector must carry a frozen tip"
+
+
+def test_nonbmp_vector_file_is_ascii_only_on_disk():
+    # The on-disk JSONL must itself be ASCII (\uXXXX-escaped) so the vector is
+    # byte-stable and git-diffable across platforms — no raw UTF-8 in the file.
+    raw = open(os.path.join(VECTORS_DIR, "nonbmp-intact.jsonl"), "rb").read()
+    assert raw.isascii(), "non-BMP vector file must be ASCII-only on disk"
+    # and it must actually contain a surrogate-pair escape (the trap it guards)
+    assert b"\\ud83d\\ude00" in raw, "expected the U+1F600 surrogate pair in the vector"
+
+
+def test_nonbmp_vector_verifies_and_reproduces_frozen_tip():
+    vec = [v for v in _load_vectors() if v["file"] == "nonbmp-intact.jsonl"][0]
+    events = _read_jsonl(vec["file"])
+    errors = S.verify_chain(events) + S.verify_dag(events)
+    assert errors == [], f"non-BMP vector expected intact, got {errors}"
+    # ledger_spec MUST reproduce the frozen tip byte-for-byte over surrogate pairs
+    assert events[-1]["entry_hash"] == vec["tip_entry_hash"], \
+        "non-BMP tip hash drifted — surrogate-pair canonicalization changed"
+
+
+def test_surrogate_pair_canonicalization_is_pinned():
+    # First principles: the astral codepoint U+1F600 MUST canonicalize to the
+    # lower-case UTF-16 surrogate pair, not \u{1F600} and not raw UTF-8 bytes.
+    # A Rust/JS port that gets this wrong fails the non-BMP vector above.
+    assert S.canonicalize({"x": "\U0001F600"}) == b'{"x":"\\ud83d\\ude00"}'
+    assert S.canonicalize({"x": "\U00010000"}) == b'{"x":"\\ud800\\udc00"}'
+    assert S.canonicalize({"x": "中"}) == b'{"x":"\\u4e2d"}'
