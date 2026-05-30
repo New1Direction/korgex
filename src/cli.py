@@ -419,6 +419,45 @@ def cmd_audit():
     return 1
 
 
+def cmd_trajectory():
+    """Export a korg-ledger journal as a verifiable, provenance-stamped training trajectory."""
+    from src import trajectory as TJ
+
+    argv = sys.argv[1:]
+    journal = out = None
+    if "trajectory" in argv:
+        toks = argv[argv.index("trajectory") + 1:]
+        i = 0
+        while i < len(toks):
+            t = toks[i]
+            if t in ("--out", "-o"):
+                out = toks[i + 1] if i + 1 < len(toks) else None
+                i += 2
+            elif not t.startswith("-") and journal is None:
+                journal = t
+                i += 1
+            else:
+                i += 1
+
+    journal = journal or os.environ.get("KORG_JOURNAL_PATH") or os.path.join(".korg", "journal.jsonl")
+    if not os.path.exists(journal):
+        print(f"  No journal at {journal}")
+        print("  usage: korgex trajectory <journal.jsonl> [-o trajectories.jsonl]")
+        return 1
+    try:
+        s = TJ.export_trajectory(journal, out)
+    except (OSError, ValueError) as exc:
+        print(f"  trajectory export failed: {exc}")
+        return 1
+
+    print(f"  trajectory: {s['turns']} turns from {s['events']} events → {s['out_path']}")
+    if s["verified"]:
+        print("  provenance: ✓ VERIFIED — derived from an intact, tamper-evident chain")
+        return 0
+    print("  provenance: ✗ UNVERIFIED — the source chain does not verify (possible tampering)")
+    return 1
+
+
 def cmd_mcp_server():
     """Run the korg-ledger MCP server (JSON-RPC over stdio) — verify/audit/import for any MCP host."""
     from src.mcp_server import serve
@@ -442,6 +481,7 @@ SUBCOMMANDS = {
     "drift":             cmd_drift,
     "import":            cmd_import,
     "audit":             cmd_audit,
+    "trajectory":        cmd_trajectory,
     "mcp-server":        cmd_mcp_server,
 }
 
@@ -539,6 +579,11 @@ def _build_subcommand_parser():
             sp.add_argument("--out", "-o", help="output journal path")
             sp.add_argument("--html", nargs="?", const="",
                             help="also write a self-verifying HTML report (default: <journal>.html)")
+        elif name == "trajectory":
+            sp.add_argument("journal", nargs="?",
+                            help="korg-ledger journal to export (default: $KORG_JOURNAL_PATH)")
+            sp.add_argument("--out", "-o",
+                            help="append the trajectory here (default: <journal>.trajectory.jsonl)")
     return p
 
 

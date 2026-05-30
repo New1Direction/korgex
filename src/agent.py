@@ -22,6 +22,7 @@ from src.tool_abstraction import USER_TOOLS, route_tool_call
 import src.tools_impl  # noqa: F401
 from src.korg_ledger import get_default_client as _korg
 from src import edit_policy as _EP
+from src.plugins import PluginRegistry
 from src.hooks import load_hooks, run_event
 from src.workspace import path_within
 from src.guardrails import is_protected
@@ -177,6 +178,12 @@ class KorgexAgent:
         # headless fail-safe (sensitive blocked; ordinary outside-workspace
         # proceeds-and-records so automation isn't broken).
         self._edit_confirmer = None
+
+        # In-process plugin registry — complements the shell command-hooks
+        # (src/hooks.py) with low-latency Python observers on the agent lifecycle
+        # (on_user_prompt / pre_tool / post_tool / on_stop). Empty → zero overhead;
+        # a plugin that raises is isolated and can never break the loop.
+        self.plugins = PluginRegistry()
 
         # Interactive (streaming TUI) on by default when stdout is a TTY,
         # off when redirected (so tests and pipes get clean stdout).
@@ -624,6 +631,7 @@ class KorgexAgent:
         # SUBAGENT, parent_seq chains its root into the parent's causal DAG so the
         # whole multi-agent run is one connected, rewindable tree.
         prompt_seq = korg.record_user_prompt(prompt, triggered_by=parent_seq)
+        self.plugins.invoke("on_user_prompt", {"prompt": prompt, "seq": prompt_seq})
         # ────────────────────────────────────────────────────────────────────
 
         # idea #5: recall persistent memory, verify anchored facts against their
@@ -751,6 +759,7 @@ class KorgexAgent:
                             messages.append(self._tool_result_turn(call["id"], blocked))
                             continue  # the tool never runs
 
+                    self.plugins.invoke("pre_tool", call)
                     if session:
                         # Show a transient spinner while the tool runs
                         with session.spinner(f"{call['name']}({_short_args(call['args'])})"):
@@ -777,6 +786,7 @@ class KorgexAgent:
                         triggered_by=llm_seq,
                     )
                     # ───────────────────────────────────────────────────────
+                    self.plugins.invoke("post_tool", {"call": call, "result": tool_result})
 
                     # ── PostToolUse hook (advisory; cannot undo the call) ────
                     if hooks:
@@ -818,6 +828,7 @@ class KorgexAgent:
         success to False (the edit is NOT accepted) and records a verdict event.
         No gate, no edits, or an already-failed run → returned unchanged.
         """
+        self.plugins.invoke("on_stop", result)
         gate = self.test_gate
         if not (gate and gate.get("command") and mutated and result.get("success")):
             return result
