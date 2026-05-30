@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-05-30
+
+A verifiability + code-intelligence batch — and the moat's central claim is now **proven across languages**.
+
+### Added
+- **Secret sanitization at the ledger boundary** (`src/sanitize.py`). Provider keys, tokens, PEM private-key blocks, and secret-named fields are redacted from tool args/results at **every** write path (local / bridge / http / import) **before** blob-extraction and hashing — so the now-shareable proofs (`audit --html`) can never leak a credential, and the chain still verifies. The conversation the model sees is untouched.
+- **Language Server Protocol client + `korgex diag`** (`src/lsp.py`). Content-Length JSON-RPC framing, initialize/didOpen/diagnostics; `diagnostics(path)` drives pyright / typescript-language-server / rust-analyzer / gopls best-effort and time-guarded. `korgex diag <file>` reports errors/types so the agent can check an edit instead of editing blind.
+- **Auto-diagnostics-on-edit + opt-in enforcement.** `$KORGEX_LSP_DIAGNOSTICS=1` folds a language server's findings into the edit's result (the agent sees what it just broke, mid-loop) and records an `lsp.diagnostics` event. `$KORGEX_LSP_ENFORCE=1` upgrades that to a hard veto — a severity-1 edit is reverted and refused as a verifiable policy event. Both default-off.
+- **Non-BMP conformance vector + bridge round-trip** (`spec/korg-ledger-v1/vectors/nonbmp-intact.jsonl`). Proves byte-for-byte canonicalization across Python / Rust / JS on emoji / CJK / astral-plane text — the surrogate-pair path that no vector previously exercised. Determinism **held**; no divergence found. Plus a test that re-verifies a written-to-disk journal through `ledger_spec`.
+- **`korg:introspect@v1` cross-language contract test** so the Python and TypeScript introspect surfaces fail in lockstep on schema drift.
+- **Shared-event-shape contract + interleaved one-journal test** — korgex, korgchat, and thumper events verified end-to-end in a single chain.
+- **Cross-vendor end-to-end flow proof + runbook** (Claude Code → import → verify → `audit --html`; witness tap → verify), with the report's embedded JS verifier reproducing the Python tip byte-for-byte.
+
 ## [0.8.0] — 2026-05-30
 
 A batch of agent-architecture upgrades, each recreated generically and each tied
