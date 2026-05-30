@@ -458,6 +458,45 @@ def cmd_trajectory():
     return 1
 
 
+def cmd_diag():
+    """Report language-server diagnostics (errors/types) for a file — best-effort."""
+    import shutil
+
+    from src import lsp
+
+    argv = sys.argv[1:]
+    path = None
+    if "diag" in argv:
+        for t in argv[argv.index("diag") + 1:]:
+            if not t.startswith("-"):
+                path = t
+                break
+    if not path:
+        print("  usage: korgex diag <file>")
+        return 1
+    if not os.path.exists(path):
+        print(f"  no such file: {path}")
+        return 1
+
+    srv = lsp.server_for(path)
+    if not srv:
+        print(f"  no language server configured for {os.path.splitext(path)[1] or '(no ext)'}")
+        return 0
+    if not shutil.which(srv[0]):
+        print(f"  language server not installed: {srv[0]}  (install it to get diagnostics)")
+        return 0
+
+    diags = lsp.diagnostics(path)
+    if not diags:
+        print(f"  ✓ no diagnostics — {os.path.basename(path)} is clean")
+        return 0
+    sev = {1: "error", 2: "warn", 3: "info", 4: "hint"}
+    for d in diags:
+        line = ((d.get("range") or {}).get("start") or {}).get("line", 0) + 1
+        print(f"  {sev.get(d.get('severity'), '?'):5} {path}:{line}  {d.get('message', '')}")
+    return 1 if any(d.get("severity") == 1 for d in diags) else 0
+
+
 def cmd_mcp_server():
     """Run the korg-ledger MCP server (JSON-RPC over stdio) — verify/audit/import for any MCP host."""
     from src.mcp_server import serve
@@ -482,6 +521,7 @@ SUBCOMMANDS = {
     "import":            cmd_import,
     "audit":             cmd_audit,
     "trajectory":        cmd_trajectory,
+    "diag":              cmd_diag,
     "mcp-server":        cmd_mcp_server,
 }
 
@@ -584,6 +624,8 @@ def _build_subcommand_parser():
                             help="korg-ledger journal to export (default: $KORG_JOURNAL_PATH)")
             sp.add_argument("--out", "-o",
                             help="append the trajectory here (default: <journal>.trajectory.jsonl)")
+        elif name == "diag":
+            sp.add_argument("file", nargs="?", help="source file to check with its language server")
     return p
 
 
