@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-30
+
+A batch of agent-architecture upgrades, each recreated generically and each tied
+back to the tamper-evident ledger (the moat).
+
+### Added
+- **`witness` — tap or import any tool-dispatch into a verifiable korg-ledger chain.** A self-contained, stdlib-only `tap(handle_tool)` wrapper (`integrations/witness/`) turns any tool-running loop — MCP server, agent, CLI router — into a tamper-evident, replayable record with two lines; opt-in via `$KORG_TAP_JOURNAL`, fail-safe (a ledger error can never break a tool call), resumes across restarts. Plus `korgex import witness <journal>` for an existing tool-event log → `korgex verify` / `audit --html`.
+- **Edit-approval policy + checkpoint-before-mutation + ledger trail** (`src/edit_policy.py`). Before any file-mutating tool runs, korgex consults a policy (`ASK`/`WORKSPACE`/`SESSION`; `$KORGEX_EDIT_POLICY`), **hard-blocks** `.git`/`.ssh`/`.gnupg`, **always-asks** sensitive paths (`.env*`, `id_*`, `*.pem`/`*.key`, `credentials*`, `.npmrc`/`.pypirc`, `.aws`/`.kube`), and fails **closed** (timeout/error → deny). An approved edit in an isolated worktree is **checkpointed-before-mutation** (revertable; never commits to the user's working branch), and **every decision is recorded to the ledger** — a verifiable trail of exactly what the agent was permitted to touch.
+- **`korgex trajectory` — verifiable training trajectories** (`src/trajectory.py`). Export a run as a normalized (ShareGPT) training trajectory **stamped with its source's provenance**, so the data carries proof it came from an unaltered run. A tampered source → `verified: false` (a built-in poisoning defense). Export is **append-only** — trajectories accumulate into a flywheel of verifiable runs.
+- **In-process plugin registry** (`src/plugins.py`). Complements the shell command-hooks with low-latency Python observers on the agent lifecycle (`on_user_prompt` / `pre_tool` / `post_tool` / `on_stop`), generalizing the `witness` tap into a registerable surface. Fail-safe (a raising plugin is isolated) and a zero-overhead no-op when empty.
+
 ## [0.7.0] — 2026-05-29
 
 ### Added

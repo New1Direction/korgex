@@ -52,7 +52,7 @@ Requires Python ≥ 3.10.
 ### From GitHub Release
 
 ```bash
-pip install https://github.com/New1Direction/korgex/releases/download/v0.7.0/korgex-0.7.0-py3-none-any.whl
+pip install https://github.com/New1Direction/korgex/releases/download/v0.8.0/korgex-0.8.0-py3-none-any.whl
 ```
 
 ### From source
