@@ -20,9 +20,11 @@ wall-clock deadline needs the commit's tip anchored to an external clock.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 
+from src import ledger_spec as S
 from src import sealed_envelope as SE
 from src import signing as SG
 from src.korg_ledger import LocalJournalClient
@@ -33,7 +35,9 @@ COMMIT = "contract.commit"
 DEADLINE = "contract.deadline"
 REVEAL = "contract.reveal"
 TEST = "contract.test"
+FUND = "contract.fund"
 _SOURCE = "korg:contract"
+_REFUND = ("FRAUD", "DEFAULTED", "FAILED", "IMPERSONATION")
 
 
 def _client(journal_path: str) -> LocalJournalClient:
@@ -93,6 +97,40 @@ def record_test(journal_path: str, frm: str, commit_seq: int, passed: bool, deta
     return _client(journal_path).record_tool_call(
         TEST, {"from": frm, "passed": bool(passed), "detail": detail},
         {}, True, 0, triggered_by=commit_seq)
+
+
+def fund(journal_path: str, buyer: str, seller: str, amount: str, *,
+         asset: str = "USDC", sign_with: str | None = None) -> int:
+    """Buyer funds escrow with an x402-style payment authorization (USDC over HTTP 402).
+    korg records and gates the payment; the actual transfer is settled on the x402 rail.
+    With ``sign_with`` the authorization is signed, so 'who authorized the payment' is provable."""
+    auth = {"scheme": "x402", "asset": asset, "amount": amount, "payer": buyer, "payee": seller}
+    args = {"from": buyer, "payment": auth}   # NB: not "authorization" — redact() scrubs that key
+    if sign_with is not None:
+        auth_hash = hashlib.sha256(S.canonicalize(auth)).hexdigest()
+        args["pubkey"] = SG.public_of(sign_with)
+        args["sig"] = SG.sign_tip(sign_with, auth_hash)
+        args["auth_hash"] = auth_hash
+    return _client(journal_path).record_tool_call(FUND, args, {}, True, 0)
+
+
+def escrow_status(journal_path: str) -> dict:
+    """The escrow outcome = the delivery verdict gated over the funded payment. The MONEY
+    ACTION is a pure function of the proof: release to the seller iff provably delivered,
+    refund to the buyer on default/fraud, hold while pending. korg decides who's owed; an
+    x402 facilitator executes the transfer and its receipt is recorded back into the chain."""
+    v = verdict(journal_path)
+    funds = [e for e in _events(journal_path) if e.get("tool_name") == FUND]
+    auth = funds[0]["args"]["payment"] if funds else None
+    st = v["status"]
+    if st == "SETTLED":
+        action, pays = "release", (auth["payee"] if auth else None)
+    elif st in _REFUND:
+        action, pays = "refund", (auth["payer"] if auth else None)
+    else:
+        action, pays = "hold", None
+    return {"delivery": st, "funded": auth, "action": action, "pays": pays,
+            "signed_by": v.get("signed_by")}
 
 
 def verdict(journal_path: str) -> dict:
