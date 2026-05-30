@@ -22,6 +22,7 @@ import json
 import os
 
 from src import ledger_spec as S
+from src.sanitize import redact
 
 SCHEMA_VERSION = "1.0"
 
@@ -177,8 +178,8 @@ def to_ledger_events(actions: list, source_agent: str) -> list:
             "seq_id": seq,
             "source_agent": source_agent,
             "tool_name": tool_name,
-            "args": args,
-            "result": result,
+            "args": redact(args),
+            "result": redact(result),
             "success": True,
             "duration_ms": 0,
         }

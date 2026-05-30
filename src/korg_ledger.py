@@ -77,6 +77,8 @@ from typing import Any
 
 import requests
 
+from src.sanitize import redact
+
 logger = logging.getLogger(__name__)
 
 # korg_dogfood.py validates events carry this; missing == rejected (spec §1.0).
@@ -447,6 +449,8 @@ class KorgLedgerClient:
             return None
 
         payload_refs: list[dict] = []
+        args = redact(args)  # never let a credential reach the (shareable) journal
+        result = redact(result)
         safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
         safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
 
@@ -545,6 +549,8 @@ class KorgBridgeClient:
         triggered_by: int | None = None,
     ) -> int:
         payload_refs: list[dict] = []
+        args = redact(args)  # never let a credential reach the (shareable) journal
+        result = redact(result)
         safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
         safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
         # v0.3.1: payload_refs flow-through. _maybe_content_ref has already
@@ -649,6 +655,10 @@ class LocalJournalClient:
             self._seq += 1
             seq = self._seq
             payload_refs: list[dict] = []
+            # Scrub secrets BEFORE blob-extraction + hashing: the journal (and the
+            # blob store) must never carry a credential — these proofs are shareable.
+            args = redact(args)
+            result = redact(result)
             safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
             safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
             event: dict[str, Any] = {
