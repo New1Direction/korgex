@@ -59,6 +59,12 @@ korgex = "src.cli:main"
 include = ["src*"]
 exclude = ["tests*", "korgex-vscode*", "sandbox*"]
 
+[tool.setuptools.package-data]
+# Ship non-Python runtime assets (the in-browser ledger verifier embedded by
+# `korgex audit --html`). Without this the .js is absent from the wheel and
+# render_html() FileNotFoundErrors on a clean install.
+src = ["assets/*.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
