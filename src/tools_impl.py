@@ -911,3 +911,33 @@ def init(repo_root: str = None, sandbox_mode: str = None):
         SANDBOX.setup(REPO_ROOT)
     except Exception as e:
         print(f"Sandbox init warning: {e}")
+
+# ── verifiable agent bus tools (bus identity via $KORG_BUS_JOURNAL + $KORG_BUS_AGENT) ──
+def tool_bus_send(to, message, context=None):
+    """Send a message to another agent over the verifiable korg agent bus."""
+    import os
+    from src import bus
+    journal, me = os.environ.get("KORG_BUS_JOURNAL"), os.environ.get("KORG_BUS_AGENT")
+    if not journal or not me:
+        return {"error": "agent bus not configured (set KORG_BUS_JOURNAL and KORG_BUS_AGENT)"}
+    try:
+        seq = bus.send(journal, me, to, str(message))
+        return {"sent": True, "seq": seq, "from": me, "to": to}
+    except Exception as e:
+        return {"error": f"bus send failed: {e}"}
+
+
+def tool_bus_inbox(context=None):
+    """Check the verifiable agent bus for unread messages addressed to this agent."""
+    import os
+    from src import bus
+    journal, me = os.environ.get("KORG_BUS_JOURNAL"), os.environ.get("KORG_BUS_AGENT")
+    if not journal or not me:
+        return {"error": "agent bus not configured (set KORG_BUS_JOURNAL and KORG_BUS_AGENT)"}
+    try:
+        msgs = bus.inbox(journal, me)
+        if msgs:
+            bus.mark_read(journal, me, [m["seq"] for m in msgs])
+        return {"messages": [{"from": m["from"], "body": m["body"], "seq": m["seq"]} for m in msgs]}
+    except Exception as e:
+        return {"error": f"bus inbox failed: {e}"}

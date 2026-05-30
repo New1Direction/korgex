@@ -327,6 +327,16 @@ def _adapter_edit(params: dict) -> dict:
     }
 
 
+register_user_tool("BusSend",
+    "Send a message to another agent over the verifiable korg agent bus — cross-vendor and "
+    "tamper-evident. Use to coordinate with another agent by name (e.g. ask for a review).", [
+    {"name": "to", "type": "string", "description": "the recipient agent's name", "required": True},
+    {"name": "message", "type": "string", "description": "the message body", "required": True},
+])
+register_user_tool("BusInbox",
+    "Check the verifiable agent bus for unread messages addressed to you, and mark them read.", [])
+
+
 _TOOL_ROUTING = {
     "Read":  {"handler": "tool_read_file",                 "module": "src.tools_impl",
               "param_map": {"file_path": "filepath"}},
@@ -341,6 +351,9 @@ _TOOL_ROUTING = {
     "Glob":  {"handler": "tool_list_files",                "module": "src.tools_impl",
               "param_map": {"path": "path"}},
     "Recall": {"handler": "tool_recall",                   "module": "src.recall"},
+    "BusSend": {"handler": "tool_bus_send",                "module": "src.tools_impl",
+                "param_map": {"to": "to", "message": "message"}},
+    "BusInbox": {"handler": "tool_bus_inbox",              "module": "src.tools_impl"},
 }
 
 
