@@ -47,13 +47,24 @@ async function chainHash(event) {
 }
 
 // Returns [] when intact; otherwise one entry per detected problem, localized by seq.
-async function verifyChain(events) {
+// With `expectedTip` (a genuine tip hash anchored externally — a public timestamp,
+// a signed post, a git tag), the chain's actual tip is compared to it. That closes
+// the unkeyed-regeneration hole: a forger can edit a body and re-link + re-hash the
+// whole chain so every per-event check passes, but the resulting tip can't match a
+// tip published before the forgery. Without an anchor, regeneration is undetectable.
+async function verifyChain(events, expectedTip) {
   const errs = [];
   let expected = GENESIS;
   for (const e of events) {
     if (e.prev_hash !== expected) errs.push({ seq: e.seq_id, why: 'broken link (insert/delete/reorder)' });
     if ((await chainHash(e)) !== e.entry_hash) errs.push({ seq: e.seq_id, why: 'content tampered' });
     expected = e.entry_hash;
+  }
+  if (expectedTip != null) {
+    const actualTip = events.length ? events[events.length - 1].entry_hash : null;
+    if (actualTip !== expectedTip) {
+      errs.push({ seq: null, why: 'tip does not match the anchored tip (chain may have been regenerated/forged)' });
+    }
   }
   return errs;
 }

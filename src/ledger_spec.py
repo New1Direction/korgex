@@ -60,7 +60,8 @@ def chain_hash(event: dict, key: bytes | None = None) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def verify_chain(events: list, key: bytes | None = None) -> list:
+def verify_chain(events: list, key: bytes | None = None,
+                 expected_tip: str | None = None) -> list:
     """Recompute the hash-chain and report tampering. Returns [] iff intact.
 
     Each error is localized to a seq_id:
@@ -69,6 +70,13 @@ def verify_chain(events: list, key: bytes | None = None) -> list:
         `entry_hash` (broken link).
     With `key`, recomputation uses HMAC, so a tail rewritten without the key
     fails even though it is internally self-consistent.
+
+    With `expected_tip` (a genuine tip hash anchored externally — a public
+    timestamp, a signed post, a git tag), the chain's actual tip is compared to
+    it. This is what closes the unkeyed-regeneration hole: a forger can edit a
+    body and re-link + re-hash the whole downstream chain so the per-event checks
+    above all pass, but the resulting tip cannot match a tip published before the
+    forgery. Without an anchor (or a key), a fully regenerated chain is undetectable.
     """
     errors = []
     expected_prev = GENESIS_HASH
@@ -86,6 +94,12 @@ def verify_chain(events: list, key: bytes | None = None) -> list:
         if chain_hash(e, key=key) != stored:
             errors.append(f"seq {sid}: entry_hash mismatch (content was tampered)")
         expected_prev = stored
+    if expected_tip is not None:
+        actual_tip = events[-1].get("entry_hash") if events else None
+        if actual_tip != expected_tip:
+            errors.append(
+                "tip does not match the anchored tip "
+                "(chain may have been wholly regenerated/forged)")
     return errors
 
 
