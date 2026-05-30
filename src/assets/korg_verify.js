@@ -69,6 +69,18 @@ async function verifyChain(events, expectedTip) {
   return errs;
 }
 
+// ── sealed envelope (commit-reveal) — mirror of src/sealed_envelope.py ──
+// commit = SHA-256 over the canonical encoding of {payload, salt}. A reveal recomputes
+// it here, in the viewer's browser, byte-for-byte identical to the Python/Rust commit.
+async function sha256Canonical(value) {
+  const bytes = new TextEncoder().encode(canonical(value)); // canonical() is ASCII-only
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function sealCommit(payload, salt) {
+  return sha256Canonical({ payload, salt });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { jsonString, canonical, chainHash, verifyChain, GENESIS };
+  module.exports = { jsonString, canonical, chainHash, verifyChain, sha256Canonical, sealCommit, GENESIS };
 }
