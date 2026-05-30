@@ -339,6 +339,7 @@ def cmd_audit():
 
     argv = sys.argv[1:]
     root = session = out = None
+    html_path = None
     if "audit" in argv:
         toks = argv[argv.index("audit") + 1:]
         i = 0
@@ -353,6 +354,14 @@ def cmd_audit():
             elif t in ("--out", "-o"):
                 out = toks[i + 1] if i + 1 < len(toks) else None
                 i += 2
+            elif t == "--html":
+                nxt = toks[i + 1] if i + 1 < len(toks) else None
+                if nxt and not nxt.startswith("-"):
+                    html_path = nxt
+                    i += 2
+                else:
+                    html_path = ""  # sentinel: derive a path from the journal
+                    i += 1
             else:
                 i += 1
 
@@ -383,10 +392,25 @@ def cmd_audit():
     tools = Counter(e.get("tool_name") for e in events)
     top = ", ".join(f"{k}×{v}" for k, v in tools.most_common(6))
 
+    if html_path is not None:
+        from src import audit_report as AR
+
+        if not html_path:
+            stem = out[: -len(".korg.jsonl")] if out.endswith(".korg.jsonl") else out
+            html_path = stem + ".html"
+        try:
+            with open(html_path, "w", encoding="utf-8") as fh:
+                fh.write(AR.render_html(events, {"session": os.path.basename(session), "vendor": "claude-code"}))
+        except OSError as exc:
+            print(f"  (html report failed: {exc})")
+            html_path = None
+
     print(f"  audited {os.path.basename(session)} → {summary['events']} ledger events")
     if top:
         print(f"  activity: {top}")
     print(f"  journal:  {out}")
+    if html_path:
+        print(f"  report:   {html_path}  ← open in any browser; it re-verifies itself")
     if summary["verified"]:
         print("  chain:    ✓ INTACT — tamper-evident, cryptographically verifiable")
         print(f"  re-check any time:  korgex verify {out}")
@@ -513,6 +537,8 @@ def _build_subcommand_parser():
             sp.add_argument("--session", help="a specific transcript (default: newest Claude Code session)")
             sp.add_argument("--root", help="sessions root (default: ~/.claude/projects)")
             sp.add_argument("--out", "-o", help="output journal path")
+            sp.add_argument("--html", nargs="?", const="",
+                            help="also write a self-verifying HTML report (default: <journal>.html)")
     return p
 
 
