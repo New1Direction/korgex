@@ -81,6 +81,19 @@ async function sealCommit(payload, salt) {
   return sha256Canonical({ payload, salt });
 }
 
+// ── Ed25519-over-tip — verify "who" in the viewer's browser (mirror of src/signing.py) ──
+// The agent IS its public key. This confirms the holder of that key signed this exact
+// chain tip — author-authenticity with zero trust in korg, via WebCrypto Ed25519.
+function _hexBytes(h) { return Uint8Array.from(h.match(/../g).map((b) => parseInt(b, 16))); }
+async function verifyTipSig(pubHex, tipHex, sigHex) {
+  try {
+    const key = await crypto.subtle.importKey('raw', _hexBytes(pubHex), { name: 'Ed25519' }, false, ['verify']);
+    return await crypto.subtle.verify('Ed25519', key, _hexBytes(sigHex), _hexBytes(tipHex));
+  } catch (e) {
+    return false; // browser without Ed25519 support, or a bad signature
+  }
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { jsonString, canonical, chainHash, verifyChain, sha256Canonical, sealCommit, GENESIS };
+  module.exports = { jsonString, canonical, chainHash, verifyChain, sha256Canonical, sealCommit, verifyTipSig, GENESIS };
 }
