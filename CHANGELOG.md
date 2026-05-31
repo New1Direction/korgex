@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-05-31
+
+The agent-economy batch: agents can now **coordinate, sign, deal, and get paid** — and "who did this" becomes a signature, not a claim. Every step is a pure function of the chain, verifiable in any browser.
+
+### Added
+- **Verifiable agent message bus** (`src/bus.py`). Multi-agent coordination where every message and every read-receipt is its own hash-chained korg-ledger@v1 event. `BusSend` / `BusInbox` agent tools with auto-delivery, so agents coordinate hands-free and the whole exchange replays and verifies from the record alone.
+- **Ed25519-over-tip signing** (`src/signing.py`). An agent's identity is its public key; it signs the chain's tip, so "who attests to this history" is a verifiable signature carried in a sidecar checkpoint — kept off the hashed chain, so the cross-language conformance vectors stay byte-identical. Anyone verifies in-browser (WebCrypto) with zero trust in korg.
+- **Sealed-envelope primitive** (`src/sealed_envelope.py`). Commit-reveal: seal a value before an outcome, reveal it after; the reveal recomputes byte-for-byte identically in Python, Rust, and the browser. The shared foundation under every receipt.
+- **Anchored-tip verification.** `ledger_spec.verify_chain(expected_tip=…)` closes the unkeyed-regeneration hole — a forger who re-links and re-hashes an entire chain still can't make its tip equal an externally published one (that would be a SHA-256 second-preimage).
+- **Sealed Deliverable Receipt + x402 escrow** (`src/contract.py`). Two agents agree (offer → accept); the deliverer **seals** its work before a deadline and **reveals** it after; an acceptance test is recorded; and the verdict — SETTLED / DEFAULTED / FRAUD / FAILED — is a pure function of the chain. The seal is **signed** (provable authorship) and the money leg rides **x402**: release to the seller on provable delivery, refund the buyer on default or fraud. korg decides who's owed; x402 settles.
+- **Proof-of-custody** (`src/custody.py`). Seal any file and prove later that it's byte-for-byte unaltered — korg's first non-agent receipt, and the primitive under the consumer "Sealed" tool.
+- **Demos** (`demos/`). A hands-free two-agent arena (korgex vs codex play a full match over the real bus; the board reconstructs from the journal alone) and a reproducible, self-verifying generator for the sealed-deliverable receipt page.
+
 ## [0.9.0] — 2026-05-30
 
 A verifiability + code-intelligence batch — and the moat's central claim is now **proven across languages**.
