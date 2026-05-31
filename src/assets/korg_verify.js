@@ -80,6 +80,12 @@ async function sha256Canonical(value) {
 async function sealCommit(payload, salt) {
   return sha256Canonical({ payload, salt });
 }
+// hash raw file bytes (an ArrayBuffer/TypedArray) — the drag-in "proof of custody" verify.
+// The file never leaves the browser; only this fingerprint is compared to the sealed one.
+async function sha256Bytes(buf) {
+  const d = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 // ── Ed25519-over-tip — verify "who" in the viewer's browser (mirror of src/signing.py) ──
 // The agent IS its public key. This confirms the holder of that key signed this exact
@@ -95,5 +101,5 @@ async function verifyTipSig(pubHex, tipHex, sigHex) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { jsonString, canonical, chainHash, verifyChain, sha256Canonical, sealCommit, verifyTipSig, GENESIS };
+  module.exports = { jsonString, canonical, chainHash, verifyChain, sha256Canonical, sealCommit, sha256Bytes, verifyTipSig, GENESIS };
 }
