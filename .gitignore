@@ -45,3 +45,6 @@ Thumbs.db
 ecosystem_audit_*.html
 # korg ledger blob store / local journal (must never enter the tree)
 .korg/
+
+# playwright MCP test artifacts
+.playwright-mcp/
