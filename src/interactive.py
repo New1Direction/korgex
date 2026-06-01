@@ -259,21 +259,16 @@ class StreamRenderer:
         console.print(f"\n[bold red]✗ Error:[/bold red] {msg}")
     
     def _show_tool_status(self, name: str, params: dict, partial: str = ""):
-        """Show a compact tool status line."""
+        """Show a compact tool-call line: ◆ verb target (dim detail), routed
+        through the prompt_toolkit-aware sink so it sits cleanly above the input.
+        While params still stream in (partial), suppress — render once on the full
+        call so we don't print a half-formed line per chunk."""
         self._current_tool = {"name": name, "params": params}
-        
-        # Truncate params for display
-        param_str = ", ".join(
-            f"{k}={str(v)[:50]}" for k, v in params.items()
-        )
-        if len(param_str) > 80:
-            param_str = param_str[:77] + "..."
-        
         if partial:
-            # Still receiving params — show as pending
-            console.print(f"\n[dim]⟐ {name}({param_str})[/dim]")
-        else:
-            console.print(f"\n[bold cyan]➤[/bold cyan] [bold]{name}[/bold]({param_str})")
+            return
+        from src import render as _R
+        from src.pt_output import emit, render_rich
+        emit("\n" + render_rich(_R.tool_line(name, params)).rstrip("\n") + "\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
