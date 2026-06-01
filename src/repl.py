@@ -390,15 +390,38 @@ class Repl:
         except Exception:
             return []
 
-    def _bottom_toolbar(self):
-        """The status line pinned to the BOTTOM of the window: model · mode · plan.
-        Re-evaluated by prompt_toolkit on every render, so it stays current."""
-        plan = " · ◐ PLAN (read-only)" if getattr(self._agent, "plan_mode_active", False) else ""
+    def _mode_label(self) -> str:
         policy = (getattr(self._agent, "edit_policy", None) or "free")
-        mode = " · ⚡ free" if policy in ("free", "session", "bypass") else f" · {policy}"
-        if policy == "bypass":
-            mode = " · ⚡ bypass (no gates)"
-        return f" korgex · {self.model}{mode}{plan} · /help · /exit "
+        mode = "⚡ free" if policy in ("free", "session") else (
+            "⚡ bypass" if policy == "bypass" else policy)
+        plan = " · ◐ PLAN" if getattr(self._agent, "plan_mode_active", False) else ""
+        return f"{mode}{plan}"
+
+    def _bottom_toolbar(self):
+        """Keybind / command hints, dim along the bottom (the status lives in the
+        input's top border). Re-evaluated each render so it stays current."""
+        return "  Enter send  ·  /help commands  ·  /plan  ·  /skills  ·  /rewind  ·  Ctrl-C quit  "
+
+    def _prompt_message(self):
+        """A framed prompt: a top border carrying the status, then the ›  caret.
+        (A reliable inline frame — the full bordered box is the full-screen TUI,
+        which previously hid streamed replies.)"""
+        import shutil
+
+        from prompt_toolkit.formatted_text import FormattedText
+        width = shutil.get_terminal_size((80, 24)).columns
+        label = f" korgex · {self.model} · {self._mode_label()} "
+        fill = max(0, width - len(label) - 3)
+        top = "╭─" + label + "─" * fill + "╮"
+        return FormattedText([("class:frame", top + "\n"), ("class:caret", "› ")])
+
+    def _prompt_style(self):
+        from prompt_toolkit.styles import Style
+        return Style.from_dict({
+            "frame": "#46525f",                 # dim border
+            "caret": "#a5de67 bold",            # green caret
+            "bottom-toolbar": "#6b7480 noreverse",  # dim hints, not a reversed bar
+        })
 
     def _session(self):
         """Lazily build the prompt_toolkit session: bottom-anchored input with
@@ -410,10 +433,12 @@ class Repl:
         return self._session_obj
 
     def _read_line(self) -> str:
-        """Read one line via the prompt_toolkit session — input pinned to the
-        bottom of the window, with the status toolbar beneath it. Raises
-        EOFError/KeyboardInterrupt to end the loop (caught in run())."""
-        return self._session().prompt("› ", bottom_toolbar=self._bottom_toolbar)
+        """Read one line via the prompt_toolkit session: a framed prompt (top border
+        + ›  caret) with a dim hint bar beneath. Raises EOFError/KeyboardInterrupt to
+        end the loop (caught in run())."""
+        return self._session().prompt(self._prompt_message,
+                                      bottom_toolbar=self._bottom_toolbar,
+                                      style=self._prompt_style())
 
     def run(self):
         """Start the REPL.
