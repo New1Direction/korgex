@@ -117,3 +117,42 @@ def resolve_model_and_key(model: str | None, cfg: Config, env: dict | None = Non
         if env_var:
             key = env.get(env_var)
     return resolved, key
+
+
+# Default OpenAI-compatible base URLs per provider type.
+_OPENROUTER_URL = "https://openrouter.ai/api/v1"
+_OLLAMA_URL = "http://localhost:11434/v1"
+
+
+def resolve_client_config(model: str, cfg: Config, env: dict | None = None):
+    """Resolve ``(api_key, base_url)`` for a model's provider — the seam the agent
+    uses to build its client from CONFIG (not just env). base_url is None for
+    Anthropic (its SDK uses its own endpoint); for OpenRouter/Ollama it's the
+    OpenAI-compatible URL so a `vendor/model` id or a local model routes correctly.
+    Falls back to the provider's conventional env key so env-only users still work.
+    """
+    env = os.environ if env is None else env
+    ptype = provider_type_for_model(model)
+    # If the model-id heuristic doesn't match a configured provider but exactly one
+    # provider IS configured, trust it — a bare local model id ("llama3.3") or a
+    # gateway can't be inferred from the name alone.
+    if cfg.provider_for(ptype) is None and len(cfg.providers) == 1:
+        ptype = cfg.providers[0].get("type", ptype)
+    provider = cfg.provider_for(ptype)
+    key = (provider or {}).get("api_key")
+    if not key:
+        env_var = _ENV_KEY.get(ptype)
+        if env_var:
+            key = env.get(env_var)
+        key = key or env.get("KORGEX_API_KEY")
+
+    if ptype == "anthropic":
+        return key, None
+    if ptype == "openrouter":
+        return key, _OPENROUTER_URL
+    if ptype == "ollama":
+        base = (provider or {}).get("base_url") or _OLLAMA_URL
+        return (key or "ollama"), base  # local needs no real key; placeholder is fine
+    # openai (and any other openai-compatible)
+    base = (provider or {}).get("base_url") or env.get("KORGEX_API_URL")
+    return key, base

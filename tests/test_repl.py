@@ -60,3 +60,54 @@ def test_slash_plan_parses():
     assert R.parse_repl_input("/plan on").kind == "plan"
     assert R.parse_repl_input("/plan on").arg == "on"
     assert R.parse_repl_input("/plan approve").arg == "approve"
+
+
+# ── the loop: reads lines from an injectable reader, dispatches via handle ──────
+
+def _repl(monkeypatch):
+    """A Repl whose model resolves without touching real config."""
+    from src import repl as RM
+    from src import config as C
+    cfg = C.Config(default_model="claude-sonnet-4-6", providers=[])
+    return RM.Repl(cfg=cfg)
+
+
+def test_loop_dispatches_lines_until_exit(monkeypatch):
+    r = _repl(monkeypatch)
+    seen = []
+    r.handle = lambda cmd: (seen.append(cmd.kind), cmd.kind != "exit")[1]
+    # a reader that yields two turns then an exit command
+    lines = iter(["hello", "/help", "/exit"])
+    r._read_line = lambda: next(lines)
+    r._banner = lambda: None  # skip the rich banner in the loop test
+    r.run()
+    assert seen == ["turn", "help", "exit"]
+
+
+def test_loop_stops_on_eof(monkeypatch):
+    r = _repl(monkeypatch)
+    seen = []
+    r.handle = lambda cmd: seen.append(cmd.kind) or True
+    def eof():
+        raise EOFError
+    r._read_line = eof
+    r._banner = lambda: None
+    r.run()  # must return cleanly, not hang or raise
+    assert seen == []
+
+
+def test_read_line_uses_the_prompt_session(monkeypatch):
+    """The real reader delegates to a prompt_toolkit session (bottom-anchored)."""
+    r = _repl(monkeypatch)
+    calls = {}
+    class FakeSession:
+        def prompt(self, *a, **k):
+            calls["prompted"] = True
+            calls["kwargs"] = k
+            return "typed text"
+    r._session_obj = FakeSession()
+    out = r._read_line()
+    assert out == "typed text"
+    assert calls.get("prompted")
+    # bottom_toolbar wired → the status line lives at the bottom of the window
+    assert "bottom_toolbar" in calls["kwargs"]

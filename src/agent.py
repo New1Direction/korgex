@@ -423,24 +423,31 @@ class KorgexAgent:
     # ── Client wiring ────────────────────────────────────────────────────
 
     def _get_client(self):
+        # Resolve the key + base_url from ~/.korgex/config.json (the seam set by
+        # `korgex setup`), falling back to env vars. This is what makes a config
+        # provider — e.g. an OpenRouter key with model "openai/gpt-4o" — actually
+        # reach the right endpoint, instead of only reading env.
+        from src.config import load_config, resolve_client_config
+        key, base_url = resolve_client_config(self.model, load_config())
+
         if self.provider == "anthropic":
-            key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("KORGEX_API_KEY")
             if not key:
                 raise RuntimeError(
-                    "No API key found. Set ANTHROPIC_API_KEY (preferred) or KORGEX_API_KEY."
+                    "No API key found. Run `korgex setup` to connect Anthropic, or set "
+                    "ANTHROPIC_API_KEY."
                 )
             from anthropic import Anthropic
             return Anthropic(api_key=key)
 
-        key = os.environ.get("OPENAI_API_KEY") or os.environ.get("KORGEX_API_KEY")
         if not key:
             raise RuntimeError(
-                "No API key found. Set OPENAI_API_KEY (preferred) or KORGEX_API_KEY."
+                "No API key found. Run `korgex setup` to connect a provider (OpenAI / "
+                "OpenRouter / Ollama), or set OPENAI_API_KEY."
             )
         from openai import OpenAI
         return OpenAI(
             api_key=key,
-            base_url=os.environ.get("KORGEX_API_URL", "https://api.openai.com/v1"),
+            base_url=base_url or "https://api.openai.com/v1",
         )
 
     def _gen_kwargs(self) -> dict:
