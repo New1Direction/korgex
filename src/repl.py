@@ -77,6 +77,7 @@ class Repl:
         self.out = out or sys.stdout
         self.model, self.api_key = _config.resolve_model_and_key(None, self.cfg)
         self._agent = None  # lazy: built on first turn
+        self._session_obj = None  # lazy prompt_toolkit session (bottom-anchored input)
 
     def _print(self, *a):
         print(*a, file=self.out)
@@ -187,8 +188,8 @@ class Repl:
         except Exception as e:  # never let one bad turn kill the session
             self._print(f"[error] {e}")
 
-    def run(self):
-        """The readline loop. Lands here from a bare `korgex` on a TTY."""
+    def _banner(self):
+        """Paint the startup banner (skippable in tests)."""
         import os
         from src import banner
         configured = self.cfg.is_configured() or bool(self.api_key)
@@ -199,9 +200,35 @@ class Repl:
             version = "dev"
         banner.render(model=self.model, cwd=os.getcwd(), version=version,
                       configured=configured, out=self.out)
+
+    def _bottom_toolbar(self):
+        """The status line pinned to the BOTTOM of the window: model · plan-state.
+        Re-evaluated by prompt_toolkit on every render, so it stays current."""
+        plan = " · ◐ PLAN (read-only)" if getattr(self._agent, "plan_mode_active", False) else ""
+        return f" korgex · {self.model}{plan} · /help · /exit "
+
+    def _session(self):
+        """Lazily build the prompt_toolkit session: bottom-anchored input with
+        in-memory history. Cached so history persists across turns."""
+        if self._session_obj is None:
+            from prompt_toolkit import PromptSession
+            from prompt_toolkit.history import InMemoryHistory
+            self._session_obj = PromptSession(history=InMemoryHistory())
+        return self._session_obj
+
+    def _read_line(self) -> str:
+        """Read one line via the prompt_toolkit session — input pinned to the
+        bottom of the window, with the status toolbar beneath it. Raises
+        EOFError/KeyboardInterrupt to end the loop (caught in run())."""
+        return self._session().prompt("› ", bottom_toolbar=self._bottom_toolbar)
+
+    def run(self):
+        """The REPL loop. Lands here from a bare `korgex` on a TTY. Input is
+        bottom-anchored (prompt_toolkit); output scrolls above it."""
+        self._banner()
         while True:
             try:
-                line = input("› ")
+                line = self._read_line()
             except (EOFError, KeyboardInterrupt):
                 self._print("")
                 break

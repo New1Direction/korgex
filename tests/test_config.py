@@ -74,3 +74,37 @@ def test_resolve_key_env_fallback_keeps_existing_users_working(tmp_path):
     empty = C.Config(default_model=None, providers=[])
     _model, key = C.resolve_model_and_key("claude-opus-4-8", empty, env={"ANTHROPIC_API_KEY": "sk-ant-ENV"})
     assert key == "sk-ant-ENV"
+
+
+# ── client config resolution (key + base_url for the active model's provider) ──
+
+def test_resolve_client_openrouter_uses_config_key_and_or_url():
+    cfg = C.Config(default_model="openai/gpt-4o",
+                   providers=[{"type": "openrouter", "api_key": "sk-or-CONFIG"}])
+    key, base_url = C.resolve_client_config("openai/gpt-4o", cfg, env={})
+    assert key == "sk-or-CONFIG"
+    assert base_url and "openrouter.ai" in base_url  # routed to OpenRouter, not api.openai.com
+
+
+def test_resolve_client_anthropic_has_no_base_url_override():
+    cfg = C.Config(default_model="claude-sonnet-4-6",
+                   providers=[{"type": "anthropic", "api_key": "sk-ant-X"}])
+    key, base_url = C.resolve_client_config("claude-sonnet-4-6", cfg, env={})
+    assert key == "sk-ant-X"
+    assert base_url is None  # anthropic SDK uses its own default endpoint
+
+
+def test_resolve_client_ollama_local_base_url_no_key():
+    cfg = C.Config(default_model="llama3.3",
+                   providers=[{"type": "ollama", "base_url": "http://localhost:11434/v1"}])
+    key, base_url = C.resolve_client_config("llama3.3", cfg, env={})
+    assert "11434" in base_url
+    # local needs no key — a placeholder is fine, but it must not be None-crash
+    assert key is not None
+
+
+def test_resolve_client_env_key_fallback():
+    # no config provider, but OPENAI_API_KEY in env → still resolves
+    key, base_url = C.resolve_client_config("gpt-4o", C.Config(),
+                                            env={"OPENAI_API_KEY": "sk-ENV"})
+    assert key == "sk-ENV"

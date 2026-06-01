@@ -101,9 +101,13 @@ def test_openrouter_anthropic_id_detected():
     assert a.provider == "anthropic"
 
 
-def test_missing_api_key_raises_cleanly():
+def test_missing_api_key_raises_cleanly(tmp_path):
     saved = {k: os.environ.pop(k, None) for k in
              ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "KORGEX_API_KEY")}
+    # Point config at an empty file too, so a real ~/.korgex/config.json with a
+    # saved key doesn't satisfy the lookup (the agent now reads config + env).
+    saved_cfg = os.environ.pop("KORGEX_CONFIG", None)
+    os.environ["KORGEX_CONFIG"] = str(tmp_path / "empty.json")
     try:
         a = KorgexAgent(model="claude-sonnet-4-6")
         with pytest.raises(RuntimeError, match="API key"):
@@ -112,6 +116,10 @@ def test_missing_api_key_raises_cleanly():
         for k, v in saved.items():
             if v is not None:
                 os.environ[k] = v
+        if saved_cfg is not None:
+            os.environ["KORGEX_CONFIG"] = saved_cfg
+        else:
+            os.environ.pop("KORGEX_CONFIG", None)
 
 
 # ── 3. Mode → model resolution ───────────────────────────────────────────
@@ -366,10 +374,12 @@ def test_swarm_profile_rejects_missing_command(client):
     assert "command" in r.json()["error"]
 
 
-def test_swarm_refactor_returns_clean_error_without_api_key(client, monkeypatch):
+def test_swarm_refactor_returns_clean_error_without_api_key(client, monkeypatch, tmp_path):
     """When no API key is configured the endpoint should return JSON, not crash."""
     for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "KORGEX_API_KEY"):
         monkeypatch.delenv(k, raising=False)
+    # also neutralize any real ~/.korgex/config.json (the agent reads config now)
+    monkeypatch.setenv("KORGEX_CONFIG", str(tmp_path / "empty.json"))
     r = client.post("/api/swarm/refactor", json={"filepath": "src/cli.py"})
     assert r.status_code == 200
     body = r.json()
