@@ -214,11 +214,9 @@ class Repl:
             version = "dev"
         banner.render(model=self.model, cwd=os.getcwd(), version=version,
                       configured=configured, out=self.out)
-        if animated_portal:
-            return  # the animated in-app portal replaces the static panel
-        # Fill the space with a welcome dashboard: connected providers, available
-        # skills + MCP servers, and quick-start tips (real data, sections skipped
-        # when empty). Best-effort — never block startup.
+        # The welcome panel (model/cwd/providers · MCP · skills · try-tips · summary)
+        # ALWAYS shows. With `animated_portal`, just omit its static mascot column —
+        # the live animated portal stands in for it, so the info + tips never vanish.
         if configured:
             try:
                 from src import skills as _SK
@@ -232,7 +230,8 @@ class Repl:
                     n_tools = 0
                 banner.render_dashboard(model=self.model, cwd=os.getcwd(), version=version,
                                         providers=providers, skills=skills,
-                                        mcps=self._mcp_names(), tools=n_tools, out=self.out)
+                                        mcps=self._mcp_names(), tools=n_tools,
+                                        mascot=not animated_portal, out=self.out)
             except Exception:
                 pass
 
