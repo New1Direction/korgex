@@ -22,8 +22,31 @@ _WORDMARK = r"""
 ██║  ██╗╚██████╔╝██║  ██║╚██████╔╝███████╗██╔╝ ██╗
 ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝""".strip("\n")
 
-# Per-row colors: bright gold at the top fading to bronze at the bottom → depth.
-_WORDMARK_TIERS = ["#ffd700", "#ffd700", "#ffbf00", "#f0a020", "#cd7f32", "#cd7f32"]
+# Per-row gradient palettes (top→bottom) for the wordmark's 3D depth. 'red' is the
+# default (bright crimson fading to deep red); 'gold' is the original.
+_PALETTES = {
+    "red":  ["#ff5b6e", "#ff3b54", "#e92846", "#c81f3a", "#a3162e", "#7d1023"],
+    "gold": ["#ffd700", "#ffd700", "#ffbf00", "#f0a020", "#cd7f32", "#cd7f32"],
+}
+_DEFAULT_PALETTE = "red"
+
+
+def wordmark_tiers(palette: str = _DEFAULT_PALETTE) -> list:
+    """The per-row color gradient for the wordmark (defaults to the red palette)."""
+    return _PALETTES.get(palette, _PALETTES[_DEFAULT_PALETTE])
+
+
+def center_block(text: str, width: int) -> str:
+    """Center each line of a multi-line block within `width` columns (for the
+    calm, Grok-style centered wordmark)."""
+    lines = text.split("\n")
+    block_w = max((len(ln) for ln in lines), default=0)
+    pad = max(0, (width - block_w) // 2)
+    return "\n".join((" " * pad) + ln for ln in lines)
+
+
+# back-compat alias used by older callers/tests
+_WORDMARK_TIERS = _PALETTES["gold"]
 
 _TAGLINE = "the cross-vendor coding agent — every model, one tool, provable"
 
@@ -181,14 +204,17 @@ def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
         print(file=out)
 
 
-def render_wordmark(console) -> None:
-    """Paint the wordmark with a per-row gold→bronze gradient — the depth/3D look.
-    Each line of _WORDMARK takes the matching color from _WORDMARK_TIERS."""
+def render_wordmark(console, palette: str = _DEFAULT_PALETTE, center: bool = True) -> None:
+    """Paint the wordmark with a per-row gradient (default: red) for 3D depth,
+    centered in the terminal by default (the calm, Grok-style look)."""
     from rich.text import Text
+    from rich.align import Align
+    tiers = wordmark_tiers(palette)
     rows = _WORDMARK.split("\n")
     for i, row in enumerate(rows):
-        color = _WORDMARK_TIERS[min(i, len(_WORDMARK_TIERS) - 1)]
-        console.print(Text(row, style=f"bold {color}"))
+        color = tiers[min(i, len(tiers) - 1)]
+        line = Text(row, style=f"bold {color}")
+        console.print(Align.center(line) if center else line)
 
 
 def render(model: str, cwd: str, version: str, configured: bool = True, out=None) -> None:

@@ -87,10 +87,8 @@ def run_app(repl) -> None:
 
     def _status():
         plan = bool(getattr(repl._agent, "plan_mode_active", False))
-        return [("class:status", status_text(repl.model, plan))]
-
-    status_bar = Window(content=FormattedTextControl(_status), height=1,
-                        style="class:status")
+        badge = " · ◐ PLAN" if plan else ""
+        return [("class:status", f"korgex · {repl.model}{badge} ")]
     input_area = TextArea(
         height=Dimension(min=1, max=8, preferred=1),
         prompt=prompt_text(),
@@ -100,11 +98,27 @@ def run_app(repl) -> None:
         style="class:input",
     )
 
-    root = HSplit([
-        Window(height=Dimension(weight=1)),  # flexible spacer keeps input at bottom
-        status_bar,
-        Window(height=1, char="─", style="class:rule"),
+    # A Tip line above the input, and the input wrapped in a bordered Frame with
+    # the status right-aligned inside it — the clean Grok-style typing area.
+    from prompt_toolkit.widgets import Frame
+    from prompt_toolkit.layout import VSplit
+
+    tip_bar = Window(
+        content=FormattedTextControl(
+            lambda: [("class:tip", "  Tip: Enter to send · /help for commands · Ctrl-C to quit")]),
+        height=1)
+
+    input_row = VSplit([
         input_area,
+        Window(content=FormattedTextControl(_status), width=32,
+               align="right", style="class:status"),
+    ])
+    input_frame = Frame(input_row, style="class:frame")
+
+    root = HSplit([
+        Window(height=Dimension(weight=1)),  # flexible spacer keeps everything at bottom
+        tip_bar,
+        input_frame,
     ])
 
     kb = KeyBindings()
@@ -129,9 +143,10 @@ def run_app(repl) -> None:
         run_in_terminal(_do)
 
     style = Style.from_dict({
-        "status": "bg:#0c1117 #8a8f98",
-        "rule": "#46525f",
-        "input": "#dde6ef",
+        "status": "#6b7480",        # dim, right side of the input frame
+        "tip": "#6b7480",           # the Tip: line
+        "frame": "#46525f",         # the input box border
+        "input": "#dde6ef",         # typed text
     })
 
     app = Application(layout=Layout(root, focused_element=input_area),
