@@ -221,9 +221,14 @@ class Repl:
                 reg = _SK.load_skills(_SK.default_skill_roots(os.getcwd()))
                 skills = [(n, reg.get(n).description) for n in reg.names()]
                 providers = [p.get("type") for p in self.cfg.providers]
+                try:
+                    from src.tool_abstraction import get_tool_names
+                    n_tools = len(get_tool_names())
+                except Exception:
+                    n_tools = 0
                 banner.render_dashboard(model=self.model, cwd=os.getcwd(), version=version,
                                         providers=providers, skills=skills,
-                                        mcps=self._mcp_names(), out=self.out)
+                                        mcps=self._mcp_names(), tools=n_tools, out=self.out)
             except Exception:
                 pass
 
