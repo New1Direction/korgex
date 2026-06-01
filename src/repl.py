@@ -189,10 +189,16 @@ class Repl:
 
     def run(self):
         """The readline loop. Lands here from a bare `korgex` on a TTY."""
-        if not self.cfg.is_configured() and not self.api_key:
-            self._print("welcome to korgex — no model connected yet.")
-            self._print("run `korgex setup` to connect a provider, then come back.\n")
-        self._print(f"korgex · {self.model} · /help for commands, /exit to leave\n")
+        import os
+        from src import banner
+        configured = self.cfg.is_configured() or bool(self.api_key)
+        try:
+            from src.cli import _get_version
+            version = _get_version()
+        except Exception:
+            version = "dev"
+        banner.render(model=self.model, cwd=os.getcwd(), version=version,
+                      configured=configured, out=self.out)
         while True:
             try:
                 line = input("› ")
