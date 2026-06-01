@@ -83,7 +83,10 @@ def run_app(repl) -> None:
     except Exception:
         pass
 
-    repl._banner()
+    # Paint the wordmark + welcome panel ABOVE the app (static, stays in
+    # scrollback). The animated portal lives inside the app as the idle splash,
+    # so tell the banner to skip its static portal/mascot to avoid doubling it.
+    repl._banner(animated_portal=True)
 
     def _status():
         plan = bool(getattr(repl._agent, "plan_mode_active", False))
@@ -115,8 +118,28 @@ def run_app(repl) -> None:
     ])
     input_frame = Frame(input_row, style="class:frame")
 
+    # ── Animated portal splash (idle only) ──────────────────────────────────
+    # A live, centered, pulsing portal shown above the input UNTIL the first turn.
+    # A background tick advances the phase and invalidates the app to redraw; once
+    # the user sends a message it collapses, so it never fights streamed output.
+    from prompt_toolkit.layout import ConditionalContainer
+    from prompt_toolkit.filters import Condition
+    from src import banner as _B
+
+    state = {"phase": 0, "idle": True}
+
+    def _portal_fragments():
+        return [(style, row + "\n") for style, row in _B.portal_frame_lines(state["phase"])]
+
+    portal_window = Window(content=FormattedTextControl(_portal_fragments),
+                          height=_B._PORTAL_H, align="center")
+    portal_splash = ConditionalContainer(
+        content=HSplit([Window(height=1), portal_window, Window(height=1)]),
+        filter=Condition(lambda: state["idle"]))
+
     root = HSplit([
         Window(height=Dimension(weight=1)),  # flexible spacer keeps everything at bottom
+        portal_splash,
         tip_bar,
         input_frame,
     ])
@@ -134,6 +157,7 @@ def run_app(repl) -> None:
         input_area.text = ""
         if not (text and text.strip()):
             return
+        state["idle"] = False  # collapse the animated splash on the first real turn
         from prompt_toolkit.application.run_in_terminal import run_in_terminal
 
         def _do():
@@ -152,4 +176,26 @@ def run_app(repl) -> None:
     app = Application(layout=Layout(root, focused_element=input_area),
                       key_bindings=kb, style=style, full_screen=False,
                       mouse_support=False)
-    app.run()
+
+    # Animation ticker: while idle (pre-first-turn), advance the portal phase and
+    # ask the app to redraw. Daemon thread; stops touching the app once not idle.
+    import threading
+    import time as _time
+    _stop = threading.Event()
+
+    def _tick():
+        while not _stop.is_set():
+            _time.sleep(0.12)
+            if not state["idle"]:
+                continue
+            state["phase"] = (state["phase"] + 1) % _B.PORTAL_PERIOD
+            try:
+                app.invalidate()
+            except Exception:
+                pass
+
+    threading.Thread(target=_tick, daemon=True).start()
+    try:
+        app.run()
+    finally:
+        _stop.set()

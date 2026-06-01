@@ -142,3 +142,23 @@ def test_mascot_render_lines_are_color_tagged():
     assert len(lines) >= 6
     assert all(isinstance(t, tuple) and len(t) == 2 for t in lines)  # (style, text)
     assert all("#" in style for style, _ in lines)  # every row carries a hex color
+
+
+# ── animated portal frames ─────────────────────────────────────────────────────
+
+def test_portal_frame_is_multiline_and_shifts_with_phase():
+    f0 = B.portal_frame(0)
+    f1 = B.portal_frame(1)
+    assert f0.count("\n") >= 8
+    assert f0 != f1, "the ring pattern must move between phases (animation)"
+
+
+def test_portal_frame_loops():
+    # phase wraps cleanly so the loop is seamless
+    period = B.PORTAL_PERIOD
+    assert B.portal_frame(0) == B.portal_frame(period)
+
+
+def test_portal_frame_lines_are_gradient_tinted():
+    lines = B.portal_frame_lines(0, palette="red")
+    assert lines and all(len(t) == 2 and "#" in t[0] for t in lines)
