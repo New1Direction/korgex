@@ -224,11 +224,11 @@ def mascot_lines(palette: str = _DEFAULT_PALETTE) -> list:
 
 
 def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
-                     mcps, tools: int = 0, out=None) -> None:
-    """Paint the welcome panel: a bordered box with a mascot column (left) and
-    categorized model/providers/skills/MCP lists (right), plus a summary footer —
-    the structured, framed look of a polished agent CLI. Falls back to the plain
-    `dashboard` text if rich isn't available."""
+                     mcps, tools: int = 0, mascot: bool = True, out=None) -> None:
+    """Paint the welcome panel: a bordered box with categorized model/providers/
+    skills/MCP lists + a summary footer. With `mascot=True` a gradient portal sits
+    in a left column; with `mascot=False` (when the live animated portal stands in)
+    it's a single content column. Falls back to plain text if rich isn't available."""
     try:
         from rich.console import Console, Group
         from rich.panel import Panel
@@ -263,20 +263,23 @@ def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
         right.append(Text(""))
         right.append(Text(summary_line(len(skills), len(mcps), tools), style="dim"))
 
-        # Mascot column, gradient-tinted to match the wordmark.
-        mascot = Text()
-        for j, (style, row) in enumerate(mascot_lines()):
-            if j:
-                mascot.append("\n")
-            mascot.append(row, style=style)
-
-        grid = Table.grid(padding=(0, 3))
-        grid.add_column(vertical="top")   # mascot
-        grid.add_column(vertical="top")   # content
-        grid.add_row(mascot, Group(*right))
+        if mascot:
+            # Static gradient portal in a left column (when there's no live one).
+            art = Text()
+            for j, (style, row) in enumerate(mascot_lines()):
+                if j:
+                    art.append("\n")
+                art.append(row, style=style)
+            grid = Table.grid(padding=(0, 3))
+            grid.add_column(vertical="top")   # mascot
+            grid.add_column(vertical="top")   # content
+            grid.add_row(art, Group(*right))
+            body = grid
+        else:
+            body = Group(*right)   # single column — the live animated portal is the visual
 
         title = f"korgex v{version} · cross-vendor coding agent"
-        console.print(Panel(grid, title=title, title_align="left",
+        console.print(Panel(body, title=title, title_align="left",
                             border_style="#46525f", box=box.ROUNDED, padding=(1, 2)))
         console.print()
     except Exception:
