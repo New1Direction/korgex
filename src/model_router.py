@@ -53,7 +53,7 @@ class ModelConfig:
 # MODE → MODEL MAPPING
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Default model configs — inspired by Claude Code's pricing (from MITM capture)
+# Default model configs — approximate public list pricing
 DEFAULT_MODELS: dict[str, ModelConfig] = {
     "opus47": ModelConfig(
         provider="anthropic",

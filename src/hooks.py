@@ -5,7 +5,7 @@ A hook is a shell command the harness (not the model) runs at a lifecycle event.
 The cross-harness contract is standardized: the hook gets a JSON event on stdin
 and may emit JSON on stdout; a PreToolUse hook can block the call.
 
-What makes korgex's hooks differentiated rather than a Claude-Code clone: the
+What makes korgex's hooks differentiated rather than a generic clone: the
 agent loop records every PreToolUse allow/deny as a *verdict event on the causal
 ledger* (carrying a policy_hash of the rule that fired). Governance over tool
 calls therefore becomes rewindable and auditable — something fire-and-forget

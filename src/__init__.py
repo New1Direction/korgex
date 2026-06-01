@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Korgex — Autonomous AI Software Engineer
-Jules spelled backwards. A faithful clone of Google Jules' architecture.
+A provider-agnostic, MCP-native autonomous coding agent.
 
 Usage:
     python -m cli.main --help
@@ -9,10 +9,10 @@ Usage:
     python -m cli.main --init             # Create AGENTS.md in repo
 
 Environment:
-    KORGEX_API_URL      LLM API endpoint (default: NousResearch)
+    KORGEX_API_URL      LLM API endpoint (set via `korgex setup`)
     KORGEX_API_KEY      API key
-    KORGEX_MODEL        Model name (default: deepseek/deepseek-v4-flash)
-    KORGEX_PROVIDER     Provider name (default: nous)
+    KORGEX_MODEL        Model name (set via `korgex setup`)
+    KORGEX_PROVIDER     Provider name (set via `korgex setup`)
     KORGEX_MAX_ITERATIONS  Max tool calls per task (default: 50)
 """
 
