@@ -56,6 +56,14 @@ def test_leading_slash_in_a_sentence_is_still_a_turn_only_if_spaced():
 
 def test_slash_skills_parses():
     assert R.parse_repl_input("/skills").kind == "skills"
+    assert R.parse_repl_input("/skills").arg is None
+
+
+def test_slash_skills_curate_carries_the_arg():
+    # `/skills curate` routes to the consolidation pass, not the listing.
+    cmd = R.parse_repl_input("/skills curate")
+    assert cmd.kind == "skills"
+    assert cmd.arg == "curate"
 
 
 def test_slash_tasks_parses():

@@ -22,6 +22,7 @@ korgex — commands
   /model [name]   show models, or switch the live model mid-session
   /plan [on|off]  plan mode: agent stays read-only until you approve its plan
   /skills         list skills (✦ = learned by the agent) and their usage
+  /skills curate  merge duplicate learned (✦) skills into one (agent-owned only)
   /tasks          show the agent's live task checklist for this conversation
   /jobs           list background shell tasks (Bash background=true) + their status
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
@@ -169,6 +170,68 @@ class Repl:
             mark = " ✦" if r["trust"] == "agent" else ""
             state = "" if r["state"] == "active" else f" · {r['state']}"
             self._print(f"  {r['name']}{mark}  —  {r['uses']} use(s){state}")
+        if sum(1 for r in _SU.overview(reg, store) if r["trust"] == "agent") >= 2:
+            self._print("→ /skills curate  merges duplicate learned (✦) skills")
+
+    # Floor below which there's nothing worth consolidating; above it a fresh
+    # learned skill triggers an auto-curation pass (new skills are rare → throttled).
+    _CURATE_THRESHOLD = 8
+
+    def _curate_skills(self, *, blocking: bool):
+        """Consolidate agent-LEARNED skills: an LLM groups near-duplicates, each
+        group is merged into one skill and the redundant ones deleted. Manual via
+        `/skills curate` (blocking, prints); also auto-run in the background after
+        the learned library grows. Only ever touches trust:agent skills. Opt out
+        with KORGEX_NO_CURATE=1; best-effort — never disturbs the session."""
+        import os
+        if os.environ.get("KORGEX_NO_CURATE", "").strip().lower() in ("1", "true", "yes"):
+            if blocking:
+                self._print("curation disabled (KORGEX_NO_CURATE)")
+            return
+
+        def _work():
+            try:
+                from src import skill_curator as _C
+                from src import skill_usage as _SU
+                from src import skills as _SK
+                from src.pt_output import emit
+
+                agent = self._ensure_agent()
+                if agent is None:
+                    if blocking:
+                        self._print("connect a provider first — run `korgex setup`")
+                    return
+
+                def complete(system, user):
+                    client = agent._get_client()
+                    resp = agent._call(client, [{"role": "user", "content": user}], [],
+                                       system_prompt=system)
+                    return agent._extract_final_text(resp)
+
+                reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+                if len(_C.agent_skills(reg)) < 2:
+                    if blocking:
+                        self._print("nothing to curate — fewer than 2 learned skills")
+                    return
+                plan = _C.plan_curation(reg, _C.make_curator(complete))
+                if not plan.groups:
+                    if blocking:
+                        self._print("✓ learned skills already tidy — nothing to merge")
+                    return
+                res = _C.apply_curation(plan, _SU.global_skills_dir(), reg)
+                removed = len(res.get("removed", []))
+                kept = ", ".join(res.get("merged", [])) or "(none)"
+                msg = f"✦ curated skills: consolidated into {kept} · removed {removed} duplicate(s)"
+                self._print(msg) if blocking else emit("\n" + msg + "\n")
+            except Exception:
+                if blocking:
+                    self._print("curation failed (best-effort) — skills left unchanged")
+
+        if blocking:
+            _work()
+        else:
+            import threading
+            threading.Thread(target=_work, daemon=True).start()
 
     def _do_rewind(self, arg):
         """/rewind — list undo points, or restore files to BEFORE a given prompt."""
@@ -230,6 +293,13 @@ class Repl:
                     res = _SR.apply_verdict(verdict, _SU.global_skills_dir(), registry=reg)
                     if res.get("saved"):
                         emit(f"\n✦ learned skill: {res['name']}\n")
+                        # The library just grew — if it's past the floor, consolidate
+                        # near-duplicates in the background (new skills are rare, so
+                        # this is naturally throttled to growth moments).
+                        from src import skill_curator as _C
+                        reg2 = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+                        if len(_C.agent_skills(reg2)) >= self._CURATE_THRESHOLD:
+                            self._curate_skills(blocking=False)
             except Exception:
                 pass  # learning is an enhancement; never disturb the session
 
@@ -280,7 +350,10 @@ class Repl:
             self._toggle_plan(cmd.arg)
             return True
         if cmd.kind == "skills":
-            self._show_skills()
+            if (cmd.arg or "").strip().lower() == "curate":
+                self._curate_skills(blocking=True)
+            else:
+                self._show_skills()
             return True
         if cmd.kind == "tasks":
             led = getattr(self._agent, "_task_ledger", None)
