@@ -105,3 +105,24 @@ def test_categorize_uncategorized_goes_to_general():
     groups = B.categorize_skills([("deploy", "ship it")])
     # a bare name with no prefix lands in a catch-all bucket, not lost
     assert any("deploy" in v for v in groups.values())
+
+
+# ── centered reddish-gradient wordmark + style setting ─────────────────────────
+
+def test_wordmark_tiers_red_palette_exists():
+    tiers = B.wordmark_tiers("red")
+    assert len(tiers) >= 4
+    # reddish: red channel dominant in every tier
+    for hexc in tiers:
+        r = int(hexc[1:3], 16); g = int(hexc[3:5], 16); b = int(hexc[5:7], 16)
+        assert r > g and r > b, f"{hexc} should be reddish"
+
+
+def test_wordmark_tiers_gold_still_available():
+    assert B.wordmark_tiers("gold")  # the original palette still selectable
+
+
+def test_center_block_pads_to_width():
+    centered = B.center_block("abc", width=11)
+    # each line padded so content sits in the middle (leading spaces present)
+    assert centered.startswith("    ") and "abc" in centered
