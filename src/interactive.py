@@ -16,26 +16,15 @@ as used by korgex's streaming bridge.
 import difflib
 import json
 import os
-import re
 import signal
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 # ── Rich imports ────────────────────────────────────────────────────────
-from rich.console import Console, Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.console import Console
 from rich.prompt import Confirm
-from rich.rule import Rule
-from rich.syntax import Syntax
-from rich.table import Table
-from rich.text import Text
-from rich.tree import Tree
 
 # force_terminal so rich still emits color when stdout is wrapped by
 # prompt_toolkit's patch_stdout (which makes the stream look non-tty otherwise).
@@ -162,6 +151,7 @@ class StreamRenderer:
         self._tool_start_time = None
         self._last_spinner = 0
         self._text_block = None  # live StreamBlock for the assistant's prose
+        self._respond_spinner = None  # "responding…" spinner while a reply buffers
     
     def handle_event(self, event: SSEMessage):
         """Process a single SSE event and render it."""
@@ -181,15 +171,8 @@ class StreamRenderer:
             pass  # Don't crash on render errors
     
     def _on_message_start(self, event: SSEMessage):
-        msg = event.data.get("message", {})
-        model = msg.get("model", "unknown")
-        usage = msg.get("usage", {})
-        cached = usage.get("cache_read_input_tokens", 0)
-        
-        if cached:
-            console.print(f"[dim]⚡ {model} (cached)[/dim]")
-        else:
-            console.print(f"[dim]⚡ {model}[/dim]")
+        # Intentionally quiet — no per-message "⚡ model" banner (kept the output clean).
+        return
     
     def _on_content_block_start(self, event: SSEMessage):
         block = event.data.get("content_block", {})
@@ -208,29 +191,22 @@ class StreamRenderer:
         delta = event.data.get("delta", {})
         dtype = delta.get("type", "")
         
-        from src.pt_output import emit, render_rich
         if dtype == "thinking_delta":
-            text = delta.get("thinking", "")
-            self._thinking_buffer += text
-            emit(f"\033[2;3m{text}\033[0m")  # dim italic reasoning
+            # Buffer reasoning but don't stream it raw — it's noise in the transcript.
+            self._thinking_buffer += delta.get("thinking", "")
 
         elif dtype == "text_delta":
-            text = delta.get("text", "")
-            self._text_buffer += text
-            # Stream the assistant's prose inside an accent block: a "▎ korgex"
-            # header on the first token, the accent bar continued on each new line.
-            # The sink pre-renders rich markup (the bar/label) to ANSI but passes
-            # plain token text straight through — so we don't run a full rich
-            # render per token (which would be slow and inject stray newlines).
-            if self._text_block is None:
-                from src.render import StreamBlock
+            # Buffer the reply; render it as clean markdown when the block closes
+            # (markdown can't be formatted mid-stream). A "responding…" spinner gives
+            # live feedback meanwhile, so the REPL never sits dead.
+            self._text_buffer += delta.get("text", "")
+            if self._respond_spinner is None:
+                try:
+                    self._respond_spinner = Spinner("responding…")
+                    self._respond_spinner.__enter__()
+                except Exception:
+                    self._respond_spinner = None
 
-                def _sink(s: str):
-                    emit(render_rich(s).rstrip("\n") if "[" in s else s)
-
-                self._text_block = StreamBlock("assistant", label="korgex", sink=_sink)
-            self._text_block.feed(text)
-            
         elif dtype == "input_json_delta":
             partial = delta.get("partial_json", "")
             if partial and self._current_tool:
@@ -260,30 +236,30 @@ class StreamRenderer:
             pass
 
     def _on_content_block_stop(self, event: SSEMessage):
-        # Close the assistant accent block (emits its trailing newline) so the
-        # next block/tool line starts clean; reset for the next turn.
-        if self._text_block is not None:
-            self._maybe_markdown(self._text_block)
-            self._text_block.close()
-            self._text_block = None
-        if self._thinking_buffer:
-            from src.pt_output import emit
-            emit("\n")  # newline after a thinking block
+        # Stop the responding spinner, then render the buffered reply as clean
+        # markdown (bold, lists, fenced code w/ highlighting, wrapped) under a single
+        # "▎ korgex" header — far more readable than a raw token stream.
+        if self._respond_spinner is not None:
+            try:
+                self._respond_spinner.__exit__(None, None, None)
+            except Exception:
+                pass
+            self._respond_spinner = None
+        if self._text_buffer.strip():
+            try:
+                from src import render as _R
+                from src.pt_output import emit, render_rich
+                emit("\n" + render_rich("[bold #a5de67]▎ korgex[/bold #a5de67]").rstrip("\n") + "\n")
+                emit(_R.render_markdown(self._text_buffer).rstrip("\n") + "\n")
+            except Exception:
+                from src.pt_output import emit
+                emit("\n" + self._text_buffer.strip() + "\n")
         self._thinking_buffer = ""
         self._text_buffer = ""
     
     def _on_message_delta(self, event: SSEMessage):
-        stop_reason = event.data.get("delta", {}).get("stop_reason", "")
-        usage = event.data.get("usage", {})
-        output_tokens = usage.get("output_tokens", 0)
-        
-        if stop_reason == "tool_use":
-            # Tool was called — show compact result
-            pass
-        elif stop_reason == "end_turn":
-            console.print()
-            if output_tokens:
-                console.print(f"[dim]━━━ {output_tokens} tok ━━━[/dim]")
+        # Quiet — no "━━━ N tok ━━━" footer; keep the reply clean.
+        return
     
     def _on_message_stop(self, event: SSEMessage):
         # Clear any lingering tool status
