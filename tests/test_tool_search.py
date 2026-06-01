@@ -160,7 +160,7 @@ def test_loop_refreshes_tools_after_toolsearch(monkeypatch, tmp_path):
             [],
         ])
 
-        def fake_call(client, messages, tools_payload, system_prompt=None):
+        def fake_call(client, messages, tools_payload, system_prompt=None, system_volatile=None):
             seen_tool_names.append({t["name"] for t in tools_payload})
             class R: pass
             r = R(); r._calls = next(turns); r.usage = None
