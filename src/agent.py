@@ -174,6 +174,12 @@ class KorgexAgent:
         # recorded to the ledger; an approved edit in an isolated worktree is
         # checkpointed-before-mutation (revertable). $KORGEX_EDIT_POLICY overrides.
         self.edit_policy = (os.environ.get("KORGEX_EDIT_POLICY") or _EP.WORKSPACE).strip().lower()
+        # Plan mode (read-only until approved): when active, only reads/searches and
+        # writes to the plan file are allowed; all other side-effecting tools are
+        # blocked. Toggled on by `mode == "plan"` or the REPL /plan command; the
+        # plan file defaults to PLAN.md in the repo root.
+        self.plan_mode_active = (self.mode == "plan")
+        self.plan_path = os.path.join(self.repo_root or ".", "PLAN.md")
         # Optional confirmer(path)->bool for interactive approval; None → the
         # headless fail-safe (sensitive blocked; ordinary outside-workspace
         # proceeds-and-records so automation isn't broken).
@@ -756,6 +762,15 @@ class KorgexAgent:
                         messages.append(self._tool_result_turn(call["id"], gr_block))
                         continue  # the agent can't edit its own guardrails
 
+                    # ── Plan mode (read-only until approved) ─────────────────
+                    # While planning, only reads/searches + writing the plan file
+                    # are allowed; everything side-effecting is blocked so the
+                    # approach gets approved before any costly/irreversible work.
+                    pm_block = self._plan_mode_block(call, korg, llm_seq)
+                    if pm_block is not None:
+                        messages.append(self._tool_result_turn(call["id"], pm_block))
+                        continue  # blocked: read-only plan mode
+
                     # ── Edit-approval policy + checkpoint-before-mutation ────
                     # Consult the policy before any file-mutating tool; the gate
                     # records its own verdict event and snapshots the workspace
@@ -977,6 +992,29 @@ class KorgexAgent:
                 "reason": f"{path} is a protected guardrail file (Gate G)",
             }
         return None
+
+    def _plan_mode_block(self, call: dict, korg, llm_seq):
+        """Plan-mode read-only gate. When `self.plan_mode_active`, block any
+        side-effecting tool except writing the plan file, recording the refusal to
+        the ledger. Returns a block-result dict if refused, else None (inactive or
+        read-only tool → passes straight through)."""
+        if not self.plan_mode_active:
+            return None
+        from src import plan_mode as _PM
+        block = _PM.is_blocked(call.get("name"), call.get("args") or {}, self.plan_path)
+        if block is None:
+            return None
+        korg.record_tool_call(
+            tool_name="plan_mode.block",
+            args={"tool": call.get("name")},
+            result={"verdict": "PLAN_MODE_READONLY", "reason": block["reason"]},
+            success=False, duration_ms=0, triggered_by=llm_seq,
+        )
+        return block
+
+    def approve_plan(self):
+        """Exit plan mode → execution is now allowed (the user approved the plan)."""
+        self.plan_mode_active = False
 
     def _edit_policy_block(self, call: dict, korg, llm_seq):
         """Edit-approval gate. For a file-mutating tool: consult the policy, record

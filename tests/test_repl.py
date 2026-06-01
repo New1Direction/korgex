@@ -52,3 +52,11 @@ def test_leading_slash_in_a_sentence_is_still_a_turn_only_if_spaced():
     # A real slash command is the first token; "/foo" alone is a command attempt,
     # but text that merely contains a slash mid-line is a turn.
     assert R.parse_repl_input("what does /etc/hosts do").kind == "turn"
+
+
+def test_slash_plan_parses():
+    assert R.parse_repl_input("/plan").kind == "plan"
+    assert R.parse_repl_input("/plan").arg is None
+    assert R.parse_repl_input("/plan on").kind == "plan"
+    assert R.parse_repl_input("/plan on").arg == "on"
+    assert R.parse_repl_input("/plan approve").arg == "approve"
