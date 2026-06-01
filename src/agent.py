@@ -321,6 +321,37 @@ class KorgexAgent:
             self._session = InteractiveSession()
         return self._session
 
+    def _thinking(self):
+        """A 'thinking…' spinner for the silent gap before the first token. Returns
+        a context manager yielding a one-shot ``stop()`` the stream calls when its
+        first event arrives. No-op when not interactive (tests/pipes)."""
+        agent = self
+
+        class _Think:
+            def __enter__(self):
+                self._sp = None
+                if agent.interactive:
+                    try:
+                        from src.interactive import Spinner
+                        self._sp = Spinner("thinking…")
+                        self._sp.__enter__()
+                    except Exception:
+                        self._sp = None
+                return self.stop
+
+            def stop(self):
+                if self._sp is not None:
+                    try:
+                        self._sp.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                    self._sp = None
+
+            def __exit__(self, *a):
+                self.stop()
+
+        return _Think()
+
     def _load_mcp_servers(self) -> int:
         """Boot every MCP server in mcp.json and register their tools into USER_TOOLS.
 
@@ -453,11 +484,15 @@ class KorgexAgent:
                 model=self.model, messages=messages, max_tokens=max_tokens, **extra,
             )
 
-        # Interactive streaming paths
+        # Interactive streaming paths. A "thinking…" spinner covers the silent
+        # gap between submit and the first token (model latency + network), then
+        # is cleared the instant output starts — so the REPL never sits dead.
         if self.interactive and self.provider == "anthropic":
-            return self._call_anthropic_streaming(client, messages, tools, sp)
+            with self._thinking() as think:
+                return self._call_anthropic_streaming(client, messages, tools, sp, think)
         if self.interactive and self.provider == "openai":
-            return self._call_openai_streaming(client, messages, tools)
+            with self._thinking() as think:
+                return self._call_openai_streaming(client, messages, tools, think)
 
         # Non-streaming
         if self.provider == "anthropic":
@@ -471,7 +506,7 @@ class KorgexAgent:
         )
 
     def _call_anthropic_streaming(self, client, messages: list, tools: list,
-                                  system_prompt: str = None):
+                                  system_prompt: str = None, on_first=None):
         """Stream Anthropic messages through the InteractiveSession renderer."""
         from src.interactive import SSEMessage, SSEEvent
         session = self._get_session()
@@ -481,6 +516,8 @@ class KorgexAgent:
             messages=messages, tools=tools, max_tokens=4096,
         ) as stream:
             for event in stream:
+                if on_first is not None:
+                    on_first(); on_first = None  # first event → clear the thinking spinner
                 ev_type = getattr(event, "type", None)
                 if not ev_type:
                     continue
@@ -498,7 +535,7 @@ class KorgexAgent:
             # get_final_message gives us the same shape as messages.create()
             return stream.get_final_message()
 
-    def _call_openai_streaming(self, client, messages: list, tools: list):
+    def _call_openai_streaming(self, client, messages: list, tools: list, on_first=None):
         """Stream OpenAI/OpenRouter chunks; render text live; accumulate tool calls.
 
         Returns a stub object shaped like a non-streamed ChatCompletion so the
@@ -518,6 +555,8 @@ class KorgexAgent:
         )
 
         for chunk in stream:
+            if on_first is not None:
+                on_first(); on_first = None  # first chunk → clear the thinking spinner
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
