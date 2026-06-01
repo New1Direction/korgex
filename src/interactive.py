@@ -37,7 +37,9 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-console = Console()
+# force_terminal so rich still emits color when stdout is wrapped by
+# prompt_toolkit's patch_stdout (which makes the stream look non-tty otherwise).
+console = Console(force_terminal=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -205,16 +207,18 @@ class StreamRenderer:
         delta = event.data.get("delta", {})
         dtype = delta.get("type", "")
         
+        from src.pt_output import emit
         if dtype == "thinking_delta":
             text = delta.get("thinking", "")
             self._thinking_buffer += text
-            # Render thinking in dimmed gray, inline
-            console.print(Text(text, style="dim italic"), end="")
-            
+            # Thinking in dim italic — routed through prompt_toolkit so it renders
+            # cleanly above the pinned input under patch_stdout.
+            emit(f"\033[2;3m{text}\033[0m")
+
         elif dtype == "text_delta":
             text = delta.get("text", "")
             self._text_buffer += text
-            console.print(text, end="")
+            emit(text)  # streamed token → prompt_toolkit ANSI sink (not raw stdout)
             
         elif dtype == "input_json_delta":
             partial = delta.get("partial_json", "")
@@ -475,19 +479,18 @@ class Spinner:
 
     @staticmethod
     def _clear_line():
-        import sys
-        sys.stdout.write("\r\033[2K")  # carriage return + erase the whole line
-        sys.stdout.flush()
+        from src.pt_output import emit
+        emit("\r\033[2K")  # carriage return + erase the whole line
 
     def _spin(self):
-        import sys
+        from src.pt_output import emit
         while not self._stop:
             char = self.SPINNER_CHARS[self._spin_idx % len(self.SPINNER_CHARS)]
             self._spin_idx += 1
-            # Raw stdout + \r overwrites the SAME line in place. (rich's
-            # console.print mangles \r, which made frames concatenate.)
-            sys.stdout.write(f"\r\033[2K\033[2m{char} {self.message}\033[0m")
-            sys.stdout.flush()
+            # Route the in-place spinner frame through prompt_toolkit's ANSI
+            # renderer so patch_stdout's StdoutProxy doesn't swallow the \r/escapes
+            # (which made frames concatenate). \r + ESC[2K overwrites one line.
+            emit(f"\r\033[2K\033[2m{char} {self.message}\033[0m")
             time.sleep(0.08)
         self._clear_line()
     
