@@ -394,6 +394,15 @@ class KorgexAgent:
         if not configs:
             return 0
 
+        # Apply any OAuth tokens stored by `korgex mcp login` as Bearer headers, so
+        # authenticated remote servers connect without a manually-pasted token
+        # (auto-refreshed when near expiry). Best-effort.
+        try:
+            from src import mcp_oauth
+            mcp_oauth.apply_stored_tokens(configs)
+        except Exception:
+            pass
+
         # Route every server through the namespaced router: tools register as
         # `server__tool`, so two servers exposing the same tool name no longer
         # shadow each other. One server failing to boot leaves the rest up.

@@ -557,11 +557,12 @@ def cmd_mcp():
     argv = sys.argv[1:]
     toks = argv[argv.index("mcp") + 1:] if "mcp" in argv else []
     if not toks or toks[0] in ("-h", "--help"):
-        print("  usage: korgex mcp <list|add|remove> …")
+        print("  usage: korgex mcp <list|catalog|add|remove|login> …")
+        print("    korgex mcp catalog")
         print("    korgex mcp list")
-        print("    korgex mcp add <name> --command npx --args '-y pkg' [--env K=V]")
-        print("    korgex mcp add <name> --url https://host/mcp [--header 'Authorization: Bearer ${TOKEN}']")
-        print("    korgex mcp remove <name>")
+        print("    korgex mcp add <name|alias> [--global] [--command … --args … | --url … --header …]")
+        print("    korgex mcp remove <name> [--global]")
+        print("    korgex mcp login <name>   # OAuth a remote server in the browser")
         return 0 if toks else 1
 
     import os
@@ -583,6 +584,29 @@ def cmd_mcp():
         for r in rows:
             print(f"  {r['name']:<22} [{r['transport']}]  {r['target']}")
         return 0
+    if action == "login":
+        names = [t for t in rest if not t.startswith("-")]
+        if not names:
+            print("  usage: korgex mcp login <name>")
+            return 1
+        name = names[0]
+        # find the server's url (configured first, then catalog)
+        from src import mcp_catalog, mcp_config, mcp_oauth
+        servers = mcp_config.load_servers(cwd=os.getcwd())
+        url = servers[name].url if name in servers and servers[name].url else None
+        if not url:
+            preset = mcp_catalog.resolve(name)
+            url = (preset or {}).get("url")
+        if not url:
+            print(f"  '{name}' isn't a known remote (http) server. Add it first: "
+                  f"korgex mcp add {name} --url <url> [--global]")
+            return 1
+        res = mcp_oauth.login(name, url)
+        if res.get("ok"):
+            print(f"  ✓ logged in to {name} — token stored; it'll be applied automatically")
+            return 0
+        print(f"  login failed: {res.get('error')}")
+        return 1
     if action == "remove":
         names = [t for t in rest if not t.startswith("-")]
         if not names:
