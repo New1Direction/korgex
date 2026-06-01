@@ -184,6 +184,14 @@ class Repl:
         raw \\r to overwrite in place, streamed content goes through the ANSI sink.
         (No patch_stdout here: it does nothing useful mid-turn and strips the \\r.)"""
         agent = self._ensure_agent()
+        # Echo the user's turn as a ▎ you block so the exchange reads cleanly in
+        # scrollback (your turn, then the reply), like the reference TUIs.
+        try:
+            from src import render as _R
+            from src.pt_output import emit, render_rich
+            emit("\n" + render_rich(_R.echo_user(text)).rstrip("\n") + "\n")
+        except Exception:
+            pass
         try:
             agent.run_task(text)
             print()  # newline so the next turn's input starts clean

@@ -597,6 +597,7 @@ class KorgexAgent:
         try:
             r = session.renderer
             if getattr(r, "_text_block", None) is not None:
+                r._maybe_markdown(r._text_block)
                 r._text_block.close()
                 r._text_block = None
         except Exception:
