@@ -98,6 +98,8 @@ def tool_read_file(filepath: str, context: dict = None):
     try:
         with open(full_path, "r") as f:
             content = f.read()
+        from src import edit_freshness
+        edit_freshness.record_read(full_path)  # baseline for stale-file detection
         return {"content": content, "filepath": filepath, "size": len(content)}
     except Exception as e:
         return {"error": str(e)}
@@ -110,10 +112,15 @@ def tool_read_file(filepath: str, context: dict = None):
 def tool_write_file(filepath: str, content: str, context: dict = None):
     cwd = context.get("repo_root") if context else os.getcwd()
     full_path = os.path.join(cwd, filepath)
+    from src import edit_freshness
+    status, reason = edit_freshness.check_fresh(full_path)
+    if status == "stale":
+        return {"error": reason, "verdict": "stale_file"}
     os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
     try:
         with open(full_path, "w") as f:
             f.write(content)
+        edit_freshness.record_read(full_path)  # our write is the new baseline
         return {"result": "File written successfully", "filepath": filepath, "size": len(content)}
     except Exception as e:
         return {"error": str(e)}
@@ -129,40 +136,56 @@ def tool_replace_with_git_merge_diff(filepath: str, merge_diff: str, context: di
     full_path = os.path.join(cwd, filepath)
     if not os.path.isfile(full_path):
         return {"error": f"File does not exist: {filepath}"}
-    
+
+    from src import edit_freshness
+    status, reason = edit_freshness.check_fresh(full_path)
+    if status == "stale":
+        return {"error": reason, "verdict": "stale_file"}
+
     with open(full_path, "r") as f:
         content = f.read()
-    
+
     # Parse SEARCH/REPLACE blocks
     blocks = merge_diff.split("<<<<<<< SEARCH")
     if len(blocks) < 2:
         return {"error": "No SEARCH blocks found. Use <<<<<<< SEARCH / ======= / >>>>>>> REPLACE format."}
     
+    from src.fuzzy_patch import find_and_replace
+
     modified = content
     changes = 0
-    
+    fuzzy_notes = []
+
     for block in blocks[1:]:
         if "=======" not in block:
             continue
         if ">>>>>>> REPLACE" not in block:
             continue
-        
+
         search_part = block.split("=======")[0].strip()
         replace_part = block.split("=======")[1].split(">>>>>>> REPLACE")[0].strip()
-        
-        if search_part in modified:
-            modified = modified.replace(search_part, replace_part, 1)
-            changes += 1
-        else:
-            return {"error": f"SEARCH block not found in file:\n{search_part[:200]}"}
-    
+
+        # Exact first, then whitespace-tolerant — an edit shouldn't fail over a few
+        # spaces of indent drift. Never similarity-guesses (could edit the wrong code).
+        modified, status, detail = find_and_replace(modified, search_part, replace_part)
+        if status in ("not-found", "empty-search"):
+            return {"error": "SEARCH block not found (exact or whitespace-tolerant). "
+                             f"Re-Read the file and copy the exact text:\n{search_part[:200]}"}
+        changes += 1
+        if status != "exact":
+            fuzzy_notes.append(detail or status)
+
     if changes == 0:
         return {"error": "No changes applied. Check SEARCH/REPLACE format."}
-    
+
     with open(full_path, "w") as f:
         f.write(modified)
-    
-    return {"result": f"Applied {changes} change(s)", "filepath": filepath}
+    edit_freshness.record_read(full_path)  # our edit is the new baseline
+
+    result = {"result": f"Applied {changes} change(s)", "filepath": filepath}
+    if fuzzy_notes:
+        result["note"] = "whitespace-tolerant match used: " + "; ".join(fuzzy_notes)
+    return result
 
 
 @register_tool("delete_file", "Deletes the specified file.", [
