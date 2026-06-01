@@ -695,6 +695,11 @@ class KorgexAgent:
         self._bus_deliver_initial(messages, korg, prompt_seq)
 
         mutated = False  # did any file-mutating tool run? gates the test-gate
+        # Loop safety rails: stop the agent retrying the same failing call forever,
+        # and nudge it when it narrates an action without calling a tool.
+        from src import loop_guard as _LG
+        _repeat_guard = _LG.RepeatGuard()
+        _intent_guard = _LG.IntentGuard()
         try:
             for i in range(max_iter):
                 # ── Auto-compaction: if the transcript is nearing the model's
@@ -733,6 +738,20 @@ class KorgexAgent:
                 # ───────────────────────────────────────────────────────────
 
                 if not tool_calls:
+                    # Tool-intent rail: the model narrated an action ("let me
+                    # search…") but called no tool. Nudge it to actually act
+                    # (capped) instead of accepting a non-answer as the finish.
+                    if output_schema is None and _LG.looks_like_unacted_intent(round_text):
+                        nudge = _intent_guard.nudge()
+                        if nudge is not None:
+                            messages.append(self._assistant_turn(response))
+                            messages.append({"role": "user", "content": nudge})
+                            korg.record_tool_call(
+                                tool_name="loop_guard.intent_nudge",
+                                args={}, result={"text": round_text[:200]},
+                                success=True, duration_ms=0, triggered_by=llm_seq,
+                            )
+                            continue  # give it another turn to actually call the tool
                     # Schema-constrained finish: do a final structured pass so
                     # the answer is a validated object on the ledger, not prose.
                     if output_schema is not None:
@@ -849,6 +868,25 @@ class KorgexAgent:
                     _success = "error" not in tool_result if isinstance(tool_result, dict) else True
                     if call["name"] in ("Write", "Edit", "Bash") and _success:
                         mutated = True  # a file-mutating tool ran → arm the test gate
+
+                    # ── Repeat/doom rail: stop retrying the same failing call ──
+                    _rg = _repeat_guard.check(call["name"], call.get("args") or {},
+                                              failed=not _success)
+                    if _rg == "force":
+                        korg.record_tool_call(
+                            tool_name="loop_guard.repeat_block",
+                            args={"tool": call["name"]},
+                            result={"verdict": "REPEAT_LIMIT",
+                                    "reason": "same failing call repeated too many times"},
+                            success=False, duration_ms=0, triggered_by=llm_seq,
+                        )
+                        tool_result = {"error": "repeat limit — this exact call has failed "
+                                       "several times. Stop retrying it; change your approach "
+                                       "or report what's blocking you.",
+                                       **(tool_result if isinstance(tool_result, dict) else {})}
+                    elif _rg.startswith("warn"):
+                        if isinstance(tool_result, dict):
+                            tool_result = {**tool_result, "_loop_guard": _rg}
                     korg.record_tool_call(
                         tool_name=call["name"],
                         args=call["args"],
