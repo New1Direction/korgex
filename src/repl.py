@@ -235,8 +235,20 @@ class Repl:
         return self._session().prompt("› ", bottom_toolbar=self._bottom_toolbar)
 
     def run(self):
-        """The REPL loop. Lands here from a bare `korgex` on a TTY. Input is
-        bottom-anchored (prompt_toolkit); output scrolls above it."""
+        """Start the REPL. Prefer the bottom-pinned inline TUI (input fixed on the
+        last row, output scrolling above in preserved scrollback); fall back to the
+        simple PromptSession loop if that stack isn't available."""
+        try:
+            from src import tui_app
+            if tui_app.is_available():
+                tui_app.run_app(self)   # paints its own banner + bottom-pinned input
+                return
+        except Exception:
+            pass  # any TUI failure → fall back to the simple loop below
+        self._run_simple()
+
+    def _run_simple(self):
+        """Fallback loop: inline PromptSession (input wherever the cursor is)."""
         self._banner()
         while True:
             try:
