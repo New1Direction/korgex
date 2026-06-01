@@ -212,6 +212,34 @@ class Repl:
             version = "dev"
         banner.render(model=self.model, cwd=os.getcwd(), version=version,
                       configured=configured, out=self.out)
+        # Fill the space with a welcome dashboard: connected providers, available
+        # skills + MCP servers, and quick-start tips (real data, sections skipped
+        # when empty). Best-effort — never block startup.
+        if configured:
+            try:
+                from src import skills as _SK
+                reg = _SK.load_skills(_SK.default_skill_roots(os.getcwd()))
+                skills = [(n, reg.get(n).description) for n in reg.names()]
+                providers = [p.get("type") for p in self.cfg.providers]
+                banner.render_dashboard(model=self.model, cwd=os.getcwd(), version=version,
+                                        providers=providers, skills=skills,
+                                        mcps=self._mcp_names(), out=self.out)
+            except Exception:
+                pass
+
+    def _mcp_names(self) -> list:
+        """Configured MCP server names from mcp.json (best-effort, empty on miss)."""
+        import json
+        import os
+        for path in ("mcp.json", os.path.join(os.getcwd(), "mcp.json")):
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+                servers = data.get("mcpServers") or data.get("servers") or {}
+                return list(servers.keys())
+            except (FileNotFoundError, ValueError, OSError):
+                continue
+        return []
 
     def _bottom_toolbar(self):
         """The status line pinned to the BOTTOM of the window: model · plan-state.

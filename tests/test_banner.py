@@ -42,3 +42,38 @@ def test_startup_text_assembles_all_parts():
 def test_startup_text_unconfigured_prompts_setup():
     text = B.startup_text(model="m", cwd="/tmp", version="1", configured=False)
     assert "setup" in text.lower()  # nudges `korgex setup` when no provider yet
+
+
+# ── welcome dashboard: fills the space with skills / MCPs / providers / tips ───
+
+def test_dashboard_lists_providers_and_model():
+    text = B.dashboard(model="gpt-4o", cwd="/tmp/p", version="1",
+                       providers=["openrouter"], skills=[], mcps=[])
+    assert "gpt-4o" in text
+    assert "openrouter" in text
+
+
+def test_dashboard_shows_skills_when_present():
+    text = B.dashboard(model="m", cwd="/p", version="1", providers=["anthropic"],
+                       skills=[("fix-flaky", "find and fix flaky tests")], mcps=[])
+    assert "fix-flaky" in text and "flaky tests" in text
+
+
+def test_dashboard_shows_mcps_when_present():
+    text = B.dashboard(model="m", cwd="/p", version="1", providers=["anthropic"],
+                       skills=[], mcps=["github", "filesystem"])
+    assert "github" in text and "filesystem" in text
+
+
+def test_dashboard_gives_starter_hint_when_empty():
+    # No skills, no MCPs → don't show empty sections; nudge how to add them.
+    text = B.dashboard(model="m", cwd="/p", version="1", providers=["anthropic"],
+                       skills=[], mcps=[])
+    assert "skill" in text.lower() or "tip" in text.lower()  # a helpful nudge, not blank
+
+
+def test_dashboard_always_has_quick_tips():
+    text = B.dashboard(model="m", cwd="/p", version="1", providers=["anthropic"],
+                       skills=[], mcps=[])
+    # at least one actionable starter tip (a slash command or "ask me to…")
+    assert "/" in text
