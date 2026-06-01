@@ -921,8 +921,11 @@ def tool_bus_send(to, message, context=None):
     if not journal or not me:
         return {"error": "agent bus not configured (set KORG_BUS_JOURNAL and KORG_BUS_AGENT)"}
     try:
-        seq = bus.send(journal, me, to, str(message))
-        return {"sent": True, "seq": seq, "from": me, "to": to}
+        # Sign with this agent's bus identity if one is configured, so the
+        # recipient can prove the message really came from us (not an impostor).
+        key = os.environ.get("KORG_BUS_KEY")
+        seq = bus.send(journal, me, to, str(message), sign_with=key or None)
+        return {"sent": True, "seq": seq, "from": me, "to": to, "signed": bool(key)}
     except Exception as e:
         return {"error": f"bus send failed: {e}"}
 
@@ -938,6 +941,10 @@ def tool_bus_inbox(context=None):
         msgs = bus.inbox(journal, me)
         if msgs:
             bus.mark_read(journal, me, [m["seq"] for m in msgs])
-        return {"messages": [{"from": m["from"], "body": m["body"], "seq": m["seq"]} for m in msgs]}
+        # Surface per-message provenance: 'verified' tells the agent whether each
+        # sender's identity is a checkable signature vs. an unsigned (trust-flat)
+        # claim — so it can weight an instruction by whether it can prove the source.
+        return {"messages": [{"from": m["from"], "body": m["body"], "seq": m["seq"],
+                              "verified": bus.verify_message(m)} for m in msgs]}
     except Exception as e:
         return {"error": f"bus inbox failed: {e}"}

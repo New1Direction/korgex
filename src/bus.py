@@ -19,6 +19,7 @@ off the current tip.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 
@@ -27,6 +28,15 @@ from src.korg_ledger import LocalJournalClient
 MESSAGE = "agent_message"
 READ = "message_read"
 _SOURCE = "korg:bus"
+
+
+def message_digest(frm: str, to: str, body: str) -> str:
+    """SHA-256 (hex) over the canonical (from, to, body). This is what a sender
+    signs and a receiver re-checks, so the signature is bound to who-said-what-to-
+    whom — changing any field invalidates it."""
+    canon = json.dumps({"from": frm, "to": to, "body": body},
+                       sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canon.encode("utf-8")).hexdigest()
 
 
 def _client(journal_path: str) -> LocalJournalClient:
@@ -43,7 +53,27 @@ def _events(journal_path: str) -> list:
 def _as_msg(e: dict) -> dict:
     a = e.get("args") or {}
     return {"seq": e.get("seq_id"), "from": a.get("from"), "to": a.get("to"),
-            "team": a.get("team"), "body": a.get("body"), "in_reply_to": e.get("triggered_by")}
+            "team": a.get("team"), "body": a.get("body"), "in_reply_to": e.get("triggered_by"),
+            # provenance: present only on signed messages (None otherwise → unverified)
+            "pubkey": a.get("pubkey"), "sig": a.get("sig")}
+
+
+def verify_message(msg: dict, expected_pubkey: str | None = None) -> bool:
+    """Re-resolve a message's sender identity, per message, at receive time.
+
+    Returns True iff the message carries a signature that verifies over its own
+    (from, to, body) under its stated pubkey. If `expected_pubkey` is given (the
+    sender's KNOWN published key), the message's pubkey must also equal it — that's
+    what catches impersonation (a valid signature under the *wrong* key). An
+    unsigned message is never 'verified' (returns False)."""
+    pub, sig = msg.get("pubkey"), msg.get("sig")
+    if not pub or not sig:
+        return False
+    if expected_pubkey is not None and pub != expected_pubkey:
+        return False
+    from src import signing
+    digest = message_digest(msg.get("from"), msg.get("to"), msg.get("body"))
+    return signing.verify_tip(pub, digest, sig)
 
 
 def _all_messages(events: list) -> list:
@@ -57,12 +87,22 @@ def _read_seqs(events: list, agent: str) -> set:
 
 
 def send(journal_path: str, frm: str, to: str, body: str, *,
-         team: str | None = None, in_reply_to: int | None = None) -> int:
+         team: str | None = None, in_reply_to: int | None = None,
+         sign_with: str | None = None) -> int:
     """Append a message as a chained ledger event. Returns its seq_id. The body is
-    redacted of secrets and hash-linked into the tamper-evident chain on write."""
+    redacted of secrets and hash-linked into the tamper-evident chain on write.
+
+    With ``sign_with`` (the sender's Ed25519 private key) the message carries the
+    sender's pubkey + a signature over its (from, to, body) digest — so 'who sent
+    this' is a re-checkable signature, not a self-asserted name. Unsigned sends
+    still work (back-compat)."""
+    args = {"from": frm, "to": to, "team": team, "body": body}
+    if sign_with is not None:
+        from src import signing
+        args["pubkey"] = signing.public_of(sign_with)
+        args["sig"] = signing.sign_tip(sign_with, message_digest(frm, to, body))
     return _client(journal_path).record_tool_call(
-        MESSAGE, {"from": frm, "to": to, "team": team, "body": body}, {},
-        True, 0, triggered_by=in_reply_to)
+        MESSAGE, args, {}, True, 0, triggered_by=in_reply_to)
 
 
 def inbox(journal_path: str, agent: str) -> list:
