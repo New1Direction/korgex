@@ -154,6 +154,17 @@ class TestOpenAICacheExtra:
         assert PC.openai_cache_extra("openai", self.OA, "gpt-4o") == {}
 
 
+class TestOpenAITaskReminder:
+    def test_volatile_becomes_a_trailing_system_message(self):
+        # The task list rides as a trailing message — kept after the cached prefix
+        # so it steers the model without invalidating the cache.
+        assert PC.openai_task_reminder("DO X") == {"role": "system", "content": "DO X"}
+
+    def test_empty_volatile_is_none(self):
+        assert PC.openai_task_reminder("") is None
+        assert PC.openai_task_reminder(None) is None
+
+
 # ── agent wiring: the cache layer actually reaches the provider call ─────────
 
 class TestAgentWiring:
@@ -190,6 +201,19 @@ class TestAgentWiring:
         # gpt-4o auto-caches → leave it a plain string, add no extra fields
         assert kw["messages"][0] == {"role": "system", "content": "SYS"}
         assert "extra_body" not in kw
+
+    def test_openai_kwargs_appends_task_list_as_trailing_message(self, tmp_path):
+        # The known gap: on gpt-4o the task list never reached the model. It must
+        # ride as a TRAILING message (after the cached prefix) — present on the wire,
+        # but not baked into the stable system message that auto-caches.
+        a = KorgexAgent(repo_root=str(tmp_path), model="openai/gpt-4o", interactive=False)
+        a.provider = "openai"
+        a._base_url = self.OR
+        msgs = [{"role": "system", "content": "SYS"}, {"role": "user", "content": "hi"}]
+        kw = a._openai_cache_kwargs(msgs, [{"name": "t"}], volatile="ZZTASK do it")
+        assert kw["messages"][-1] == {"role": "system", "content": "ZZTASK do it"}
+        assert kw["messages"][0] == {"role": "system", "content": "SYS"}  # prefix unchanged
+        assert len(msgs) == 2  # the caller's history is never mutated
 
 
 # ── the core invariant: volatile content stays OUT of the cached prefix ──────
