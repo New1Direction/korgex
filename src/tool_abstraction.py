@@ -24,12 +24,28 @@ from typing import Any, Callable, Dict, Optional
 
 USER_TOOLS = {}
 
+# Tools the model can reach this turn even though they're "deferred": ToolSearch
+# stages a match here, and the agent includes it on the NEXT turn's tool list.
+# Lives at module scope (the registry is module-global); the agent clears it per run.
+_STAGED_TOOLS: set[str] = set()
+
+# Number of registered tools at/above which deferrable (MCP/plugin) tools flip to
+# "deferred" so they're discovered via ToolSearch instead of sent every turn.
+DEFER_THRESHOLD = int(os.environ.get("KORGEX_TOOL_DEFER_THRESHOLD", "60"))
+
+
 def register_user_tool(name: str, description: str, params: list[dict],
-                       handler_name: str = None, aliases: list[str] = None):
-    """Register a user-facing tool that routes to one or more internal handlers."""
+                       handler_name: str = None, aliases: list[str] = None,
+                       exposure: str = "direct"):
+    """Register a user-facing tool that routes to one or more internal handlers.
+
+    `exposure` ∈ {"direct","deferred","hidden"}: direct tools are always sent to
+    the model; deferred tools are found via ToolSearch; hidden are dispatch-only.
+    """
     USER_TOOLS[name] = {
         "name": name,
         "description": description,
+        "exposure": exposure,
         "input_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
@@ -269,6 +285,55 @@ def get_tool_names() -> list[str]:
     return list(USER_TOOLS.keys())
 
 
+# ── Tiered exposure: which tools the model actually sees this turn ────────────
+
+def visible_tool_names() -> list[str]:
+    """Names the model should be offered THIS turn: every non-deferred tool, plus
+    any deferred tool ToolSearch has staged. Below DEFER_THRESHOLD total tools,
+    deferral is disabled (the surface is small enough to send whole)."""
+    names = list(USER_TOOLS.keys())
+    defer_on = len(names) >= DEFER_THRESHOLD
+    out = []
+    for n in names:
+        t = USER_TOOLS[n]
+        exposure = t.get("exposure", "direct")
+        if exposure == "hidden":
+            continue
+        if exposure == "deferred" and defer_on and n not in _STAGED_TOOLS:
+            continue
+        out.append(n)
+    return out
+
+
+def stage_tools(names) -> None:
+    """Mark deferred tools as available on the next turn (ToolSearch matched them)."""
+    _STAGED_TOOLS.update(names)
+
+
+def clear_staged_tools() -> None:
+    """Reset staged deferred tools (the agent calls this at the start of a run)."""
+    _STAGED_TOOLS.clear()
+
+
+def tool_search(query: str, limit: int = 5) -> dict:
+    """Rank the DEFERRED tools against `query`, stage the matches so they're usable
+    next turn, and return their name+description for the model to read now."""
+    from src import tool_search as _ts
+    deferred = [
+        {"name": t["name"], "description": t.get("description", "")}
+        for t in USER_TOOLS.values()
+        if t.get("exposure") == "deferred"
+    ]
+    hits = _ts.rank(query, deferred, limit=limit)
+    stage_tools(h["name"] for h in hits)
+    return {
+        "query": query,
+        "matches": [{"name": h["name"], "description": h["description"][:200]} for h in hits],
+        "note": ("these tools are now available — call them directly on your next message"
+                 if hits else "no matching tools found"),
+    }
+
+
 # ── Router ──────────────────────────────────────────────────────────────
 # Maps model-facing user-facing tools → internal internal handlers.
 # Three pieces:
@@ -296,6 +361,9 @@ def register_mcp_tool(tool) -> None:
     USER_TOOLS[tool.name] = {
         "name": tool.name,
         "description": tool.description,
+        # MCP tools are deferrable: once the registry is large they flip to
+        # "deferred" and are discovered via ToolSearch instead of sent every turn.
+        "exposure": "deferred",
         "input_schema": tool.input_schema or {
             "type": "object", "properties": {}, "required": [],
         },
@@ -368,6 +436,11 @@ def route_tool_call(tool_name: str, params: dict, repo_root: str = None) -> dict
     `repo_root` is injected into the handler's context so file tools resolve
     relative to it (e.g. an isolated worktree). Defaults to the cwd.
     """
+    # ToolSearch is a meta-tool: it queries the deferred-tool index and stages
+    # matches for the next turn (handled in-process, not a file/MCP handler).
+    if tool_name == "ToolSearch":
+        return tool_search(params.get("query", ""), int(params.get("limit", 5) or 5))
+
     if tool_name in _MCP_TOOLS:
         try:
             from src.mcp_client import get_manager
