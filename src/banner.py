@@ -11,14 +11,19 @@ from __future__ import annotations
 
 import os
 
-# Block-letter "korgex" wordmark — korgex's own figlet-style design (no box, so
-# rows can't misalign), vendor-neutral.
+# Block-letter "KORGEX" wordmark — korgex's own design in heavy box-drawing
+# glyphs (██╗/╚═╝) so it reads with depth/shadow. Painted with a 3-tier gold→bronze
+# gradient in `render` (the rows map to _WORDMARK_TIERS) for the 3D look.
 _WORDMARK = r"""
- ██  ██  ██████  ██████   ██████  ██████ ██  ██
- ██ ██   ██  ██  ██  ██   ██      ██      ████
- ████    ██  ██  ██████   ██  ███ ████     ██
- ██ ██   ██  ██  ██  ██   ██   ██ ██      ████
- ██  ██  ██████  ██  ██   ██████  ██████ ██  ██""".strip("\n")
+██╗  ██╗ ██████╗ ██████╗  ██████╗ ███████╗██╗  ██╗
+██║ ██╔╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝╚██╗██╔╝
+█████╔╝ ██║   ██║██████╔╝██║  ███╗█████╗   ╚███╔╝
+██╔═██╗ ██║   ██║██╔══██╗██║   ██║██╔══╝   ██╔██╗
+██║  ██╗╚██████╔╝██║  ██║╚██████╔╝███████╗██╔╝ ██╗
+╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝""".strip("\n")
+
+# Per-row colors: bright gold at the top fading to bronze at the bottom → depth.
+_WORDMARK_TIERS = ["#ffd700", "#ffd700", "#ffbf00", "#f0a020", "#cd7f32", "#cd7f32"]
 
 _TAGLINE = "the cross-vendor coding agent — every model, one tool, provable"
 
@@ -40,6 +45,22 @@ def _short_cwd(cwd: str) -> str:
 def status_line(model: str, cwd: str, version: str) -> str:
     """One status line: model · cwd · version, dot-separated."""
     return f"model {model}  ·  {_short_cwd(cwd)}  ·  v{version}"
+
+
+def summary_line(skills: int, mcps: int, tools: int) -> str:
+    """The footer tally: '12 tools · 5 skills · 3 MCP servers · /help'."""
+    return f"{tools} tools · {skills} skills · {mcps} MCP servers · /help for commands"
+
+
+def categorize_skills(skills: list) -> dict:
+    """Group skills by their name prefix (``github-auth``/``github-codegen`` →
+    ``github``), so the welcome lists read as tidy categories like the reference
+    TUI. A bare name with no ``-`` lands in a ``general`` bucket, never dropped."""
+    groups: dict = {}
+    for name, _desc in skills:
+        cat = name.split("-", 1)[0] if "-" in name else "general"
+        groups.setdefault(cat, []).append(name)
+    return groups
 
 
 def hint_line() -> str:
@@ -96,46 +117,92 @@ def dashboard(model: str, cwd: str, version: str, *, providers: list,
     return "\n".join(L)
 
 
+# Small mascot — korgex's own ASCII (a stylized 'k' shield), left column of the panel.
+_MASCOT = r"""[#ffcf6b]    ▄▄▄▄▄    [/]
+[#ffcf6b]  ▟█▀▀▀█▙  [/]
+[#f0a020] ██  ▟█▘  [/]
+[#f0a020] ██ ▜█▖   [/]
+[#cd7f32] ▜█▄▄▄█▛  [/]
+[#cd7f32]   ▀▀▀▀▀   [/]"""
+
+
 def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
-                     mcps, out=None) -> None:
-    """Paint the welcome dashboard with rich color (sections dim, accents bright)."""
-    text = dashboard(model, cwd, version, providers=providers, skills=skills, mcps=mcps)
+                     mcps, tools: int = 0, out=None) -> None:
+    """Paint the welcome panel: a bordered box with a mascot column (left) and
+    categorized model/providers/skills/MCP lists (right), plus a summary footer —
+    the structured, framed look of a polished agent CLI. Falls back to the plain
+    `dashboard` text if rich isn't available."""
     try:
-        from rich.console import Console
+        from rich.console import Console, Group
+        from rich.panel import Panel
+        from rich.table import Table
         from rich.text import Text
+        from rich import box
+
         console = Console(file=out) if out is not None else Console()
-        for line in text.split("\n"):
-            stripped = line.strip()
-            if stripped in ("skills", "mcp servers", "try"):
-                console.print(Text(line, style="bold #ffcf6b"))  # section headers, amber
-            elif stripped.startswith("◆"):
-                console.print(Text(line, style="#a5de67"))        # skills, green
-            elif stripped.startswith("›"):
-                console.print(Text(line, style="dim"))            # tips, dim
-            else:
-                console.print(Text(line, style="#8a8f98"))        # meta, gray
+
+        # Right column: what's connected + available, grouped by category.
+        right = []
+        right.append(Text(f"model     {model}", style="#dde6ef"))
+        right.append(Text(f"cwd       {_short_cwd(cwd)}", style="#8a8f98"))
+        if providers:
+            right.append(Text(f"providers {' · '.join(providers)}", style="#5fd0ff"))
+        if mcps:
+            right.append(Text(""))
+            right.append(Text("MCP Servers", style="bold #ffcf6b"))
+            right.append(Text("  " + " · ".join(mcps), style="#a89bff"))
+        if skills:
+            right.append(Text(""))
+            right.append(Text("Available Skills", style="bold #ffcf6b"))
+            for cat, names in sorted(categorize_skills(skills).items()):
+                shown = ", ".join(names[:4])
+                more = f", +{len(names) - 4}" if len(names) > 4 else ""
+                right.append(Text.assemble((f"  {cat}: ", "#808a96"),
+                                           (shown + more, "#a5de67")))
+        right.append(Text(""))
+        right.append(Text("try", style="bold #ffcf6b"))
+        for tip in _TIPS:
+            right.append(Text(f"  › {tip}", style="dim"))
+        right.append(Text(""))
+        right.append(Text(summary_line(len(skills), len(mcps), tools), style="dim"))
+
+        grid = Table.grid(padding=(0, 3))
+        grid.add_column(vertical="top")   # mascot
+        grid.add_column(vertical="top")   # content
+        grid.add_row(Text.from_markup(_MASCOT), Group(*right))
+
+        title = f"korgex v{version} · cross-vendor coding agent"
+        console.print(Panel(grid, title=title, title_align="left",
+                            border_style="#46525f", box=box.ROUNDED, padding=(1, 2)))
         console.print()
     except Exception:
-        print(text, file=out)
+        print(dashboard(model, cwd, version, providers=providers, skills=skills, mcps=mcps),
+              file=out)
         print(file=out)
 
 
+def render_wordmark(console) -> None:
+    """Paint the wordmark with a per-row gold→bronze gradient — the depth/3D look.
+    Each line of _WORDMARK takes the matching color from _WORDMARK_TIERS."""
+    from rich.text import Text
+    rows = _WORDMARK.split("\n")
+    for i, row in enumerate(rows):
+        color = _WORDMARK_TIERS[min(i, len(_WORDMARK_TIERS) - 1)]
+        console.print(Text(row, style=f"bold {color}"))
+
+
 def render(model: str, cwd: str, version: str, configured: bool = True, out=None) -> None:
-    """Paint the banner with rich color (amber wordmark, dim status), falling back
-    to plain text if rich isn't importable or output isn't a console."""
+    """Paint the gradient wordmark + tagline + status, falling back to plain text
+    if rich isn't importable."""
     try:
         from rich.console import Console
         from rich.text import Text
         console = Console(file=out) if out is not None else Console()
-        wm = Text(_WORDMARK, style="bold yellow")
-        console.print(wm)
+        render_wordmark(console)
         console.print(Text(" " + _TAGLINE, style="italic dim"))
-        if configured:
-            console.print(Text(" " + status_line(model, cwd, version), style="dim"))
-        else:
+        if not configured:
             console.print(Text(" no model connected yet — run `korgex setup` to connect a provider",
                                style="yellow"))
-        console.print(Text(" " + hint_line(), style="dim"))
         console.print()
     except Exception:
         print(startup_text(model, cwd, version, configured), file=out)

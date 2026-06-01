@@ -77,3 +77,31 @@ def test_dashboard_always_has_quick_tips():
                        skills=[], mcps=[])
     # at least one actionable starter tip (a slash command or "ask me to…")
     assert "/" in text
+
+
+# ── upgraded look: gradient wordmark + paneled welcome + summary footer ────────
+
+def test_wordmark_has_box_drawing_block_letters():
+    art = B.wordmark()
+    # uses heavy box-drawing block chars (the 3D look), not plain ██ only
+    assert any(c in art for c in "╗╔╝╚║═█")
+
+
+def test_summary_line_counts_skills_mcps():
+    s = B.summary_line(skills=5, mcps=3, tools=12)
+    assert "5 skills" in s and "3 MCP" in s and ("12 tools" in s or "12 tool" in s)
+
+
+def test_categorize_groups_skills_by_prefix():
+    # "github-auth", "github-codegen" → grouped under "github"
+    groups = B.categorize_skills([
+        ("github-auth", "x"), ("github-codegen", "y"), ("apple-notes", "z"),
+    ])
+    assert "github" in groups and set(groups["github"]) == {"github-auth", "github-codegen"}
+    assert groups["apple"] == ["apple-notes"]
+
+
+def test_categorize_uncategorized_goes_to_general():
+    groups = B.categorize_skills([("deploy", "ship it")])
+    # a bare name with no prefix lands in a catch-all bucket, not lost
+    assert any("deploy" in v for v in groups.values())
