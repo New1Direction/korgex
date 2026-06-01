@@ -59,6 +59,67 @@ def startup_text(model: str, cwd: str, version: str, configured: bool = True) ->
     return "\n".join(parts)
 
 
+_TIPS = [
+    "ask me to build, fix, or explain anything in this repo",
+    "/plan — I'll propose a plan read-only before touching files",
+    "/model — switch models mid-session (any provider)",
+    "drop a SKILL.md in .korgex/skills to teach me a reusable workflow",
+]
+
+
+def dashboard(model: str, cwd: str, version: str, *, providers: list,
+              skills: list, mcps: list) -> str:
+    """The welcome dashboard that fills the screen on startup: what's connected
+    (model · providers), what's available (skills · MCP servers), and quick-start
+    tips. Empty sections are skipped — no blank 'Skills: (none)' noise — but a tip
+    always nudges how to add them. Plain text; `render` paints it with color."""
+    L = []
+    L.append(f"  model    {model}")
+    L.append(f"  cwd      {_short_cwd(cwd)}")
+    if providers:
+        L.append(f"  providers {' · '.join(providers)}")
+    L.append("")
+
+    if skills:
+        L.append("  skills")
+        for name, desc in skills[:6]:
+            L.append(f"    ◆ {name} — {desc}")
+        L.append("")
+    if mcps:
+        L.append("  mcp servers")
+        L.append("    " + " · ".join(mcps))
+        L.append("")
+
+    L.append("  try")
+    for tip in _TIPS:
+        L.append(f"    › {tip}")
+    return "\n".join(L)
+
+
+def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
+                     mcps, out=None) -> None:
+    """Paint the welcome dashboard with rich color (sections dim, accents bright)."""
+    text = dashboard(model, cwd, version, providers=providers, skills=skills, mcps=mcps)
+    try:
+        from rich.console import Console
+        from rich.text import Text
+        console = Console(file=out) if out is not None else Console()
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if stripped in ("skills", "mcp servers", "try"):
+                console.print(Text(line, style="bold #ffcf6b"))  # section headers, amber
+            elif stripped.startswith("◆"):
+                console.print(Text(line, style="#a5de67"))        # skills, green
+            elif stripped.startswith("›"):
+                console.print(Text(line, style="dim"))            # tips, dim
+            else:
+                console.print(Text(line, style="#8a8f98"))        # meta, gray
+        console.print()
+    except Exception:
+        print(text, file=out)
+        print(file=out)
+
+
 def render(model: str, cwd: str, version: str, configured: bool = True, out=None) -> None:
     """Paint the banner with rich color (amber wordmark, dim status), falling back
     to plain text if rich isn't importable or output isn't a console."""
