@@ -116,3 +116,28 @@ def test_streamblock_close_is_idempotent_and_safe():
     sb = R.StreamBlock("assistant", label="korgex", sink=out.append)
     sb.feed("hi")
     sb.close(); sb.close()  # no crash, no double trailing garbage
+
+
+# ── input echo: the user's turn rendered as a ▎ you block ──────────────────────
+
+def test_echo_user_renders_a_you_block():
+    out = R.echo_user("add rate limiting")
+    assert "▎" in out and "you" in out.lower() and "add rate limiting" in out
+
+
+# ── markdown: final assistant prose rendered (headings/bold/code) ──────────────
+
+def test_render_markdown_returns_ansi_with_content():
+    s = R.render_markdown("# Title\n\nsome **bold** text")
+    assert "Title" in s
+    assert "bold" in s
+    assert "\033[" in s  # actually rendered (ANSI escapes present)
+
+
+def test_render_markdown_handles_code_block():
+    s = R.render_markdown("here:\n```python\nprint('hi')\n```")
+    assert "print" in s and "hi" in s
+
+
+def test_render_markdown_empty_is_safe():
+    assert R.render_markdown("") == "" or R.render_markdown("") is not None

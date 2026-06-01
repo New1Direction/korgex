@@ -240,10 +240,30 @@ class StreamRenderer:
                     partial=partial,
                 )
     
+    def _maybe_markdown(self, block):
+        """Opt-in ($KORGEX_MARKDOWN=1): after a reply streams plain, re-render it as
+        markdown (highlighted code, headings, lists) below a dim separator. Default
+        off — the live plain stream stays the canonical output, so we never fight
+        the scrollback by repainting mid-stream."""
+        import os
+        if os.environ.get("KORGEX_MARKDOWN", "").strip().lower() not in ("1", "true", "yes", "on"):
+            return
+        text = getattr(block, "buffer", "")
+        if not text or not any(m in text for m in ("```", "\n#", "\n- ", "\n* ", "**")):
+            return  # only re-render when there's actual markdown structure
+        try:
+            from src import render as _R
+            from src.pt_output import emit, render_rich
+            emit("\n" + render_rich("[dim]── formatted ──[/dim]") + "\n")
+            emit(_R.render_markdown(text).rstrip("\n") + "\n")
+        except Exception:
+            pass
+
     def _on_content_block_stop(self, event: SSEMessage):
         # Close the assistant accent block (emits its trailing newline) so the
         # next block/tool line starts clean; reset for the next turn.
         if self._text_block is not None:
+            self._maybe_markdown(self._text_block)
             self._text_block.close()
             self._text_block = None
         if self._thinking_buffer:

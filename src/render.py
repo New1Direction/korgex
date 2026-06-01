@@ -90,6 +90,33 @@ def tool_target(name: str, args: dict) -> str:
     return ""
 
 
+def echo_user(text: str, theme: Theme | None = None) -> str:
+    """Render the user's submitted turn as a ``▎ you`` block, so the conversation
+    reads as an exchange (your turn, then the reply) in scrollback."""
+    return block("user", text, label="you", theme=theme)
+
+
+def render_markdown(text: str, width: int | None = None) -> str:
+    """Render markdown (headings, bold, lists, fenced code with highlighting) to an
+    ANSI string. Used to re-render the assistant's COMPLETED prose — markdown can't
+    be rendered mid-stream (you can't format half a code fence), so the stream is
+    plain and this paints the final buffer. Falls back to the raw text on any error."""
+    if not text:
+        return ""
+    try:
+        import shutil
+        from io import StringIO
+        from rich.console import Console
+        from rich.markdown import Markdown
+        buf = StringIO()
+        w = width or shutil.get_terminal_size((80, 24)).columns
+        Console(file=buf, force_terminal=True, color_system="truecolor",
+                width=w).print(Markdown(text))
+        return buf.getvalue()
+    except Exception:
+        return text
+
+
 class StreamBlock:
     """Render streamed tokens as a live accent block: a ``▎ label`` header on the
     first chunk, then the accent bar continued at the start of every new line as
@@ -108,6 +135,7 @@ class StreamBlock:
         self._started = False
         self._at_line_start = True
         self._closed = False
+        self.buffer = ""  # raw text fed so far (for an optional markdown re-render)
 
     def _open(self):
         if self._started:
@@ -122,6 +150,7 @@ class StreamBlock:
         """Emit a streamed chunk, inserting the accent bar after each newline."""
         if self._closed or not chunk:
             return
+        self.buffer += chunk
         self._open()
         # Split keeping the structure: each '\n' starts a new bar-prefixed line.
         parts = chunk.split("\n")
