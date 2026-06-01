@@ -109,6 +109,15 @@ def openai_system_message(stable: str, *, cache: bool) -> dict:
     return {"role": "system", "content": stable}
 
 
+def openai_task_reminder(volatile: str | None) -> dict | None:
+    """The volatile task list as a TRAILING system message for the OpenAI-compatible
+    path. Trailing (after the cached prefix) means it steers the model every turn
+    without invalidating the cached system+tools prefix. ``None`` when empty."""
+    if not volatile:
+        return None
+    return {"role": "system", "content": volatile}
+
+
 def openai_cache_extra(provider: str, base_url: str | None, model: str | None) -> dict:
     """OpenRouter ``extra_body`` for caching. A top-level ``cache_control`` makes
     OpenRouter auto-advance the breakpoint as the conversation grows, so the

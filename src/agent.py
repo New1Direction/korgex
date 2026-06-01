@@ -519,19 +519,23 @@ class KorgexAgent:
         return {"system": PC.anthropic_system(sp, volatile),
                 "tools": PC.with_tool_cache(tools)}
 
-    def _openai_cache_kwargs(self, messages: list, tools: list) -> dict:
+    def _openai_cache_kwargs(self, messages: list, tools: list, volatile: str = None) -> dict:
         """OpenAI-compatible request shaped for prompt caching. On OpenRouter →
         manual-breakpoint model (Claude/Qwen) the stable system message gets a
         cache_control marker and a top-level breakpoint auto-advances over the
         growing history; auto-cache providers (and api.openai.com) are left plain.
-        stream_options/usage accounting is added by the caller."""
+        The volatile task list (if any) trails as the last message so it steers the
+        model without busting the cached prefix. stream_options/usage accounting is
+        added by the caller."""
         from src import prompt_cache as PC
-        call_messages = messages
-        if PC.should_mark(self.provider, self._base_url, self.model) and messages \
-                and messages[0].get("role") == "system" \
-                and isinstance(messages[0].get("content"), str):
-            call_messages = [PC.openai_system_message(messages[0]["content"], cache=True)] \
-                + list(messages[1:])
+        call_messages = list(messages)  # copy — never mutate the loop's history
+        if PC.should_mark(self.provider, self._base_url, self.model) and call_messages \
+                and call_messages[0].get("role") == "system" \
+                and isinstance(call_messages[0].get("content"), str):
+            call_messages[0] = PC.openai_system_message(call_messages[0]["content"], cache=True)
+        reminder = PC.openai_task_reminder(volatile)
+        if reminder is not None:
+            call_messages.append(reminder)
         kwargs = {"model": self.model, "messages": call_messages}
         # tools=None means "the caller supplies tools elsewhere" (the structured
         # path gets them from build_request_kwargs) — don't collide with that.
@@ -579,7 +583,8 @@ class KorgexAgent:
                     client, messages, tools, sp, think, volatile=system_volatile)
         if self.interactive and self.provider == "openai":
             with self._thinking() as think:
-                return self._call_openai_streaming(client, messages, tools, think)
+                return self._call_openai_streaming(
+                    client, messages, tools, think, volatile=system_volatile)
 
         # Non-streaming
         if self.provider == "anthropic":
@@ -588,7 +593,7 @@ class KorgexAgent:
                 **self._anthropic_cache_kwargs(sp, tools, system_volatile),
             )
         return client.chat.completions.create(
-            **self._openai_cache_kwargs(messages, tools), **gen,
+            **self._openai_cache_kwargs(messages, tools, volatile=system_volatile), **gen,
         )
 
     def _call_anthropic_streaming(self, client, messages: list, tools: list,
@@ -622,7 +627,8 @@ class KorgexAgent:
             # get_final_message gives us the same shape as messages.create()
             return stream.get_final_message()
 
-    def _call_openai_streaming(self, client, messages: list, tools: list, on_first=None):
+    def _call_openai_streaming(self, client, messages: list, tools: list, on_first=None,
+                               volatile: str = None):
         """Stream OpenAI/OpenRouter chunks; render text live; accumulate tool calls.
 
         Returns a stub object shaped like a non-streamed ChatCompletion so the
@@ -638,7 +644,7 @@ class KorgexAgent:
         usage = None  # final chunk carries token usage incl. cache hits
 
         stream = client.chat.completions.create(
-            **self._openai_cache_kwargs(messages, tools),
+            **self._openai_cache_kwargs(messages, tools, volatile=volatile),
             max_tokens=4096, stream=True,
             # Ask for a trailing usage chunk so we can see (and prove) cache hits.
             stream_options={"include_usage": True},
