@@ -759,6 +759,12 @@ class KorgexAgent:
                             client, messages, response, output_schema,
                             llm_seq, korg, i + 1, prompt_seq, sys_prompt,
                         ), korg, prompt_seq, mutated)
+                    # Diagnose the finish: a typed stall verdict, recorded to the
+                    # ledger. The high-value catch is `false_completion` — the model
+                    # said "done" on a task that asked for a change but mutated
+                    # nothing. (Diagnostic only; doesn't block the return.)
+                    self._record_stall_verdict(round_text, korg, llm_seq,
+                                               had_tool_call=False, mutated=mutated)
                     # Reuse round_text we already extracted above; saves a
                     # second pass over response.content.
                     return self._finish({
@@ -1070,6 +1076,35 @@ class KorgexAgent:
     def approve_plan(self):
         """Exit plan mode → execution is now allowed (the user approved the plan)."""
         self.plan_mode_active = False
+
+    # Action verbs that mark a task as expecting a deliverable (a change), vs. a
+    # read-only question. Used only to diagnose false-completion at the finish.
+    _ACTION_VERBS = ("add", "fix", "implement", "write", "create", "refactor",
+                     "edit", "change", "update", "remove", "delete", "rename",
+                     "build", "make", "migrate", "rewrite", "patch", "install")
+
+    def _record_stall_verdict(self, text: str, korg, llm_seq, *, had_tool_call: bool,
+                              mutated: bool) -> None:
+        """Classify the round's state and record a `stall.verdict` ledger event.
+        Diagnostic only — never blocks. The notable verdict is false_completion:
+        the model claimed done on a change-task but produced no deliverable."""
+        try:
+            from src import stall_classifier as _ST
+            intent = (self._active_intent or "").lower()
+            expects = any(v in intent for v in self._ACTION_VERBS)
+            verdict = _ST.classify(_ST.Signals(
+                text=text or "", had_tool_call=had_tool_call,
+                produced_artifact=mutated, expects_artifact=expects,
+            ))
+            korg.record_tool_call(
+                tool_name="stall.verdict",
+                args={"category": verdict.category},
+                result={"category": verdict.category, "reason": verdict.reason,
+                        "confidence": verdict.confidence, "stuck": verdict.is_stuck()},
+                success=not verdict.is_stuck(), duration_ms=0, triggered_by=llm_seq,
+            )
+        except Exception:
+            pass  # diagnostics must never break the loop
 
     def _maybe_compact(self, messages: list, korg, prompt_seq) -> list:
         """If the transcript is nearing the model's context window, compact it: the
