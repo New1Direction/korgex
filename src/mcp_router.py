@@ -55,28 +55,53 @@ class MCPRouter:
         self._reverse = (None, None)             # (asker, sampler) to apply to clients
 
     def connect_all(self, configs: dict) -> dict:
-        """Connect every configured server. Degrades gracefully: a server that
-        fails to connect is recorded in ``failed`` and skipped; the rest proceed."""
+        """Connect every configured server. Servers connect (and discover tools) in
+        PARALLEL — startup with several servers is bounded by the slowest one, not
+        their sum. Degrades gracefully: a server that fails is recorded in ``failed``
+        and skipped. Results are assembled in config order, so output is deterministic."""
+        from concurrent.futures import ThreadPoolExecutor
+
         connected, failed = [], {}
-        for name, config in configs.items():
-            if name in self._clients:
-                # Already live (e.g. agent rebuilt on /clear) — don't re-spawn.
-                connected.append(name)
-                continue
+        pending = [(n, c) for n, c in configs.items() if n not in self._clients]
+
+        def _connect_one(name, config):
             client = self._client_factory(config)
-            result = client.connect()
-            if isinstance(result, dict) and result.get("error"):
-                failed[name] = result["error"]
-                continue
+            res = client.connect()
+            if isinstance(res, dict) and res.get("error"):
+                return client, res["error"], []
             asker, sampler = self._reverse
             if asker is not None or sampler is not None:
                 try:
                     client.set_reverse_handlers(asker=asker, sampler=sampler)
                 except Exception:
                     pass
+            return client, None, list(client.discover_tools())   # discover in the worker too
+
+        results = {}
+        if pending:
+            with ThreadPoolExecutor(max_workers=min(8, len(pending))) as ex:
+                futs = {ex.submit(_connect_one, n, c): n for n, c in pending}
+                for fut in futs:
+                    name = futs[fut]
+                    try:
+                        results[name] = fut.result()
+                    except Exception as e:
+                        results[name] = (None, f"{type(e).__name__}: {e}", [])
+
+        # assemble in CONFIG order (deterministic) — no network here, just registration
+        for name in configs:
+            if name in self._clients:
+                connected.append(name)               # already live (e.g. /clear rebuild)
+                continue
+            if name not in results:
+                continue
+            client, err, tools = results[name]
+            if err or client is None:
+                failed[name] = err or "connect failed"
+                continue
             self._clients[name] = client
             connected.append(name)
-            for t in client.discover_tools():
+            for t in tools:
                 ns = namespaced_name(name, t.name)
                 self._tools.append(MCPTool(name=ns, description=t.description,
                                            input_schema=t.input_schema, server_name=name))
