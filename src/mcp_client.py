@@ -126,6 +126,19 @@ class MCPClient:
         self._pending_results: dict[str, dict] = {}
         self._reader_thread: Optional[threading.Thread] = None
         self._stderr_buffer: deque[str] = deque(maxlen=_STDERR_BUFFER_MAX)
+        # Handlers for server→client reverse-requests (elicitation/sampling).
+        # Default safe: decline elicitations (no UI bound), no LLM for sampling.
+        # The host (agent/REPL) sets these to wire a real prompt + the client LLM.
+        self._reverse_asker = None      # asker(message, schema) -> str
+        self._reverse_sampler = None    # sampler(messages, system, max_tokens) -> str
+
+    def set_reverse_handlers(self, *, asker=None, sampler=None) -> None:
+        """Bind how the client answers a server's reverse-requests: `asker` prompts
+        the user (elicitation), `sampler` runs the client's LLM (sampling)."""
+        if asker is not None:
+            self._reverse_asker = asker
+        if sampler is not None:
+            self._reverse_sampler = sampler
     
     # ── Connection ───────────────────────────────────────────────────
     
@@ -165,14 +178,13 @@ class MCPClient:
         stdout_reader.start()
 
         # Send initialize request
+        from src import mcp_reverse
         result = self._send_request("initialize", {
             "protocolVersion": "2025-03-26",
-            "capabilities": {
-                "tools": {
-                    "listChanged": True,
-                    "supportsStreaming": False,
-                }
-            },
+            # Advertise elicitation + sampling so servers know they can call back:
+            # ask the user a question, or borrow our LLM. We answer both (see the
+            # reverse-request dispatch in start_response_reader).
+            "capabilities": mcp_reverse.client_capabilities(),
             "clientInfo": {
                 "name": "korgex",
                 "version": "1.0.0",
@@ -334,6 +346,16 @@ class MCPClient:
                 except json.JSONDecodeError:
                     continue
                 
+                # A server→client REQUEST (elicitation/sampling): answer it and
+                # write the response back, rather than dropping it.
+                from src import mcp_reverse
+                if mcp_reverse.is_reverse_request(response):
+                    reply = mcp_reverse.handle_reverse(
+                        response, asker=self._reverse_asker, sampler=self._reverse_sampler)
+                    with self._lock:
+                        self._write_line(json.dumps(reply))
+                    continue
+
                 # Check if this is a response to a pending request
                 req_id = response.get("id")
                 if req_id and req_id in self._pending_requests:
