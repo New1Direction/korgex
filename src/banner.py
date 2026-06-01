@@ -140,13 +140,42 @@ def dashboard(model: str, cwd: str, version: str, *, providers: list,
     return "\n".join(L)
 
 
-# Small mascot — korgex's own ASCII (a stylized 'k' shield), left column of the panel.
-_MASCOT = r"""[#ffcf6b]    ▄▄▄▄▄    [/]
-[#ffcf6b]  ▟█▀▀▀█▙  [/]
-[#f0a020] ██  ▟█▘  [/]
-[#f0a020] ██ ▜█▖   [/]
-[#cd7f32] ▜█▄▄▄█▛  [/]
-[#cd7f32]   ▀▀▀▀▀   [/]"""
+# Mascot — a Spartan/Corinthian helmet (korgex's own ASCII): tall crest, domed
+# helm, T-slit visor. Painted with the same gradient as the wordmark (crest bright,
+# fading down the helm) so the left column ties into the red KORGEX above it.
+_MASCOT = r"""         ▟▙
+        ▟██▙
+       ▟████▙
+      ▟██████▙
+    ▗▟████████▙▖
+   ▟████████████▙
+  ▟██▀▀▀▀▀▀▀▀▀▀██▙
+  ██  ▘     ▝   ██
+  ██   ▗▄▄▄▖    ██
+  ██     █      ██
+  ▜█▙    █     ▟█▛
+   ▜██▄▄▄█▄▄▄██▛
+     ▀▀█████▀▀
+        ▀▀▀"""
+
+
+def mascot() -> str:
+    """The Spartan-helmet mascot as a plain multi-line string."""
+    return _MASCOT
+
+
+def mascot_lines(palette: str = _DEFAULT_PALETTE) -> list:
+    """The mascot as ``(style, text)`` rows, tinted with the gradient palette
+    (crest brightest at top → deep at the base). Stretches the palette across all
+    rows so the helmet shades smoothly."""
+    tiers = wordmark_tiers(palette)
+    rows = _MASCOT.split("\n")
+    out = []
+    for i, row in enumerate(rows):
+        # map row index across the palette so the gradient spans the whole figure
+        ti = min(len(tiers) - 1, i * len(tiers) // max(1, len(rows)))
+        out.append((f"bold {tiers[ti]}", row))
+    return out
 
 
 def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
@@ -189,10 +218,17 @@ def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
         right.append(Text(""))
         right.append(Text(summary_line(len(skills), len(mcps), tools), style="dim"))
 
+        # Mascot column, gradient-tinted to match the wordmark.
+        mascot = Text()
+        for j, (style, row) in enumerate(mascot_lines()):
+            if j:
+                mascot.append("\n")
+            mascot.append(row, style=style)
+
         grid = Table.grid(padding=(0, 3))
         grid.add_column(vertical="top")   # mascot
         grid.add_column(vertical="top")   # content
-        grid.add_row(Text.from_markup(_MASCOT), Group(*right))
+        grid.add_row(mascot, Group(*right))
 
         title = f"korgex v{version} · cross-vendor coding agent"
         console.print(Panel(grid, title=title, title_align="left",
