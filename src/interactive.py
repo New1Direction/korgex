@@ -196,16 +196,15 @@ class StreamRenderer:
             self._thinking_buffer += delta.get("thinking", "")
 
         elif dtype == "text_delta":
-            # Buffer the reply; render it as clean markdown when the block closes
-            # (markdown can't be formatted mid-stream). A "responding…" spinner gives
-            # live feedback meanwhile, so the REPL never sits dead.
-            self._text_buffer += delta.get("text", "")
-            if self._respond_spinner is None:
-                try:
-                    self._respond_spinner = Spinner("responding…")
-                    self._respond_spinner.__enter__()
-                except Exception:
-                    self._respond_spinner = None
+            # Stream tokens LIVE so the reply appears as it generates (responsive,
+            # like the reference agents) — buffering the whole thing first felt slow.
+            # A "▎ korgex" header on the first token, then clean flowing prose.
+            text = delta.get("text", "")
+            from src.pt_output import emit, render_rich
+            if not self._text_buffer:
+                emit("\n" + render_rich("[bold #a5de67]▎ korgex[/bold #a5de67]").rstrip("\n") + "\n")
+            self._text_buffer += text
+            emit(text)
 
         elif dtype == "input_json_delta":
             partial = delta.get("partial_json", "")
@@ -236,24 +235,11 @@ class StreamRenderer:
             pass
 
     def _on_content_block_stop(self, event: SSEMessage):
-        # Stop the responding spinner, then render the buffered reply as clean
-        # markdown (bold, lists, fenced code w/ highlighting, wrapped) under a single
-        # "▎ korgex" header — far more readable than a raw token stream.
-        if self._respond_spinner is not None:
-            try:
-                self._respond_spinner.__exit__(None, None, None)
-            except Exception:
-                pass
-            self._respond_spinner = None
-        if self._text_buffer.strip():
-            try:
-                from src import render as _R
-                from src.pt_output import emit, render_rich
-                emit("\n" + render_rich("[bold #a5de67]▎ korgex[/bold #a5de67]").rstrip("\n") + "\n")
-                emit(_R.render_markdown(self._text_buffer).rstrip("\n") + "\n")
-            except Exception:
-                from src.pt_output import emit
-                emit("\n" + self._text_buffer.strip() + "\n")
+        # The text streamed live; just close the block with a newline so the next
+        # output (tool line / next turn) starts clean.
+        if self._text_buffer:
+            from src.pt_output import emit
+            emit("\n")
         self._thinking_buffer = ""
         self._text_buffer = ""
     
