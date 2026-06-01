@@ -471,17 +471,25 @@ class Spinner:
         self._stop = True
         if self._thread:
             self._thread.join(timeout=0.5)
-        # Clear the spinner line
-        console.print("\r" + " " * 80 + "\r", end="")
-    
+        self._clear_line()
+
+    @staticmethod
+    def _clear_line():
+        import sys
+        sys.stdout.write("\r\033[2K")  # carriage return + erase the whole line
+        sys.stdout.flush()
+
     def _spin(self):
+        import sys
         while not self._stop:
             char = self.SPINNER_CHARS[self._spin_idx % len(self.SPINNER_CHARS)]
             self._spin_idx += 1
-            console.print(f"\r[dim]{char} {self.message}[/dim]", end="")
+            # Raw stdout + \r overwrites the SAME line in place. (rich's
+            # console.print mangles \r, which made frames concatenate.)
+            sys.stdout.write(f"\r\033[2K\033[2m{char} {self.message}\033[0m")
+            sys.stdout.flush()
             time.sleep(0.08)
-        # Final clear
-        console.print("\r" + " " * 80 + "\r", end="")
+        self._clear_line()
     
     def succeed(self, message: str = None):
         """Replace spinner with a green checkmark."""
@@ -529,16 +537,16 @@ class InteractiveSession:
         self._running = False
     
     def start(self):
-        """Start the interactive session."""
+        """Begin a turn: arm the interrupt handler. No decorative frame — in a
+        REPL this runs once PER TURN, so a '╔══ … ──' banner per message was wrong
+        (it made every reply look like a whole session opening/closing)."""
         self._running = True
         self.interrupt.install()
-        console.print("[bold]╔══ Korgex Interactive ──[/bold]")
-    
+
     def stop(self):
-        """Stop the interactive session."""
+        """End a turn: restore the interrupt handler. No closing frame (see start)."""
         self._running = False
         self.interrupt.restore()
-        console.print("[bold]╚══ Session ended ──[/bold]")
     
     def stream_event(self, event: SSEMessage):
         """Process a single SSE event from the stream."""
