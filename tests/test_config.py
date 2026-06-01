@@ -1,0 +1,76 @@
+"""korgex CLI config layer: ~/.korgex/config.json — provider keys + default model.
+
+JSON (not TOML) because the target runs Python 3.9 (no stdlib tomllib) and we keep
+korgex zero-dep to avoid clean-install breakage.
+"""
+import os
+import stat
+
+from src import config as C
+
+
+def test_missing_file_is_empty_config(tmp_path):
+    cfg = C.load_config(str(tmp_path / "nope.json"))
+    assert cfg.providers == []
+    assert cfg.default_model is None
+    assert cfg.is_configured() is False
+
+
+def test_save_then_load_roundtrips(tmp_path):
+    path = str(tmp_path / "config.json")
+    cfg = C.Config(
+        default_model="claude-opus-4-8",
+        providers=[
+            {"type": "openrouter", "api_key": "sk-or-xyz"},
+            {"type": "ollama", "base_url": "http://localhost:11434"},
+        ],
+    )
+    C.save_config(cfg, path)
+    back = C.load_config(path)
+    assert back.default_model == "claude-opus-4-8"
+    assert back.api_key_for("openrouter") == "sk-or-xyz"
+    assert back.provider_for("ollama")["base_url"] == "http://localhost:11434"
+    assert back.is_configured() is True
+
+
+def test_saved_file_is_chmod_600(tmp_path):
+    path = str(tmp_path / "config.json")
+    C.save_config(C.Config(default_model="m", providers=[{"type": "anthropic", "api_key": "k"}]), path)
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    assert mode == 0o600, f"config holds secret keys; must be 0o600, got {oct(mode)}"
+
+
+def test_resolve_precedence_explicit_arg_wins(tmp_path):
+    cfg = C.Config(default_model="config-model", providers=[{"type": "anthropic", "api_key": "k"}])
+    model, _key = C.resolve_model_and_key("explicit-model", cfg, env={"KORGEX_MODEL": "env-model"})
+    assert model == "explicit-model"
+
+
+def test_resolve_precedence_config_default_over_env(tmp_path):
+    cfg = C.Config(default_model="config-model", providers=[])
+    model, _key = C.resolve_model_and_key(None, cfg, env={"KORGEX_MODEL": "env-model"})
+    assert model == "config-model"
+
+
+def test_resolve_falls_back_to_env_then_builtin(tmp_path):
+    empty = C.Config(default_model=None, providers=[])
+    model, _ = C.resolve_model_and_key(None, empty, env={"KORGEX_MODEL": "env-model"})
+    assert model == "env-model"
+    model2, _ = C.resolve_model_and_key(None, empty, env={})
+    assert model2  # some built-in default, never empty
+
+
+def test_resolve_maps_model_to_its_provider_key(tmp_path):
+    cfg = C.Config(
+        default_model="claude-opus-4-8",
+        providers=[{"type": "anthropic", "api_key": "sk-ant-CONFIG"}],
+    )
+    _model, key = C.resolve_model_and_key("claude-opus-4-8", cfg, env={})
+    assert key == "sk-ant-CONFIG"
+
+
+def test_resolve_key_env_fallback_keeps_existing_users_working(tmp_path):
+    # No provider saved, but ANTHROPIC_API_KEY in env → still resolves a key.
+    empty = C.Config(default_model=None, providers=[])
+    _model, key = C.resolve_model_and_key("claude-opus-4-8", empty, env={"ANTHROPIC_API_KEY": "sk-ant-ENV"})
+    assert key == "sk-ant-ENV"

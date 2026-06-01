@@ -550,6 +550,19 @@ def cmd_mcp_server():
     return 0
 
 
+def cmd_setup():
+    """Connect model providers (any of them) — saves keys + a default model to ~/.korgex/config.json."""
+    from src.setup_wizard import run_setup
+    return run_setup()
+
+
+def cmd_repl():
+    """Start an interactive korgex session (the conversational coding agent)."""
+    from src.repl import Repl
+    Repl().run()
+    return 0
+
+
 # ── Entry Point ──────────────────────────────────────────────────────────
 
 import argparse
@@ -570,6 +583,7 @@ SUBCOMMANDS = {
     "diag":              cmd_diag,
     "bus":               cmd_bus,
     "mcp-server":        cmd_mcp_server,
+    "setup":             cmd_setup,               # connect model providers
 }
 
 
@@ -731,6 +745,12 @@ def main():
     #   - otherwise → prompt parser
     is_subcommand = any(tok in SUBCOMMANDS for tok in argv)
     is_help_only = argv in ([], ["-h"], ["--help"])
+
+    # Bare `korgex` on a real terminal → launch the interactive REPL (the
+    # conversational agent). Piped/redirected (non-TTY) or explicit -h/--help
+    # still print help, so scripts and CI never hang on a readline loop.
+    if argv == [] and sys.stdout.isatty() and sys.stdin.isatty():
+        return cmd_repl()
 
     if is_subcommand or is_help_only:
         args = _build_subcommand_parser().parse_args(argv)
