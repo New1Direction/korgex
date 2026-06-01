@@ -20,9 +20,13 @@ def test_builtin_skills_are_bundled_and_loaded():
         "performance-profiling", "security-review", "error-handling",
         "concurrency-correctness", "managing-dependencies", "api-design",
         "database-migrations", "observability-and-logging",
+        # fourth wave — dev/ops + MCP (generic, from the surveyed inventory)
+        "building-an-mcp-server", "issue-triage", "ci-cd-pipelines",
+        "deploying-safely", "incident-response", "designing-a-job-queue",
+        "data-pipelines", "handling-webhooks",
     ):
         assert expected in names, f"{expected} missing from built-in library: {names}"
-    assert len(names) >= 24
+    assert len(names) >= 32
 
 
 def test_builtin_skills_are_marked_built_in():
