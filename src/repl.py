@@ -81,17 +81,29 @@ class Repl:
     def _print(self, *a):
         print(*a, file=self.out)
 
-    def _models_overview(self) -> str:
-        lines = [f"current model: {self.model}"]
-        if self.cfg.providers:
-            for p in self.cfg.providers:
-                t = p.get("type", "?")
-                sug = ", ".join(SUGGESTED.get(t, []))
-                lines.append(f"  {t}: {sug}" if sug else f"  {t}")
+    def _pick_model(self):
+        """Interactive model selector: show a priced, numbered menu of the
+        connected providers' models (current marked), and switch to the pick."""
+        from src import model_selector as _MS
+        if not self.cfg.providers:
+            self._print("no providers connected — run `korgex setup`")
+            return
+        rows = []
+        for p in self.cfg.providers:
+            rows.extend(_MS.menu_for(p.get("type", "")))
+        if not rows:
+            self._print(f"current model: {self.model}  (no suggestions; /model <id> to switch)")
+            return
+        self._print(_MS.render_menu(rows, current=self.model))
+        try:
+            answer = input("model> ")
+        except (EOFError, KeyboardInterrupt):
+            self._print(""); return
+        choice = _MS.pick(rows, answer)
+        if choice:
+            self._switch_model(choice)
         else:
-            lines.append("  (no providers connected — run `korgex setup`)")
-        lines.append("switch with: /model <name>")
-        return "\n".join(lines)
+            self._print(f"(kept {self.model})")
 
     def _switch_model(self, name: str):
         self.model, self.api_key = _config.resolve_model_and_key(name, self.cfg)
@@ -150,7 +162,7 @@ class Repl:
             return True
         if cmd.kind == "model":
             if cmd.arg is None:
-                self._print(self._models_overview())
+                self._pick_model()        # interactive numbered, priced menu
             else:
                 self._switch_model(cmd.arg)
             return True

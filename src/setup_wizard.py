@@ -110,9 +110,16 @@ def run_setup(path: str | None = None, _input=input, _getpass=None, out=None) ->
         say("\nnothing connected — run `korgex setup` again when ready.")
         return 1
 
+    # Pick a default model from a PRICED menu (cheapest first; default is a mid
+    # tier, never the priciest) so you choose cost-aware — no auto-opus surprise.
+    from src import model_selector as _MS
     first = answers[0]["type"]
-    suggested = suggest_default_model(first)
-    chosen = _input(f"\ndefault model [{suggested}]: ").strip() or suggested
+    rows = _MS.menu_for(first)
+    default = _MS.default_model_for(first)
+    say("\nchoose a default model:")
+    say(_MS.render_menu(rows, current=default))
+    picked = _MS.pick(rows, _input(f"default [{default}]: "))
+    chosen = picked or default
 
     cfg = build_config(answers, default_model=chosen)
     saved = C.save_config(cfg, path)
