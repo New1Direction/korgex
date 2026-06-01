@@ -31,10 +31,9 @@ def _ptk_print_ansi(text: str) -> None:
 
 
 def emit(text: str) -> None:
-    """The single interactive output sink. Routes through prompt_toolkit when it's
-    available (so it cooperates with the bottom-anchored input), else plain print.
-    Never raises — a renderer failure falls back to print rather than killing the
-    turn."""
+    """The single interactive output sink for CONTENT (streamed tokens, blocks,
+    tool lines). Routes through prompt_toolkit's ANSI renderer when available so it
+    cooperates with the bottom-anchored input; else plain print. Never raises."""
     if _ptk_available():
         try:
             _ptk_print_ansi(text)
@@ -43,6 +42,21 @@ def emit(text: str) -> None:
             pass
     try:
         print(text, end="")
+    except Exception:
+        pass
+
+
+def emit_raw(text: str) -> None:
+    """Write cursor-control sequences (\\r, ESC[2K) straight to the real terminal.
+
+    These MUST bypass prompt_toolkit — its print_formatted_text strips carriage
+    returns, so an in-place spinner routed through it would append every frame
+    instead of overwriting one line. Used only for the transient spinner, which
+    clears itself before any real content is emitted."""
+    import sys
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
     except Exception:
         pass
 

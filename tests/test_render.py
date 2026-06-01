@@ -89,3 +89,30 @@ def test_thinking_truncates_to_n_lines():
 def test_truncate_handles_trailing_blank_lines():
     out = R.truncate_output("a\nb\n\n", first=1, last=1)
     assert "a" in out  # doesn't crash on trailing blanks
+
+
+# ── streaming block: prefix each line with the accent bar as tokens arrive ─────
+
+def test_streamblock_first_chunk_emits_label_and_bar():
+    out = []
+    sb = R.StreamBlock("assistant", label="korgex", sink=out.append)
+    sb.feed("Hello")
+    text = "".join(out)
+    assert "korgex" in text and "▎" in text   # label + bar on the opening line
+    assert "Hello" in text
+
+
+def test_streamblock_newline_continues_the_bar():
+    out = []
+    sb = R.StreamBlock("assistant", label="korgex", sink=out.append)
+    sb.feed("line one\nline two")
+    text = "".join(out)
+    # the second line also carries an accent bar (block continues, not a flat dump)
+    assert text.count("▎") >= 2
+
+
+def test_streamblock_close_is_idempotent_and_safe():
+    out = []
+    sb = R.StreamBlock("assistant", label="korgex", sink=out.append)
+    sb.feed("hi")
+    sb.close(); sb.close()  # no crash, no double trailing garbage

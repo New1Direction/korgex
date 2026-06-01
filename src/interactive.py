@@ -161,6 +161,7 @@ class StreamRenderer:
         self._current_tool = None
         self._tool_start_time = None
         self._last_spinner = 0
+        self._text_block = None  # live StreamBlock for the assistant's prose
     
     def handle_event(self, event: SSEMessage):
         """Process a single SSE event and render it."""
@@ -207,18 +208,28 @@ class StreamRenderer:
         delta = event.data.get("delta", {})
         dtype = delta.get("type", "")
         
-        from src.pt_output import emit
+        from src.pt_output import emit, render_rich
         if dtype == "thinking_delta":
             text = delta.get("thinking", "")
             self._thinking_buffer += text
-            # Thinking in dim italic — routed through prompt_toolkit so it renders
-            # cleanly above the pinned input under patch_stdout.
-            emit(f"\033[2;3m{text}\033[0m")
+            emit(f"\033[2;3m{text}\033[0m")  # dim italic reasoning
 
         elif dtype == "text_delta":
             text = delta.get("text", "")
             self._text_buffer += text
-            emit(text)  # streamed token → prompt_toolkit ANSI sink (not raw stdout)
+            # Stream the assistant's prose inside an accent block: a "▎ korgex"
+            # header on the first token, the accent bar continued on each new line.
+            # The sink pre-renders rich markup (the bar/label) to ANSI but passes
+            # plain token text straight through — so we don't run a full rich
+            # render per token (which would be slow and inject stray newlines).
+            if self._text_block is None:
+                from src.render import StreamBlock
+
+                def _sink(s: str):
+                    emit(render_rich(s).rstrip("\n") if "[" in s else s)
+
+                self._text_block = StreamBlock("assistant", label="korgex", sink=_sink)
+            self._text_block.feed(text)
             
         elif dtype == "input_json_delta":
             partial = delta.get("partial_json", "")
@@ -230,9 +241,14 @@ class StreamRenderer:
                 )
     
     def _on_content_block_stop(self, event: SSEMessage):
-        # Flush any remaining content
+        # Close the assistant accent block (emits its trailing newline) so the
+        # next block/tool line starts clean; reset for the next turn.
+        if self._text_block is not None:
+            self._text_block.close()
+            self._text_block = None
         if self._thinking_buffer:
-            console.print()  # newline after thinking block
+            from src.pt_output import emit
+            emit("\n")  # newline after a thinking block
         self._thinking_buffer = ""
         self._text_buffer = ""
     
@@ -474,18 +490,17 @@ class Spinner:
 
     @staticmethod
     def _clear_line():
-        from src.pt_output import emit
-        emit("\r\033[2K")  # carriage return + erase the whole line
+        from src.pt_output import emit_raw
+        emit_raw("\r\033[2K")  # carriage return + erase the whole line
 
     def _spin(self):
-        from src.pt_output import emit
+        from src.pt_output import emit_raw
         while not self._stop:
             char = self.SPINNER_CHARS[self._spin_idx % len(self.SPINNER_CHARS)]
             self._spin_idx += 1
-            # Route the in-place spinner frame through prompt_toolkit's ANSI
-            # renderer so patch_stdout's StdoutProxy doesn't swallow the \r/escapes
-            # (which made frames concatenate). \r + ESC[2K overwrites one line.
-            emit(f"\r\033[2K\033[2m{char} {self.message}\033[0m")
+            # RAW write (not prompt_toolkit) — its renderer strips \r, which made
+            # frames append instead of overwrite. \r + ESC[2K overwrites one line.
+            emit_raw(f"\r\033[2K\033[2m{char} {self.message}\033[0m")
             time.sleep(0.08)
         self._clear_line()
     

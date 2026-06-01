@@ -90,6 +90,56 @@ def tool_target(name: str, args: dict) -> str:
     return ""
 
 
+class StreamBlock:
+    """Render streamed tokens as a live accent block: a ``▎ label`` header on the
+    first chunk, then the accent bar continued at the start of every new line as
+    tokens arrive. `sink(markup_str)` receives rich-markup chunks to paint.
+
+    This is what makes a STREAMING reply read like a structured block (à la the
+    accent-block agent TUIs) instead of a flat wall of text."""
+
+    def __init__(self, role: str, label: str | None = None, sink=None,
+                 theme: Theme | None = None):
+        th = theme or _THEME
+        self._color = th.accent(role)
+        self._bar = f"[{self._color}]{ACCENT_BAR}[/{self._color}] "
+        self._label = label
+        self._sink = sink or (lambda s: None)
+        self._started = False
+        self._at_line_start = True
+        self._closed = False
+
+    def _open(self):
+        if self._started:
+            return
+        self._started = True
+        if self._label:
+            self._sink(f"\n{self._bar.rstrip()} [bold {self._color}]{self._label}[/bold {self._color}]\n")
+        self._sink(self._bar)         # bar for the first content line
+        self._at_line_start = False
+
+    def feed(self, chunk: str):
+        """Emit a streamed chunk, inserting the accent bar after each newline."""
+        if self._closed or not chunk:
+            return
+        self._open()
+        # Split keeping the structure: each '\n' starts a new bar-prefixed line.
+        parts = chunk.split("\n")
+        for i, part in enumerate(parts):
+            if i > 0:
+                self._sink("\n" + self._bar)
+            if part:
+                self._sink(part)
+
+    def close(self):
+        """Finish the block (idempotent). Adds a trailing newline once."""
+        if self._closed or not self._started:
+            self._closed = True
+            return
+        self._sink("\n")
+        self._closed = True
+
+
 def truncate_output(text: str, first: int = 2, last: int = 3) -> str:
     """Collapse long output to its first `first` + last `last` lines with a dim
     ``… N lines hidden …`` marker between — the head+tail pattern that keeps tool
