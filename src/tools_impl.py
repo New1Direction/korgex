@@ -242,23 +242,40 @@ def tool_restore_file(filepath: str, context: dict = None):
 @register_tool("run_in_bash_session", "Runs a bash command in an isolated sandbox (cloud VM, Docker, or local).", [
     ToolParam("command", "STRING", "The bash command to run.", required=True),
 ])
-def tool_run_in_bash_session(command: str, context: dict = None):
-    """Run command in sandbox (cloud VM > Docker > direct fallback)."""
+def tool_run_in_bash_session(command: str, background: bool = False, context: dict = None):
+    """Run a bash command. With background=True, launch it as a background task and
+    return a task_id immediately (poll with BashOutput) — for long-running commands
+    (builds, test suites, dev servers, watchers) that shouldn't block the turn."""
+    cwd = context.get("repo_root") if context else os.getcwd()
+
+    if background:
+        from src.background_tasks import get_runner
+        tid = get_runner().launch(command, cwd=cwd)
+        return {"task_id": tid, "status": "running",
+                "message": f"running in background as {tid} — check it with BashOutput(task_id=\"{tid}\")"}
+
     global SANDBOX
-    
-    # Use sandbox if available
     if SANDBOX:
         result = SANDBOX.run(command)
     else:
-        # Fallback to local execution
-        cwd = context.get("repo_root") if context else os.getcwd()
         result = _run_bash(command, cwd)
-    
+
     return {
         "stdout": result.get("stdout", ""),
         "stderr": result.get("stderr", ""),
         "exit_code": result.get("exit_code", -1),
     }
+
+
+@register_tool("bash_output", "Check a background bash task's status + output (by task_id).", [
+    ToolParam("task_id", "STRING", "the background task id returned by Bash(background=true)", required=True),
+])
+def tool_bash_output(task_id: str, context: dict = None):
+    from src.background_tasks import get_runner
+    snap = get_runner().poll(task_id)
+    if snap is None:
+        return {"error": f"no background task '{task_id}'"}
+    return snap
 
 
 @register_tool("run_test_with_self_healing", "Runs tests and automatically self-corrects any failures up to 5 times using the TDD Healer.", [
