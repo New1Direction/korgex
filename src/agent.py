@@ -142,6 +142,10 @@ class KorgexAgent:
         # Per-mode generation params (max_tokens / thinking budget / temperature).
         self.params = _resolve_params(mode)
 
+        # Resolved endpoint, filled in by _get_client. The prompt-cache layer reads
+        # it to decide whether OpenRouter cache_control breakpoints apply.
+        self._base_url = None
+
         # Injectable ledger client. None → resolve the process default lazily in
         # run_task. A subagent is handed its parent's ledger so events from the
         # whole multi-agent run land in one causal journal.
@@ -465,6 +469,9 @@ class KorgexAgent:
         # reach the right endpoint, instead of only reading env.
         from src.config import load_config, resolve_client_config
         key, base_url = resolve_client_config(self.model, load_config())
+        # Remembered for the prompt-cache layer: whether we're on OpenRouter (and
+        # thus can use its cache_control breakpoints) is a base_url question.
+        self._base_url = base_url
 
         if self.provider == "anthropic":
             if not key:
@@ -503,10 +510,45 @@ class KorgexAgent:
                 kw["temperature"] = p["temperature"]
         return kw
 
+    def _anthropic_cache_kwargs(self, sp: str, tools: list, volatile: str = None) -> dict:
+        """Anthropic `system`/`tools` shaped for prompt caching: a cache breakpoint
+        on the stable system text (which caches the tool array ahead of it too) and
+        the volatile task list trailing as a separate, unmarked block so it never
+        invalidates the cached prefix."""
+        from src import prompt_cache as PC
+        return {"system": PC.anthropic_system(sp, volatile),
+                "tools": PC.with_tool_cache(tools)}
+
+    def _openai_cache_kwargs(self, messages: list, tools: list) -> dict:
+        """OpenAI-compatible request shaped for prompt caching. On OpenRouter →
+        manual-breakpoint model (Claude/Qwen) the stable system message gets a
+        cache_control marker and a top-level breakpoint auto-advances over the
+        growing history; auto-cache providers (and api.openai.com) are left plain.
+        stream_options/usage accounting is added by the caller."""
+        from src import prompt_cache as PC
+        call_messages = messages
+        if PC.should_mark(self.provider, self._base_url, self.model) and messages \
+                and messages[0].get("role") == "system" \
+                and isinstance(messages[0].get("content"), str):
+            call_messages = [PC.openai_system_message(messages[0]["content"], cache=True)] \
+                + list(messages[1:])
+        kwargs = {"model": self.model, "messages": call_messages}
+        # tools=None means "the caller supplies tools elsewhere" (the structured
+        # path gets them from build_request_kwargs) — don't collide with that.
+        if tools is not None:
+            kwargs["tools"] = tools
+        extra = PC.openai_cache_extra(self.provider, self._base_url, self.model)
+        if extra:
+            kwargs["extra_body"] = extra
+        return kwargs
+
     def _call(self, client, messages: list, tools: list, output_schema: dict = None,
-              system_prompt: str = None) -> object:
+              system_prompt: str = None, system_volatile: str = None) -> object:
         # `system_prompt` is passed explicitly (not read off self) so concurrent
         # run_task calls on one agent instance can't clobber each other's prompt.
+        # `system_volatile` is the per-turn task list — kept out of the cached
+        # prefix (Anthropic: a trailing unmarked block; OpenAI: not in the system
+        # message) so the expensive system+tools prefix stays cacheable turn to turn.
         sp = system_prompt if system_prompt is not None else self.system_prompt
         gen = self._gen_kwargs()
 
@@ -519,12 +561,13 @@ class KorgexAgent:
             extra = build_request_kwargs(output_schema, self.provider)
             max_tokens = gen.get("max_tokens", 4096)
             if self.provider == "anthropic":
+                from src import prompt_cache as PC
                 return client.messages.create(
-                    model=self.model, system=sp,
+                    model=self.model, system=PC.anthropic_system(sp, system_volatile),
                     messages=messages, max_tokens=max_tokens, **extra,
                 )
             return client.chat.completions.create(
-                model=self.model, messages=messages, max_tokens=max_tokens, **extra,
+                **self._openai_cache_kwargs(messages, None), max_tokens=max_tokens, **extra,
             )
 
         # Interactive streaming paths. A "thinking…" spinner covers the silent
@@ -532,7 +575,8 @@ class KorgexAgent:
         # is cleared the instant output starts — so the REPL never sits dead.
         if self.interactive and self.provider == "anthropic":
             with self._thinking() as think:
-                return self._call_anthropic_streaming(client, messages, tools, sp, think)
+                return self._call_anthropic_streaming(
+                    client, messages, tools, sp, think, volatile=system_volatile)
         if self.interactive and self.provider == "openai":
             with self._thinking() as think:
                 return self._call_openai_streaming(client, messages, tools, think)
@@ -540,23 +584,23 @@ class KorgexAgent:
         # Non-streaming
         if self.provider == "anthropic":
             return client.messages.create(
-                model=self.model, system=sp,
-                messages=messages, tools=tools, **gen,
+                model=self.model, messages=messages, **gen,
+                **self._anthropic_cache_kwargs(sp, tools, system_volatile),
             )
         return client.chat.completions.create(
-            model=self.model, messages=messages,
-            tools=tools, **gen,
+            **self._openai_cache_kwargs(messages, tools), **gen,
         )
 
     def _call_anthropic_streaming(self, client, messages: list, tools: list,
-                                  system_prompt: str = None, on_first=None):
+                                  system_prompt: str = None, on_first=None, volatile: str = None):
         """Stream Anthropic messages through the InteractiveSession renderer."""
         from src.interactive import SSEMessage, SSEEvent
         session = self._get_session()
 
+        sp = system_prompt if system_prompt is not None else self.system_prompt
         with client.messages.stream(
-            model=self.model, system=(system_prompt if system_prompt is not None else self.system_prompt),
-            messages=messages, tools=tools, max_tokens=4096,
+            model=self.model, messages=messages, max_tokens=4096,
+            **self._anthropic_cache_kwargs(sp, tools, volatile),
         ) as stream:
             for event in stream:
                 if on_first is not None:
@@ -591,16 +635,20 @@ class KorgexAgent:
         full_text = ""
         # idx → {"id", "name", "args_str"}
         partials: dict[int, dict] = {}
+        usage = None  # final chunk carries token usage incl. cache hits
 
         stream = client.chat.completions.create(
-            model=self.model, messages=messages,
-            tools=tools, max_tokens=4096, stream=True,
+            **self._openai_cache_kwargs(messages, tools),
+            max_tokens=4096, stream=True,
+            # Ask for a trailing usage chunk so we can see (and prove) cache hits.
+            stream_options={"include_usage": True},
         )
 
         for chunk in stream:
             if on_first is not None:
                 on_first(); on_first = None  # first chunk → clear the thinking spinner
             if not chunk.choices:
+                usage = getattr(chunk, "usage", None) or usage  # usage-only final chunk
                 continue
             delta = chunk.choices[0].delta
 
@@ -639,8 +687,32 @@ class KorgexAgent:
         except Exception:
             pass
 
+        self._maybe_report_cache(usage)
         # Build a fake response object shaped like a non-streamed ChatCompletion
         return _StubOpenAIResponse(full_text, partials)
+
+    def _maybe_report_cache(self, usage) -> None:
+        """When KORGEX_CACHE_STATS is set, print a dim one-line cache summary so a
+        prompt-cache hit is visible/provable. Off by default (keeps output clean);
+        never raises — telemetry must not break a turn."""
+        if not usage or not os.environ.get("KORGEX_CACHE_STATS"):
+            return
+        try:
+            total = getattr(usage, "prompt_tokens", 0) or 0
+            details = getattr(usage, "prompt_tokens_details", None)
+            cached = 0
+            if details is not None:
+                cached = (getattr(details, "cached_tokens", None)
+                          or (details.get("cached_tokens") if isinstance(details, dict) else 0) or 0)
+            if not total:
+                return
+            pct = (cached / total) * 100 if total else 0
+            from src.pt_output import emit, render_rich
+            emit("\n" + render_rich(
+                f"[dim]⚡ cache: {cached}/{total} prompt tok cached ({pct:.0f}%)[/dim]"
+            ).rstrip("\n") + "\n")
+        except Exception:
+            pass
 
     # ── Response parsing ─────────────────────────────────────────────────
 
@@ -805,18 +877,22 @@ class KorgexAgent:
                     messages = self._maybe_compact(messages, korg, prompt_seq)
 
                 # ── Feed the live task list back so the model works through it
-                # (and won't claim done while items remain). Top-level only; the
-                # block reflects current state, so it's stable between updates.
-                turn_sys = sys_prompt
+                # (and won't claim done while items remain). Top-level only. This
+                # block changes as tasks complete, so it's kept SEPARATE from the
+                # stable system prompt (passed as system_volatile) — the prompt-cache
+                # layer trails it outside the cached prefix so updating the task list
+                # never invalidates the cached system+tools prefix.
+                task_volatile = None
                 if tools_filter is None and self._task_ledger.open_tasks():
-                    turn_sys = sys_prompt + (
-                        "\n\n# Your task list — keep it current with TaskUpdate as you "
+                    task_volatile = (
+                        "# Your task list — keep it current with TaskUpdate as you "
                         "work; do NOT stop or claim the task is done while any item is "
                         "still open:\n" + self._task_ledger.render())
 
                 # ── korg: time the LLM round-trip ──────────────────────────
                 _llm_t0 = time.monotonic()
-                response = self._call(client, messages, tools_payload, system_prompt=turn_sys)
+                response = self._call(client, messages, tools_payload,
+                                      system_prompt=sys_prompt, system_volatile=task_volatile)
                 _llm_ms = int((time.monotonic() - _llm_t0) * 1000)
 
                 tool_calls = self._extract_tool_calls(response)

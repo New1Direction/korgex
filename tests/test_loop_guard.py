@@ -104,7 +104,7 @@ def _stub_agent(tmp_path, monkeypatch):
 def test_repeat_rail_blocks_a_failing_loop(tmp_path, monkeypatch):
     a = _stub_agent(tmp_path, monkeypatch)
     # the model calls the same Bash command every turn; it always "fails"
-    def fake_call(client, messages, tools_payload, system_prompt=None):
+    def fake_call(client, messages, tools_payload, system_prompt=None, system_volatile=None):
         class R: pass
         r = R(); r._text = ""; r.usage = None
         r._calls = [{"id": "c", "name": "Bash", "args": {"command": "pytest"}}]
@@ -124,7 +124,7 @@ def test_intent_rail_nudges_then_lets_finish(tmp_path, monkeypatch):
     a = _stub_agent(tmp_path, monkeypatch)
     texts = iter(["Let me search for the handler.",   # intent, no tool → nudge
                   "The handler is in app.py, line 10."])  # real answer → finish
-    def fake_call(client, messages, tools_payload, system_prompt=None):
+    def fake_call(client, messages, tools_payload, system_prompt=None, system_volatile=None):
         class R: pass
         r = R(); r._text = next(texts); r.usage = None; r._calls = []
         return r

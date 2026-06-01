@@ -185,7 +185,7 @@ def test_concurrent_run_task_each_sees_its_own_system_prompt():
         def _get_client(self):
             return object()
 
-        def _call(self, client, messages, tools, output_schema=None, system_prompt=None):
+        def _call(self, client, messages, tools, output_schema=None, system_prompt=None, system_volatile=None):
             captured[threading.current_thread().name] = system_prompt
             return SimpleNamespace(
                 usage=None,
