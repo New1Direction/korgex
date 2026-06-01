@@ -126,3 +126,19 @@ def test_center_block_pads_to_width():
     centered = B.center_block("abc", width=11)
     # each line padded so content sits in the middle (leading spaces present)
     assert centered.startswith("    ") and "abc" in centered
+
+
+# ── spartan helmet mascot ──────────────────────────────────────────────────────
+
+def test_mascot_is_a_multiline_helmet():
+    m = B.mascot()
+    assert m.count("\n") >= 6           # a real multi-row figure, not a blob
+    assert any(c in m for c in "▟█▙▜")  # block-drawing art present
+
+
+def test_mascot_render_lines_are_color_tagged():
+    # rendered with a red-gradient (crest bright → helmet deep), per-row colors
+    lines = B.mascot_lines(palette="red")
+    assert len(lines) >= 6
+    assert all(isinstance(t, tuple) and len(t) == 2 for t in lines)  # (style, text)
+    assert all("#" in style for style, _ in lines)  # every row carries a hex color
