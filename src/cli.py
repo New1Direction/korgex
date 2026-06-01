@@ -550,6 +550,96 @@ def cmd_mcp_server():
     return 0
 
 
+def cmd_mcp():
+    """Manage MCP servers — add/list/remove stdio or remote (url+auth) servers in mcp.json."""
+    from src import mcp_admin
+
+    argv = sys.argv[1:]
+    toks = argv[argv.index("mcp") + 1:] if "mcp" in argv else []
+    if not toks or toks[0] in ("-h", "--help"):
+        print("  usage: korgex mcp <list|add|remove> …")
+        print("    korgex mcp list")
+        print("    korgex mcp add <name> --command npx --args '-y pkg' [--env K=V]")
+        print("    korgex mcp add <name> --url https://host/mcp [--header 'Authorization: Bearer ${TOKEN}']")
+        print("    korgex mcp remove <name>")
+        return 0 if toks else 1
+
+    import os
+    global_path = os.path.join(os.path.expanduser("~"), ".korgex", "mcp.json")
+
+    action, rest = toks[0], toks[1:]
+    if action == "catalog":
+        from src import mcp_catalog
+        print("  MCP catalog — add with `korgex mcp add <alias> [--global]`:")
+        for e in mcp_catalog.entries():
+            needs = f"  (needs {', '.join(e['needs'])})" if e["needs"] else ""
+            print(f"  {e['alias']:<20} [{e['transport']}]  {e['description']}{needs}")
+        return 0
+    if action == "list":
+        rows = mcp_admin.mcp_list()
+        if not rows:
+            print("  no MCP servers configured — `korgex mcp catalog` then `korgex mcp add <alias>`")
+            return 0
+        for r in rows:
+            print(f"  {r['name']:<22} [{r['transport']}]  {r['target']}")
+        return 0
+    if action == "remove":
+        names = [t for t in rest if not t.startswith("-")]
+        if not names:
+            print("  usage: korgex mcp remove <name> [--global]")
+            return 1
+        path = global_path if "--global" in rest else "mcp.json"
+        ok = mcp_admin.mcp_remove(names[0], path=path)
+        print(f"  {'✓ removed' if ok else '· not found'}: {names[0]}")
+        return 0 if ok else 1
+    if action == "add":
+        ap = argparse.ArgumentParser(prog="korgex mcp add", add_help=False)
+        ap.add_argument("name")
+        ap.add_argument("--command")
+        ap.add_argument("--args")
+        ap.add_argument("--url")
+        ap.add_argument("--env", action="append", default=[])
+        ap.add_argument("--header", action="append", default=[])
+        ap.add_argument("--path", help="directory for the filesystem preset")
+        ap.add_argument("--global", dest="is_global", action="store_true",
+                        help="write to ~/.korgex/mcp.json (available in any directory)")
+        try:
+            a = ap.parse_args(rest)
+        except SystemExit:
+            return 1
+        path = global_path if a.is_global else "mcp.json"
+        where = "global (~/.korgex/mcp.json)" if a.is_global else "project (mcp.json)"
+
+        # Bare `add <alias>` with no --command/--url → resolve from the catalog.
+        if not a.url and not a.command:
+            from src import mcp_catalog
+            preset = mcp_catalog.resolve(a.name, path_value=a.path or os.getcwd())
+            if preset is None:
+                print(f"  '{a.name}' isn't a catalog preset, and no --command/--url given.")
+                print("  → see `korgex mcp catalog`, or pass --command <cmd> / --url <url>")
+                return 1
+            mcp_admin.mcp_add(a.name, path=path, **preset)
+            tgt = preset.get("url") or (preset.get("command", "") + " " + " ".join(preset.get("args", []))).strip()
+            print(f"  ✓ added {a.name} (from catalog) → {tgt}  [{where}]")
+            print("  korgex auto-connects it at startup")
+            return 0
+
+        env = dict(kv.split("=", 1) for kv in a.env if "=" in kv)
+        headers = {}
+        for h in a.header:
+            if ":" in h:
+                k, v = h.split(":", 1)
+                headers[k.strip()] = v.strip()
+        args_list = a.args.split() if a.args else None
+        mcp_admin.mcp_add(a.name, command=a.command, args=args_list, env=env or None,
+                          url=a.url, headers=headers or None, path=path)
+        print(f"  ✓ added {a.name} → {a.url or (a.command + (' ' + a.args if a.args else ''))}  [{where}]")
+        print("  korgex now auto-connects configured servers at startup")
+        return 0
+    print(f"  unknown action: {action} — use list|add|remove")
+    return 1
+
+
 def cmd_setup():
     """Connect model providers (any of them) — saves keys + a default model to ~/.korgex/config.json."""
     from src.setup_wizard import run_setup
@@ -582,6 +672,7 @@ SUBCOMMANDS = {
     "trajectory":        cmd_trajectory,
     "diag":              cmd_diag,
     "bus":               cmd_bus,
+    "mcp":               cmd_mcp,                 # add/list/remove MCP servers
     "mcp-server":        cmd_mcp_server,
     "setup":             cmd_setup,               # connect model providers
 }
@@ -689,6 +780,9 @@ def _build_subcommand_parser():
             sp.add_argument("file", nargs="?", help="source file to check with its language server")
         elif name == "bus":
             sp.add_argument("args", nargs="*", help="<send|inbox|history|members> …")
+        elif name == "mcp":
+            sp.add_argument("args", nargs="*",
+                            help="<list|add|remove> … (e.g. add <name> --url <url> | --command <cmd>)")
     return p
 
 
@@ -751,6 +845,12 @@ def main():
     # still print help, so scripts and CI never hang on a readline loop.
     if argv == [] and sys.stdout.isatty() and sys.stdin.isatty():
         return cmd_repl()
+
+    # `mcp` and `bus` take free-form/flagged args and read sys.argv themselves;
+    # dispatch them directly so the strict subcommand parser doesn't reject their
+    # --flags (e.g. `mcp add api --url …`).
+    if argv and argv[0] in ("mcp", "bus"):
+        return SUBCOMMANDS[argv[0]]() or 0
 
     if is_subcommand or is_help_only:
         args = _build_subcommand_parser().parse_args(argv)

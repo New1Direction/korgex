@@ -1,5 +1,5 @@
 """
-Korgex Mode-Gated Tool Schemas — Claude Code's plan/execute split.
+Korgex Mode-Gated Tool Schemas — a plan/execute split.
 
 Each mode exposes a different subset of the 12 user-facing tools.
 The model only sees the tools relevant to its current mode, reducing
@@ -184,7 +184,7 @@ def filter_tool_schemas(mode: str, all_tools: list[dict]) -> list[dict]:
 class ModeStateMachine:
     """Tracks the current mode and handles transitions.
     
-    Mirrors Claude Code's EnterPlanMode/ExitPlanMode pattern.
+    A standard plan-mode enter/exit pattern.
     """
     
     def __init__(self, initial_mode: str = "execute"):

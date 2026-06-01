@@ -1,5 +1,5 @@
 """
-Korgex Memory System — file-based persistent memory inspired by Claude Code.
+Korgex Memory System — file-based persistent memory inspired by frontier coding agents.
 
 Architecture:
   memory_dir/
@@ -19,7 +19,7 @@ Each memory file:
 
   Body content. Link [[other-memories]] with double-brackets.
 
-Key design rules (from Claude Code's architecture):
+Key design rules (from a modern agent architecture):
 - MEMORY.md is always loaded — lines after 200 are truncated
 - Individual files are loaded on-demand when relevance is suspected
 - Immutable: never edit in-place, delete and recreate
@@ -316,5 +316,5 @@ can have a complete picture of who the user is and how to work with them.
 
 ## Current Memory Index
 
-{index[:3000]}  # truncated past 3000 chars as Claude Code does
+{index[:3000]}  # truncated past 3000 chars for cache efficiency
 """

@@ -1,5 +1,5 @@
 """
-Korgex System Prompt — 4-block architecture inspired by Claude Code.
+Korgex System Prompt — 4-block architecture inspired by frontier coding agents.
 
 Architecture:
   Block 0: Attribution header (billing, version info)
@@ -7,7 +7,7 @@ Architecture:
   Block 2: Core instructions (always present, cacheable)
   Block 3: Session context (memory, environment, dynamic content)
 
-Claude Code caches blocks 0-2 with 1-hour TTL (~70K tokens cached).
+Such layered prompts cache blocks 0-2 with 1-hour TTL (~70K tokens cached).
 Block 3 changes each turn and is not cached.
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 def build_system_prompt(memory_text: str = "", workdir: str = None,
                         model_info: str = "Korgex (Sonnet-level)") -> list[dict]:
     """
-    Build a 4-block system prompt matching Claude Code's architecture.
+    Build a 4-block system prompt matching a modern agent architecture.
     
     Returns a list of dicts suitable for Anthropic's API system parameter,
     or for use with Korgex's own prompt assembly.
@@ -35,7 +35,7 @@ def build_system_prompt(memory_text: str = "", workdir: str = None,
 
 
 def _build_attribution_block() -> dict:
-    """Block 0: Billing/attribution header (~85 chars, matches Claude Code)."""
+    """Block 0: Billing/attribution header (~85 chars, is cache-friendly)."""
     return {
         "type": "text",
         "text": "x-korgex-billing-header: version=1.0.0; cc_entrypoint=cli;\n",

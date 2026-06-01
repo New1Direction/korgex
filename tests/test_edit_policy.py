@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from src.edit_policy import (
     ASK,
+    BYPASS,
+    FREE,
     SESSION,
     WORKSPACE,
     EditDecision,
@@ -17,6 +19,35 @@ from src.edit_policy import (
     mutating_path,
     prompt_outcome_allows,
 )
+
+
+def test_free_policy_auto_allows_ordinary_files_anywhere():
+    # FREE (the new default): just act — allow edits everywhere, no prompt, even
+    # outside the workspace (where WORKSPACE would ask).
+    assert evaluate_edit("/repo/src/main.py", policy=FREE, cwd="/repo").action == "allow"
+    assert evaluate_edit("/etc/hosts", policy=FREE, cwd="/repo").action == "allow"
+
+
+def test_free_policy_keeps_the_thin_safety_floor():
+    # ...but the one seatbelt holds: secrets ask, protected dirs block.
+    assert evaluate_edit("/x/.env", policy=FREE, cwd="/x").action == "ask"
+    assert evaluate_edit("/x/deploy.pem", policy=FREE, cwd="/x").action == "ask"
+    assert evaluate_edit("/home/u/.ssh/id_rsa", policy=FREE, cwd="/home/u").action == "block"
+
+
+def test_bypass_policy_removes_every_gate():
+    # BYPASS is the explicit override: nothing is checked — secrets and protected
+    # dirs included. Maximum freedom, no safety net.
+    for p in ["/repo/src/main.py", "/etc/hosts", "/x/.env", "/x/api.key",
+              "/home/u/.ssh/id_rsa", "repo/.git/HEAD"]:
+        assert evaluate_edit(p, policy=BYPASS, cwd="/repo").action == "allow", p
+
+
+def test_free_guard_proceeds_silently_outside_workspace():
+    # The point of FREE: an outside-workspace edit just proceeds with action
+    # "allow" (not the WORKSPACE "proceed-and-record" path), even headless.
+    proceed, action, _ = guard_decision("/etc/hosts", policy=FREE, cwd="/r", interactive=False)
+    assert proceed is True and action == "allow"
 
 
 def test_hard_blocked_paths_are_never_editable_even_in_session_mode():

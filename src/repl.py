@@ -21,6 +21,9 @@ _HELP_TEXT = """\
 korgex — commands
   /model [name]   show models, or switch the live model mid-session
   /plan [on|off]  plan mode: agent stays read-only until you approve its plan
+  /skills         list skills (✦ = learned by the agent) and their usage
+  /tasks          show the agent's live task checklist for this conversation
+  /rewind [n]     list undo points, or restore files to BEFORE prompt n
   /clear          start a fresh conversation
   /help  /?       this help
   /exit  /quit    leave (also Ctrl-D)
@@ -55,6 +58,12 @@ def parse_repl_input(line: str) -> Command:
             return Command("model", rest or None)
         if head == "/plan":
             return Command("plan", rest or None)
+        if head == "/skills":
+            return Command("skills", rest or None)
+        if head == "/tasks":
+            return Command("tasks")
+        if head == "/rewind":
+            return Command("rewind", rest or None)
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
 
@@ -78,6 +87,8 @@ class Repl:
         self.model, self.api_key = _config.resolve_model_and_key(None, self.cfg)
         self._agent = None  # lazy: built on first turn
         self._session_obj = None  # lazy prompt_toolkit session (bottom-anchored input)
+        self._turn = 0           # user-prompt counter, for rewind points
+        self._rewind = None      # lazy RewindLog: start-of-turn file snapshots
 
     def _print(self, *a):
         print(*a, file=self.out)
@@ -121,11 +132,106 @@ class Repl:
                 self._agent = None  # safest: rebuild fresh next turn
         self._print(f"→ switched to {self.model}")
 
+    def _mcp_configured(self) -> bool:
+        """True if any MCP servers are configured (any source). Cheap — just reads
+        config files, doesn't connect."""
+        import os
+        try:
+            from src import mcp_config
+            return bool(mcp_config.load_servers(cwd=os.getcwd()))
+        except Exception:
+            return False
+
     def _ensure_agent(self):
         if self._agent is None:
             from src.agent import KorgexAgent
-            self._agent = KorgexAgent(model=self.model, interactive=True)
+            # Load MCP servers when any are configured, so their tools are actually
+            # available in-session (this was the gap: the REPL never enabled MCP).
+            self._agent = KorgexAgent(model=self.model, interactive=True,
+                                      load_mcp=self._mcp_configured())
         return self._agent
+
+    def _show_skills(self):
+        """List skills with usage + lifecycle state. ✦ marks ones korgex learned."""
+        from src import skill_usage as _SU
+        from src import skills as _SK
+        reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+        if not reg.names():
+            self._print("no skills yet — korgex writes them as it learns (✦ agent), "
+                        "or add your own under .korgex/skills/<name>/SKILL.md")
+            return
+        store = _SU.UsageStore(_SU.usage_path(_SU.global_skills_dir()))
+        self._print("skills:")
+        for r in _SU.overview(reg, store):
+            mark = " ✦" if r["trust"] == "agent" else ""
+            state = "" if r["state"] == "active" else f" · {r['state']}"
+            self._print(f"  {r['name']}{mark}  —  {r['uses']} use(s){state}")
+
+    def _do_rewind(self, arg):
+        """/rewind — list undo points, or restore files to BEFORE a given prompt."""
+        pts = self._rewind.points() if self._rewind else []
+        if not pts:
+            self._print("nothing to rewind — no file changes recorded this session yet")
+            return
+        if arg is None:
+            self._print("rewind points (restore files to BEFORE the prompt):")
+            for p in pts:
+                preview = p.prompt if len(p.prompt) <= 60 else p.prompt[:59] + "…"
+                self._print(f"  {p.turn}.  {preview}")
+            self._print("→ /rewind <n> restores the files changed from prompt n onward")
+            return
+        try:
+            target = int((arg or "").strip())
+        except ValueError:
+            self._print("usage: /rewind <prompt-number>  (run /rewind to list them)")
+            return
+        actions = self._rewind.restore(target)
+        if not actions:
+            self._print(f"no file changes recorded at or after prompt {target}")
+            return
+        self._rewind.forget_from(target)
+        self._print(f"⟲ rewound to before prompt {target} — {len(actions)} file(s):")
+        for path, act in actions:
+            self._print(f"  {act}: {path}")
+        self._print("(conversation kept — /clear to also reset the chat)")
+
+    def _learn_from_turn(self, user_text: str, summary: str):
+        """Background self-review: after a turn, ask the model (in a daemon thread,
+        never blocking the REPL) whether a reusable skill emerged, and if so write it
+        as an agent-owned skill. Best-effort — any failure is swallowed. Opt out with
+        KORGEX_NO_LEARN=1."""
+        import os
+        if os.environ.get("KORGEX_NO_LEARN", "").strip().lower() in ("1", "true", "yes"):
+            return
+        agent = self._agent
+        if agent is None:
+            return
+
+        def _bg():
+            try:
+                from src import skill_review as _SR
+                from src import skill_usage as _SU
+                from src import skills as _SK
+                from src.pt_output import emit
+
+                def complete(system, user):
+                    client = agent._get_client()
+                    resp = agent._call(client, [{"role": "user", "content": user}], [],
+                                       system_prompt=system)
+                    return agent._extract_final_text(resp)
+
+                reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+                verdict = _SR.review_turn(user_text, summary, reg.names(),
+                                          reviewer=_SR.make_reviewer(complete))
+                if verdict.action in ("create", "update"):
+                    res = _SR.apply_verdict(verdict, _SU.global_skills_dir(), registry=reg)
+                    if res.get("saved"):
+                        emit(f"\n✦ learned skill: {res['name']}\n")
+            except Exception:
+                pass  # learning is an enhancement; never disturb the session
+
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _toggle_plan(self, arg):
         """/plan [on|off] — turn plan mode on (read-only until you approve) or off.
@@ -170,6 +276,20 @@ class Repl:
         if cmd.kind == "plan":
             self._toggle_plan(cmd.arg)
             return True
+        if cmd.kind == "skills":
+            self._show_skills()
+            return True
+        if cmd.kind == "tasks":
+            led = getattr(self._agent, "_task_ledger", None)
+            if led is None or not led.tasks():
+                self._print("no tasks yet — the agent creates a checklist when it plans multi-step work")
+            else:
+                self._print(f"tasks ({led.summary()}):")
+                self._print(led.render())
+            return True
+        if cmd.kind == "rewind":
+            self._do_rewind(cmd.arg)
+            return True
         if cmd.kind == "unknown":
             self._print(f"unknown command: /{cmd.arg} — try /help")
             return True
@@ -179,22 +299,25 @@ class Repl:
         return True
 
     def _run_turn(self, text: str):
-        """Stream one agent turn. The prompt isn't active during a turn (you've
-        already hit enter), so we write directly to the terminal — the spinner uses
-        raw \\r to overwrite in place, streamed content goes through the ANSI sink.
-        (No patch_stdout here: it does nothing useful mid-turn and strips the \\r.)"""
+        """Stream one agent turn. The PromptSession has already exited (you pressed
+        Enter, and your "› {text}" line is sitting in scrollback), so there is NO
+        live app to fight: the spinner uses raw \\r to overwrite in place and the
+        streamed reply prints directly to the terminal and stays put. (No
+        patch_stdout — nothing useful mid-turn, and it would mangle the \\r spinner.)"""
         agent = self._ensure_agent()
-        # Echo the user's turn as a ▎ you block so the exchange reads cleanly in
-        # scrollback (your turn, then the reply), like the reference TUIs.
+        # Track this prompt as a rewind point and snapshot start-of-turn file state.
+        self._turn += 1
+        if self._rewind is None:
+            from src.rewind import RewindLog
+            self._rewind = RewindLog()
+        self._rewind.begin_turn(self._turn, text)
+        _turn = self._turn
+        agent._rewind_sink = lambda path, pre: self._rewind.record_pre(_turn, path, pre)
         try:
-            from src import render as _R
-            from src.pt_output import emit, render_rich
-            emit("\n" + render_rich(_R.echo_user(text)).rstrip("\n") + "\n")
-        except Exception:
-            pass
-        try:
-            agent.run_task(text)
-            print()  # newline so the next turn's input starts clean
+            result = agent.run_task(text)
+            print()  # newline so the next turn's prompt starts clean
+            summary = (result or {}).get("result", "") if isinstance(result, dict) else ""
+            self._learn_from_turn(text, summary)  # background; never blocks
         except KeyboardInterrupt:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session
@@ -236,24 +359,32 @@ class Repl:
                 pass
 
     def _mcp_names(self) -> list:
-        """Configured MCP server names from mcp.json (best-effort, empty on miss)."""
-        import json
+        """MCP servers to show on the dashboard: CONNECTED ones if MCP is loaded
+        (live truth), else the full CONFIGURED set across all sources (mcp.json +
+        .mcp.json + .claude + .cursor + global) — matching `korgex mcp list`."""
         import os
-        for path in ("mcp.json", os.path.join(os.getcwd(), "mcp.json")):
-            try:
-                with open(path) as f:
-                    data = json.load(f)
-                servers = data.get("mcpServers") or data.get("servers") or {}
-                return list(servers.keys())
-            except (FileNotFoundError, ValueError, OSError):
-                continue
-        return []
+        try:  # connected servers (after the agent loaded MCP) are the real truth
+            from src.mcp_router import get_router
+            connected = [s.get("server") for s in get_router().list_servers() if s.get("server")]
+            if connected:
+                return connected
+        except Exception:
+            pass
+        try:  # otherwise show what's configured (all sources)
+            from src import mcp_config
+            return list(mcp_config.load_servers(cwd=os.getcwd()).keys())
+        except Exception:
+            return []
 
     def _bottom_toolbar(self):
-        """The status line pinned to the BOTTOM of the window: model · plan-state.
+        """The status line pinned to the BOTTOM of the window: model · mode · plan.
         Re-evaluated by prompt_toolkit on every render, so it stays current."""
         plan = " · ◐ PLAN (read-only)" if getattr(self._agent, "plan_mode_active", False) else ""
-        return f" korgex · {self.model}{plan} · /help · /exit "
+        policy = (getattr(self._agent, "edit_policy", None) or "free")
+        mode = " · ⚡ free" if policy in ("free", "session", "bypass") else f" · {policy}"
+        if policy == "bypass":
+            mode = " · ⚡ bypass (no gates)"
+        return f" korgex · {self.model}{mode}{plan} · /help · /exit "
 
     def _session(self):
         """Lazily build the prompt_toolkit session: bottom-anchored input with
@@ -271,21 +402,49 @@ class Repl:
         return self._session().prompt("› ", bottom_toolbar=self._bottom_toolbar)
 
     def run(self):
-        """Start the REPL. Prefer the bottom-pinned inline TUI (input fixed on the
-        last row, output scrolling above in preserved scrollback); fall back to the
-        simple PromptSession loop if that stack isn't available."""
-        try:
-            from src import tui_app
-            if tui_app.is_available():
-                tui_app.run_app(self)   # paints its own banner + bottom-pinned input
-                return
-        except Exception:
-            pass  # any TUI failure → fall back to the simple loop below
+        """Start the REPL.
+
+        Input is driven by a transient PromptSession, NOT a persistent full-screen
+        Application — and that choice is about correctness, not simplicity. A
+        PromptSession's prompt() exits the instant you press Enter, so while a turn
+        streams there is NO application rendering: the reply prints straight to the
+        terminal and stays in scrollback. The earlier Application kept an app alive
+        across the whole turn, and its renderer swallowed/clobbered the streamed
+        reply (it came out invisible). The robust rule: when no app
+        is running, a direct print is the safe path; it only keeps a live app by
+        running the agent on a background thread and marshalling every line back to
+        the UI thread via run_in_terminal+patch_stdout. Until we build that
+        machinery, the transient prompt is the reliable, legible path.
+        """
         self._run_simple()
+
+    def _sweep_skills(self):
+        """Age agent-learned skills by idle time on startup (active→stale→archived,
+        never deleted; only agent-owned skills). Cheap, pure, best-effort."""
+        try:
+            import time
+
+            from src import skill_usage as _SU
+            from src import skills as _SK
+            reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+            store = _SU.UsageStore(_SU.usage_path(_SU.global_skills_dir()))
+            _SU.sweep(store, reg, now=time.time())
+        except Exception:
+            pass
 
     def _run_simple(self):
         """Fallback loop: inline PromptSession (input wherever the cursor is)."""
+        # Connect MCP servers BEFORE the banner so the dashboard shows the real
+        # connected servers + their tools (and they're ready for turn 1). Skipped
+        # entirely when nothing is configured, so startup stays instant.
+        if self._mcp_configured():
+            self._print("· connecting MCP server(s)…")
+            try:
+                self._ensure_agent()
+            except Exception:
+                pass
         self._banner()
+        self._sweep_skills()
         while True:
             try:
                 line = self._read_line()

@@ -45,6 +45,36 @@ def test_tools_list_exposes_the_korg_tools():
         assert t["description"] and t["inputSchema"]["type"] == "object"
 
 
+def test_tools_list_includes_web_and_bus():
+    tools = {t["name"] for t in M.handle_request(_req("tools/list"))["result"]["tools"]}
+    assert {"web_search", "web_fetch", "bus_send", "bus_inbox"} <= tools
+
+
+def test_web_fetch_tool_rejects_non_http():
+    resp = M.handle_request(_req("tools/call",
+                                 {"name": "web_fetch", "arguments": {"url": "file:///etc/passwd"}}))
+    assert resp["result"]["isError"] is True
+
+
+def test_web_search_tool_returns_results(monkeypatch):
+    import src.web_tools as W
+    monkeypatch.setattr(W, "_http_get", lambda url, timeout=20: (
+        200, '<a class="result__a" href="https://r.com">R</a><a class="result__snippet">s</a>'))
+    resp = M.handle_request(_req("tools/call", {"name": "web_search", "arguments": {"query": "x"}}))
+    assert resp["result"]["isError"] is False
+    assert "r.com" in resp["result"]["content"][0]["text"]
+
+
+def test_bus_tools_send_and_read(tmp_path):
+    j = str(tmp_path / "bus.jsonl")
+    send = M.handle_request(_req("tools/call", {"name": "bus_send",
+            "arguments": {"journal": j, "from": "a", "to": "b", "message": "hi there"}}))
+    assert send["result"]["isError"] is False
+    inbox = M.handle_request(_req("tools/call", {"name": "bus_inbox",
+            "arguments": {"journal": j, "agent": "b"}}))
+    assert "hi there" in inbox["result"]["content"][0]["text"]
+
+
 def test_notification_gets_no_response():
     # a JSON-RPC notification (no id), e.g. notifications/initialized
     assert M.handle_request({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None

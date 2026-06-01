@@ -21,6 +21,12 @@ from dataclasses import dataclass
 ASK = "ask"            # confirm every edit
 WORKSPACE = "workspace"  # auto-approve inside the workspace/tmp; confirm outside
 SESSION = "session"    # auto-approve for the whole session
+FREE = "free"          # THE DEFAULT: just act — auto-approve edits everywhere, no
+                       # prompts. Keeps one thin floor: protected dirs (.git/.ssh/
+                       # .gnupg) block and secrets (is_sensitive) still ask. Same
+                       # allow-surface as SESSION, named for what it is.
+BYPASS = "bypass"      # the explicit override: NOTHING is checked — secrets and
+                       # protected dirs included. Maximum freedom, no safety net.
 AUTO = "auto"          # an LLM classifies each action vs the user's permission rules
                        # (allow/soft_deny/hard_deny buckets) — see policy_classifier.py.
                        # The hard-block floor (is_hard_blocked) always applies first.
@@ -95,12 +101,17 @@ def evaluate_edit(file_path: str, *, policy: str = ASK, cwd: str | None = None) 
     policy falls through to ASK — it never silently allows.
     """
     cwd = cwd or os.getcwd()
+    # BYPASS removes every gate — checked BEFORE the floor, by design. It's the
+    # explicit "I accept all risk" override, so even secrets/protected dirs pass.
+    if policy == BYPASS:
+        return EditDecision(ALLOW, "bypass policy: all gates disabled")
     if is_hard_blocked(file_path):
         return EditDecision(BLOCK, f"protected location (.git/.ssh/.gnupg): {file_path}")
     if is_sensitive(file_path):
         return EditDecision(PROMPT, f"sensitive file — always confirm: {file_path}")
-    if policy == SESSION:
-        return EditDecision(ALLOW, "session policy: auto-approved")
+    if policy in (SESSION, FREE):
+        label = "free policy: auto-approved" if policy == FREE else "session policy: auto-approved"
+        return EditDecision(ALLOW, label)
     if policy == WORKSPACE:
         if _under(file_path, cwd) or _in_tmp(file_path):
             return EditDecision(ALLOW, "workspace policy: inside workspace/tmp")

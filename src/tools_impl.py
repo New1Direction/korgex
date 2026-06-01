@@ -1,6 +1,6 @@
 """
 All 30 active + 3 deprecated tool handlers for Korgex.
-Mirrors Jules' complete tool surface extracted from Gemini 4 Pro.
+The complete tool handler surface for korgex.
 """
 
 import os
@@ -254,13 +254,13 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
     try:
         from openai import OpenAI
         client = OpenAI(
-            base_url=os.environ.get("KORGEX_API_URL", "https://inference-api.provider.com/v1"),
+            base_url=os.environ.get("KORGEX_API_URL") or None,
             api_key=os.environ.get("KORGEX_API_KEY", ""),
         )
     except ImportError:
         return {"error": "openai package required: pip install openai"}
-    
-    model = os.environ.get("KORGEX_MODEL", "deepseek/deepseek-v4-flash")
+
+    model = os.environ.get("KORGEX_MODEL", "gpt-4o-mini")
     
     healer = TDDHealer(
         sandbox=SANDBOX,
@@ -283,13 +283,9 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
     ToolParam("query", "STRING", "The query to search for.", required=True),
 ])
 def tool_google_search(query: str, context: dict = None):
-    """Uses the configured search tool."""
-    from web_tools import web_search
-    try:
-        result = web_search(query=query, limit=5)
-        return result
-    except ImportError:
-        return {"error": "web_search not available. Install web_tools or configure a search provider."}
+    """Web search via korgex's built-in (no-key) web search."""
+    from src.web_tools import tool_web_search
+    return tool_web_search(query, max_results=5)
 
 
 @register_tool("view_text_website", "Fetches website content as plain text.", [
@@ -769,7 +765,7 @@ def tool_sandbox_status(context: dict = None):
     return {"mode": "none", "status": "not initialized"}
 
 
-# ─── Memory System (Claude Code-inspired) ─────────────────────────────
+# ─── Memory System (frontier-agent-inspired) ─────────────────────────────
 
 @register_tool("memory_save", "Save a persistent memory about the user, project, or workflow. Immutable — use memory_delete first if updating.", [
     ToolParam("name", "STRING", "Short kebab-case slug (e.g. 'prefers-bun-over-npm').", required=True),

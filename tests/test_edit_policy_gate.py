@@ -29,6 +29,14 @@ def _agent(tmp_path, policy="workspace", interactive=False, workspace_root=None)
     return a
 
 
+def test_default_edit_policy_is_free(tmp_path, monkeypatch):
+    # Out-of-the-box posture is FREE: act without prompting (thin floor only),
+    # not the older WORKSPACE default that asked outside the repo.
+    monkeypatch.delenv("KORGEX_EDIT_POLICY", raising=False)
+    a = KorgexAgent(repo_root=str(tmp_path), interactive=False)
+    assert a.edit_policy == "free"
+
+
 def test_gate_refuses_hard_blocked_path_and_records_block(tmp_path):
     a = _agent(tmp_path, policy="session")
     led = FakeLedger()

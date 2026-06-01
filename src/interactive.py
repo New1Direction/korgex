@@ -1,7 +1,7 @@
 """
 Korgex Interactive TUI — Streaming, Diffs, Spinners, Interrupts.
 
-Bridges the gap between a headless backend and a Claude Code-level feel.
+Bridges the gap between a headless backend and a polished interactive feel.
 
 Features:
 1. SSE stream parser → interleaved thinking (gray) + text (normal) + tool status
@@ -9,8 +9,8 @@ Features:
 3. SIGINT trap → UserInterrupt event (not kill)
 4. Ephemeral spinners that resolve to compact checkmarks
 
-Heavily inspired by the Claude Code MITM capture — our 8-event SSE format
-maps exactly to what we intercepted from api.anthropic.com.
+Parses the documented Anthropic-style streaming SSE format (8 event types),
+as used by korgex's streaming bridge.
 """
 
 import difflib
@@ -43,7 +43,7 @@ console = Console(force_terminal=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. SSE STREAM PARSER — matches Claude Code's 8-event format
+# 1. SSE STREAM PARSER — the streaming 8-event SSE format
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SSEEvent(Enum):
@@ -84,7 +84,7 @@ def parse_sse_stream(raw_stream: str) -> list[SSEMessage]:
     Handles both the Anthropic API format documented at:
     https://docs.anthropic.com/en/api/messages-streaming
     
-    And Claude Code's custom events from the MITM capture.
+    Plus a few synthesized events for tool status.
     """
     messages = []
     current_event = None
@@ -150,7 +150,7 @@ def _parse_sse_data(data: str) -> dict:
 class StreamRenderer:
     """Renders SSE stream events to the terminal in real-time.
     
-    Thinking → dimmed gray (like Claude Code)
+    Thinking → dimmed gray
     Text → normal terminal output
     Tool use → compact status line with tool name + params
     """
@@ -314,7 +314,7 @@ class StreamRenderer:
 def render_unified_diff(file_path: str, old_content: str, new_content: str) -> str:
     """Generate a rich, colorized unified diff.
     
-    Matches the format Claude Code uses for SEARCH/REPLACE edits:
+    A standard unified-diff format for SEARCH/REPLACE edits:
     - Red lines with - prefix for removed content
     - Green lines with + prefix for added content
     - @@ hunks showing line numbers

@@ -38,7 +38,7 @@ def wordmark_tiers(palette: str = _DEFAULT_PALETTE) -> list:
 
 def center_block(text: str, width: int) -> str:
     """Center each line of a multi-line block within `width` columns (for the
-    calm, streaming-style centered wordmark)."""
+    calm, minimal centered wordmark)."""
     lines = text.split("\n")
     block_w = max((len(ln) for ln in lines), default=0)
     pad = max(0, (width - block_w) // 2)
@@ -290,7 +290,7 @@ def render_dashboard(model: str, cwd: str, version: str, *, providers, skills,
 
 def render_wordmark(console, palette: str = _DEFAULT_PALETTE, center: bool = True) -> None:
     """Paint the wordmark with a per-row gradient (default: red) for 3D depth,
-    centered in the terminal by default (the calm, streaming-style look)."""
+    centered in the terminal by default (the calm look)."""
     from rich.text import Text
     from rich.align import Align
     tiers = wordmark_tiers(palette)

@@ -1,7 +1,7 @@
 """
 memory_drift.py — make stale memory an exact, auditable signal (roadmap P2 #5).
 
-The one genuine differentiator vs Claude Code / Cursor / Codex: they punt the
+The one genuine differentiator vs other agents: they punt the
 trust-hierarchy problem (a remembered fact silently rots; you discover it when
 the agent acts on it). korgex anchors each memory to the sha256 of what it was
 derived from, so drift is a content-hash *fact* — and the decision to keep,

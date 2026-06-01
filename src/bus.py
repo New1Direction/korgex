@@ -9,7 +9,7 @@ Multi-agent frameworks have messaging; this one is **auditable**. It reuses the
 journal korgex already writes, so:
   * secrets in message bodies are redacted at the ledger boundary (src/sanitize),
   * the chain `verify`s, and the conversation `audit`s,
-  * any agent (korgex, Claude Code, Codex, …) that appends to the shared journal
+  * any agent (korgex or another CLI, …) that appends to the shared journal
     joins the bus — cross-vendor by construction.
 
 The chain is append-only, so a message is never mutated: "read" is recorded as a

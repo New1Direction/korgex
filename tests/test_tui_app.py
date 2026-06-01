@@ -1,4 +1,4 @@
-"""Bottom-pinned inline TUI (the reference agent-style): a non-full-screen prompt_toolkit
+"""Bottom-pinned inline TUI: a non-full-screen prompt_toolkit
 Application with the input TextArea pinned to the bottom, output scrolling above
 in preserved scrollback. These pin the pure pieces (prompt text, bottom-push math,
 accept routing, status line); the live paint is verified by eye.

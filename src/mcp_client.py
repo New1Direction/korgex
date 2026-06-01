@@ -53,14 +53,17 @@ class MCPTool:
 
 @dataclass
 class MCPServerConfig:
-    """Configuration for an MCP server connection."""
+    """Configuration for an MCP server connection (stdio subprocess or remote HTTP)."""
     name: str
-    command: str
+    command: str = ""  # stdio transport; empty for remote (http) servers
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     transport: str = "stdio"  # "stdio" or "http"
     url: Optional[str] = None  # For HTTP transport
     timeout: int = 60
+    headers: dict[str, str] = field(default_factory=dict)  # HTTP auth, e.g. Authorization: Bearer …
+    tool_timeouts: dict[str, int] = field(default_factory=dict)  # per-tool timeout overrides (secs)
+    startup_timeout: int = 30  # seconds to wait for the initialize handshake
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -100,6 +103,38 @@ def parse_response(line: str) -> dict:
         return {"error": {"message": f"Invalid JSON: {line[:200]}"}}
 
 
+def _parse_http_jsonrpc(body: str) -> dict:
+    """Parse an HTTP MCP response body into a JSON-RPC response dict. Handles a
+    plain JSON body and a text/event-stream (SSE) body (extracts the data: JSON)."""
+    text = (body or "").strip()
+    if not text:
+        return {"error": "empty response"}
+    if text.startswith(("event:", "data:")) or "\ndata:" in text:
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if line.startswith("data:"):
+                chunk = line[5:].strip()
+                if chunk and chunk != "[DONE]":
+                    try:
+                        return json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+        return {"error": f"unparseable SSE body: {text[:200]}"}
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return {"error": f"invalid JSON: {text[:200]}"}
+
+
+def _default_http_post(url: str, payload: dict, headers: dict, timeout) -> tuple:
+    """Real HTTP POST of a JSON-RPC message; returns (status_code, body_text)."""
+    import httpx
+    h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    h.update(headers or {})
+    r = httpx.post(url, json=payload, headers=h, timeout=timeout)
+    return r.status_code, r.text
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MCP CLIENT — stdio transport
 # ═══════════════════════════════════════════════════════════════════════════
@@ -114,8 +149,11 @@ class MCPClient:
         4. disconnect() — send shutdown notification, kill process
     """
     
-    def __init__(self, config: MCPServerConfig):
+    def __init__(self, config: MCPServerConfig, http_post=None):
         self.config = config
+        # Remote (HTTP) transport: post(url, payload, headers, timeout) -> (status, body).
+        # Injected in tests; defaults to a real httpx POST. None for stdio servers.
+        self._http_post = http_post
         self._process: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         self._request_id = 0
@@ -143,10 +181,16 @@ class MCPClient:
     # ── Connection ───────────────────────────────────────────────────
     
     def connect(self) -> dict:
-        """Spawn the server process and perform initialize handshake."""
+        """Connect to the server and perform the initialize handshake.
+
+        Remote (http) servers POST JSON-RPC to a url; stdio servers spawn a process.
+        """
         if self._connected:
             return {"status": "already_connected"}
-        
+
+        if self.config.transport == "http":
+            return self._connect_http()
+
         try:
             env = os.environ.copy()
             env.update(self.config.env)
@@ -237,9 +281,9 @@ class MCPClient:
         """Fetch the list of available tools from the server."""
         if not self._connected:
             return []
-        
-        result = self._send_request("tools/list", {})
-        
+
+        result = self._request("tools/list", {})
+
         if "error" in result:
             return []
         
@@ -260,19 +304,67 @@ class MCPClient:
     # ── Tool Execution ───────────────────────────────────────────────
     
     def call_tool(self, name: str, arguments: dict) -> dict:
-        """Call a tool on the MCP server."""
+        """Call a tool on the MCP server (per-tool timeout override applies if set)."""
         if not self._connected:
             return {"error": "Not connected to server"}
-        
-        result = self._send_request("tools/call", {
+
+        timeout = self.config.tool_timeouts.get(name) if self.config.tool_timeouts else None
+        result = self._request("tools/call", {
             "name": name,
             "arguments": arguments,
-        })
-        
+        }, timeout=timeout)
+
         if "error" in result:
             return {"error": str(result["error"])}
-        
+
         return result.get("result", {})
+
+    # ── Transport-agnostic request dispatch ───────────────────────────
+    def _request(self, method: str, params: dict = None, timeout: int = None) -> dict:
+        """Send a JSON-RPC request over whichever transport this server uses."""
+        if self.config.transport == "http":
+            return self._http_send_request(method, params, timeout=timeout)
+        return self._send_request(method, params)
+
+    # ── HTTP (remote) transport ────────────────────────────────────────
+    def _connect_http(self) -> dict:
+        """Initialize handshake against a remote server over HTTP POST."""
+        if not self.config.url:
+            return {"error": "http transport requires a url", "status": "failed"}
+        from src import mcp_reverse
+        result = self._http_send_request("initialize", {
+            "protocolVersion": "2025-03-26",
+            "capabilities": mcp_reverse.client_capabilities(),
+            "clientInfo": {"name": "korgex", "version": "1.0.0"},
+        }, timeout=self.config.startup_timeout)
+        if "error" in result:
+            return {"error": f"Handshake failed: {result['error']}", "status": "failed"}
+        self._capabilities = result.get("result", {}).get("capabilities", {})
+        self._connected = True
+        try:  # best-effort initialized notification
+            self._http_send_request("notifications/initialized", {}, timeout=5)
+        except Exception:
+            pass
+        return {"status": "connected", "server": self.config.name,
+                "capabilities": list(self._capabilities.keys())}
+
+    def _http_send_request(self, method: str, params: dict = None, timeout: int = None) -> dict:
+        """POST one JSON-RPC request to the remote server; parse the (JSON or SSE)
+        body back into a JSON-RPC response dict (same shape as the stdio path)."""
+        req_id = f"req_{self._request_id}"
+        self._request_id += 1
+        payload = {"jsonrpc": "2.0", "id": req_id, "method": method}
+        if params:
+            payload["params"] = params
+        post = self._http_post or _default_http_post
+        try:
+            status, body = post(self.config.url, payload, self.config.headers,
+                                 timeout or self.config.timeout)
+        except Exception as e:
+            return {"error": f"http transport error: {type(e).__name__}: {e}"}
+        if status and status >= 400:
+            return {"error": f"http {status}"}
+        return _parse_http_jsonrpc(body)
     
     # ── Internal: JSON-RPC over stdio ─────────────────────────────────
     
@@ -363,6 +455,8 @@ class MCPClient:
                     self._pending_requests[req_id].set()
     
     def is_connected(self) -> bool:
+        if self.config.transport == "http":
+            return self._connected  # no subprocess to liveness-check
         return self._connected and self._process is not None and self._process.poll() is None
     
     def get_stderr_log(self) -> list[str]:

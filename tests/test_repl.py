@@ -54,6 +54,47 @@ def test_leading_slash_in_a_sentence_is_still_a_turn_only_if_spaced():
     assert R.parse_repl_input("what does /etc/hosts do").kind == "turn"
 
 
+def test_slash_skills_parses():
+    assert R.parse_repl_input("/skills").kind == "skills"
+
+
+def test_slash_tasks_parses():
+    assert R.parse_repl_input("/tasks").kind == "tasks"
+
+
+def test_slash_rewind_parses():
+    assert R.parse_repl_input("/rewind").kind == "rewind"
+    assert R.parse_repl_input("/rewind").arg is None
+    assert R.parse_repl_input("/rewind 2").arg == "2"
+
+
+def test_mcp_configured_reflects_config_file(tmp_path, monkeypatch):
+    import io
+    import json
+
+    import src.mcp_config as MC
+    monkeypatch.chdir(tmp_path)
+    # Isolate from the user's real global config by scoping sources to this dir.
+    monkeypatch.setattr(MC, "default_sources", lambda cwd=None: [str(tmp_path / "mcp.json")])
+    r = R.Repl(out=io.StringIO())
+    assert r._mcp_configured() is False
+    (tmp_path / "mcp.json").write_text(json.dumps({"mcpServers": {"x": {"url": "https://y"}}}))
+    assert r._mcp_configured() is True
+
+
+def test_mcp_names_lists_all_configured_servers(tmp_path, monkeypatch):
+    import io
+    import json
+
+    import src.mcp_config as MC
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(MC, "default_sources", lambda cwd=None: [str(tmp_path / "mcp.json")])
+    (tmp_path / "mcp.json").write_text(json.dumps(
+        {"mcpServers": {"alpha": {"url": "https://a"}, "beta": {"command": "x"}}}))
+    r = R.Repl(out=io.StringIO())
+    assert sorted(r._mcp_names()) == ["alpha", "beta"]
+
+
 def test_slash_plan_parses():
     assert R.parse_repl_input("/plan").kind == "plan"
     assert R.parse_repl_input("/plan").arg is None

@@ -1,4 +1,4 @@
-"""Bottom-pinned inline TUI for korgex (the reference agent-style architecture).
+"""Bottom-pinned inline TUI for korgex (non-full-screen prompt_toolkit).
 
 A **non-full-screen** prompt_toolkit ``Application`` (``full_screen=False``) whose
 root ``HSplit`` puts a status bar + the input ``TextArea`` at the bottom. At
@@ -74,7 +74,7 @@ def run_app(repl) -> None:
 
     from src.repl import parse_repl_input
 
-    # Push the whole TUI to the bottom of the terminal (the reference agent's trick).
+    # Push the whole TUI to the bottom of the terminal.
     try:
         lines = shutil.get_terminal_size((80, 24)).lines
         n = bottom_push_count(lines)
@@ -103,7 +103,7 @@ def run_app(repl) -> None:
     )
 
     # A Tip line above the input, and the input wrapped in a bordered Frame with
-    # the status right-aligned inside it — the clean streaming-style typing area.
+    # the status right-aligned inside it — the clean typing area.
     from prompt_toolkit.widgets import Frame
     from prompt_toolkit.layout import VSplit
 
@@ -119,8 +119,13 @@ def run_app(repl) -> None:
     ])
     input_frame = Frame(input_row, style="class:frame")
 
+    # The app must own ONLY these few bottom rows — NOT the whole screen. A
+    # full-height spacer here made the app's post-turn redraw clear the entire
+    # screen, erasing the reply that just streamed in (invisible reply + thrash).
+    # Kept short, run_in_terminal scrolls turn output into real scrollback ABOVE
+    # the input, and the redraw only repaints these rows. The startup
+    # newline-push (above) is what anchors the input to the bottom initially.
     root = HSplit([
-        Window(height=Dimension(weight=1)),  # flexible spacer keeps everything at bottom
         tip_bar,
         input_frame,
     ])
