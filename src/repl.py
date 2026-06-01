@@ -200,8 +200,10 @@ class Repl:
         except Exception as e:  # never let one bad turn kill the session
             self._print(f"[error] {e}")
 
-    def _banner(self):
-        """Paint the startup banner (skippable in tests)."""
+    def _banner(self, animated_portal: bool = False):
+        """Paint the startup banner. With `animated_portal`, the wordmark still
+        prints but the static welcome panel is skipped — the live app shows an
+        animated portal splash instead (so we don't double the visual)."""
         import os
         from src import banner
         configured = self.cfg.is_configured() or bool(self.api_key)
@@ -212,6 +214,8 @@ class Repl:
             version = "dev"
         banner.render(model=self.model, cwd=os.getcwd(), version=version,
                       configured=configured, out=self.out)
+        if animated_portal:
+            return  # the animated in-app portal replaces the static panel
         # Fill the space with a welcome dashboard: connected providers, available
         # skills + MCP servers, and quick-start tips (real data, sections skipped
         # when empty). Best-effort — never block startup.

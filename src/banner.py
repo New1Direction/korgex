@@ -163,6 +163,41 @@ _MASCOT = r"""●●●◉◉◉◉◉◉◉◉◉◉◉◉◉●●●
 _RAMP_DENSITY = {"●": 0, "◉": 1, "○": 2, "◦": 3, "≀": 4, "∴": 5, "·": 5, " ": 5}
 
 
+# Animated portal: the ring pattern flows outward as `phase` advances. The ramp
+# has 8 glyphs, so the loop repeats every 8 phases (PORTAL_PERIOD).
+_PORTAL_RAMP = "●◉○◦≀∴· "
+PORTAL_PERIOD = len(_PORTAL_RAMP)
+_PORTAL_W, _PORTAL_H = 19, 13
+
+
+def portal_frame(phase: int) -> str:
+    """The portal at animation `phase` — concentric rings whose pattern shifts with
+    phase so they appear to flow. Loops every PORTAL_PERIOD phases."""
+    import math
+    cx, cy = (_PORTAL_W - 1) / 2, (_PORTAL_H - 1) / 2
+    rows = []
+    for y in range(_PORTAL_H):
+        line = ""
+        for x in range(_PORTAL_W):
+            d = math.hypot((x - cx) / 2.0, (y - cy))
+            line += _PORTAL_RAMP[int(d * 1.9 + phase) % len(_PORTAL_RAMP)]
+        rows.append(line)
+    return "\n".join(rows)
+
+
+def portal_frame_lines(phase: int, palette: str = _DEFAULT_PALETTE) -> list:
+    """Animated portal frame as ``(style, text)`` rows, gradient-tinted by each
+    row's glyph density (bright core → deep edge), for painting in the live app."""
+    tiers = wordmark_tiers(palette)
+    out = []
+    for row in portal_frame(phase).split("\n"):
+        glyphs = [c for c in row if c.strip()]
+        avg = (sum(_RAMP_DENSITY.get(c, 3) for c in glyphs) / len(glyphs)) if glyphs else 5
+        ti = min(len(tiers) - 1, int(avg * (len(tiers) - 1) / 5))
+        out.append((f"bold {tiers[len(tiers) - 1 - ti]}", row))
+    return out
+
+
 def mascot() -> str:
     """The portal mascot as a plain multi-line string."""
     return _MASCOT
