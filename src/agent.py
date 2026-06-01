@@ -687,6 +687,13 @@ class KorgexAgent:
         mutated = False  # did any file-mutating tool run? gates the test-gate
         try:
             for i in range(max_iter):
+                # ── Auto-compaction: if the transcript is nearing the model's
+                # context window, have the model summarize the older turns and
+                # continue, so long runs don't die at the ceiling. Top-level only
+                # (a subagent's history is short-lived); fails safe to no-op.
+                if tools_filter is None:
+                    messages = self._maybe_compact(messages, korg, prompt_seq)
+
                 # ── korg: time the LLM round-trip ──────────────────────────
                 _llm_t0 = time.monotonic()
                 response = self._call(client, messages, tools_payload, system_prompt=sys_prompt)
@@ -1015,6 +1022,43 @@ class KorgexAgent:
     def approve_plan(self):
         """Exit plan mode → execution is now allowed (the user approved the plan)."""
         self.plan_mode_active = False
+
+    def _maybe_compact(self, messages: list, korg, prompt_seq) -> list:
+        """If the transcript is nearing the model's context window, compact it: the
+        model writes a handoff summary and history becomes [head + recent raw turns
+        + summary]. Returns the (possibly) compacted list; a no-op or any failure
+        returns the original. Records a `compaction` ledger event when it fires."""
+        from src import compaction as _CP
+        limit = _CP.context_window_for(self.model)
+        if not _CP.should_compact(messages, limit):
+            return messages
+        # OpenAI-shaped history leads with a system message to preserve as head;
+        # Anthropic carries system out-of-band, so head is empty.
+        head = messages[:1] if (messages and messages[0].get("role") == "system") else []
+        history = messages[len(head):]
+        before = _CP.estimate_tokens(messages)
+
+        def _summarize(hist):
+            prompt = _CP.SUMMARY_PROMPT + "\n\n--- conversation ---\n" + "\n".join(
+                f"{m.get('role')}: {str(m.get('content'))[:4000]}" for m in hist)
+            resp = self._call(self._get_client(),
+                              [{"role": "user", "content": prompt}], [],
+                              system_prompt="You write terse, faithful handoff summaries.")
+            return self._extract_final_text(resp)
+
+        recent_budget = int(limit * 0.25)  # keep ~a quarter of the window as raw recent turns
+        out = _CP.compact_messages(head, history, summarize=_summarize,
+                                   recent_budget_tokens=recent_budget)
+        if out is not messages and _CP.estimate_tokens(out) < before:
+            korg.record_tool_call(
+                tool_name="compaction",
+                args={"model": self.model, "trigger_tokens": before, "limit": limit},
+                result={"tokens_before": before, "tokens_after": _CP.estimate_tokens(out),
+                        "turns_before": len(messages), "turns_after": len(out)},
+                success=True, duration_ms=0, triggered_by=prompt_seq,
+            )
+            return out
+        return messages
 
     def _edit_policy_block(self, call: dict, korg, llm_seq):
         """Edit-approval gate. For a file-mutating tool: consult the policy, record
