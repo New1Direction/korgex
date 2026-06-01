@@ -16,9 +16,13 @@ def test_builtin_skills_are_bundled_and_loaded():
         "safe-refactoring", "using-git", "exploring-a-codebase",
         "requesting-code-review", "handling-ambiguity", "writing-clearly",
         "spike", "condition-based-waiting",
+        # third wave — core SWE depth + delivery
+        "performance-profiling", "security-review", "error-handling",
+        "concurrency-correctness", "managing-dependencies", "api-design",
+        "database-migrations", "observability-and-logging",
     ):
         assert expected in names, f"{expected} missing from built-in library: {names}"
-    assert len(names) >= 16
+    assert len(names) >= 24
 
 
 def test_builtin_skills_are_marked_built_in():
