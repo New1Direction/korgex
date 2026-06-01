@@ -20,6 +20,7 @@ _CLEAR = {"/clear"}
 _HELP_TEXT = """\
 korgex — commands
   /model [name]   show models, or switch the live model mid-session
+  /plan [on|off]  plan mode: agent stays read-only until you approve its plan
   /clear          start a fresh conversation
   /help  /?       this help
   /exit  /quit    leave (also Ctrl-D)
@@ -52,6 +53,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("clear")
         if head == "/model":
             return Command("model", rest or None)
+        if head == "/plan":
+            return Command("plan", rest or None)
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
 
@@ -111,6 +114,27 @@ class Repl:
             self._agent = KorgexAgent(model=self.model, interactive=True)
         return self._agent
 
+    def _toggle_plan(self, arg):
+        """/plan [on|off] — turn plan mode on (read-only until you approve) or off.
+        With no arg, toggles. 'approve' exits plan mode and lets execution proceed."""
+        agent = self._ensure_agent()
+        want = (arg or "").strip().lower()
+        if want in ("approve", "go", "execute"):
+            agent.approve_plan()
+            self._print("✓ plan approved — executing (read-only lifted)")
+            return
+        if want == "on":
+            agent.plan_mode_active = True
+        elif want == "off":
+            agent.plan_mode_active = False
+        else:
+            agent.plan_mode_active = not getattr(agent, "plan_mode_active", False)
+        if agent.plan_mode_active:
+            self._print("◐ plan mode ON — I'll stay read-only and propose a plan; "
+                        "`/plan approve` to execute, `/plan off` to cancel")
+        else:
+            self._print("plan mode OFF")
+
     def handle(self, cmd: Command) -> bool:
         """Apply one parsed command. Returns False when the session should end."""
         if cmd.kind == "exit":
@@ -129,6 +153,9 @@ class Repl:
                 self._print(self._models_overview())
             else:
                 self._switch_model(cmd.arg)
+            return True
+        if cmd.kind == "plan":
+            self._toggle_plan(cmd.arg)
             return True
         if cmd.kind == "unknown":
             self._print(f"unknown command: /{cmd.arg} — try /help")
