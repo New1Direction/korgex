@@ -441,6 +441,13 @@ def route_tool_call(tool_name: str, params: dict, repo_root: str = None) -> dict
     if tool_name == "ToolSearch":
         return tool_search(params.get("query", ""), int(params.get("limit", 5) or 5))
 
+    # Skill is a meta-tool: it resolves a file-defined skill's body (progressive
+    # disclosure) so the agent can follow it. Routes to the skills loader.
+    if tool_name == "Skill":
+        from src import skills as _SK
+        reg = _SK.load_skills(_SK.default_skill_roots(repo_root))
+        return _SK.invoke_skill(reg, params.get("skill", ""), params.get("args", "") or "")
+
     if tool_name in _MCP_TOOLS:
         try:
             from src.mcp_client import get_manager

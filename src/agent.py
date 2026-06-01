@@ -261,6 +261,16 @@ class KorgexAgent:
                     parts.append(f"# Memory\n\n{content[:3000]}")
                 break
 
+        # Skills index (name + one-line description only — bodies load on demand
+        # when the Skill tool invokes one). Empty string → section skipped.
+        try:
+            from src import skills as _SK
+            block = _SK.load_skills(_SK.default_skill_roots(self.repo_root)).index_block()
+            if block:
+                parts.append(block)
+        except Exception:
+            pass  # skills are an enhancement; never break prompt assembly
+
         return "\n\n".join(parts)
 
     def _recall_and_reconcile(self, korg, prompt_seq) -> str:
