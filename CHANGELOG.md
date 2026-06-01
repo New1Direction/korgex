@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-06-01
+
+The **terminal-native conversational agent** batch — korgex becomes a cross-vendor Claude Code competitor you live inside, plus a fleet of frontier-agent capabilities.
+
+### Added — the CLI experience
+- **Interactive REPL** (`src/repl.py`): bare `korgex` on a TTY drops into a streaming, multi-turn session. Bottom-pinned input via `prompt_toolkit` (input stays on the last row, output scrolls above in preserved scrollback), in-memory history, slash commands (`/model`, `/plan`, `/clear`, `/help`, `/exit`). Non-TTY still prints help so scripts/CI never hang.
+- **`korgex setup`** (`src/setup_wizard.py`) + **config** (`src/config.py`): connect any provider (OpenRouter / Anthropic / OpenAI / Ollama) — keys + a default model saved to `~/.korgex/config.json` (0o600). The agent now resolves its key + base_url from config, not just env.
+- **Priced model selector** (`src/model_selector.py`): `/model` shows a numbered, cost-labeled menu; defaults to a mid/cheap tier (no surprise Opus billing). Free-text model ids still work.
+- **Premium startup**: a red-gradient `KORGEX` wordmark, a bordered welcome panel (gradient portal + model/providers/MCP/skills/quick-tips/summary), and a Grok-style bordered input box (`src/banner.py`, `src/tui_app.py`).
+- **Clean block-rendered output** (`src/render.py`): per-role accent-bar blocks (`▎ you` / `▎ korgex`), compact `◆ verb target` tool lines, head/tail truncation, optional markdown re-render (`$KORGEX_MARKDOWN=1`), and a thinking spinner that overwrites in place.
+
+### Added — agent capabilities
+- **Tiered tool exposure + real `ToolSearch`** (`src/tool_search.py`): a BM25-flavoured index over deferred tools; MCP/plugin tools are discovered on demand instead of dumped into every request.
+- **Classifier permission mode** (`src/policy_classifier.py`): an `auto` edit-policy tier where a cheap model judges each action against your natural-language rules (allow / soft-deny / hard-deny), with the deterministic hard-block floor underneath.
+- **Plan mode** (`src/plan_mode.py`): read-only until you approve the agent's plan; only writes to the plan file until then.
+- **Model-authored compaction** (`src/compaction.py`): summarize-and-continue when a long run nears the context window — ledger-logged, fail-safe.
+- **File-defined skills** (`src/skills.py`): `SKILL.md` registry with progressive disclosure (a compact index in the prompt, body loaded on demand) and trust tiers.
+- **Loop safety rails** (`src/loop_guard.py`) + **typed stall classifier** (`src/stall_classifier.py`): kill infinite retries, nudge narrate-not-act, and flag false-completion.
+- **Provenance-verified agent bus** (`src/bus.py`): per-message Ed25519 signatures, re-resolved per message — catches tampering and impersonation on the coordination channel.
+- **MCP elicitation + sampling** (`src/mcp_reverse.py`): servers can ask the user a question or borrow the client's LLM.
+
 ## [0.10.0] — 2026-05-31
 
 The agent-economy batch: agents can now **coordinate, sign, deal, and get paid** — and "who did this" becomes a signature, not a claim. Every step is a pure function of the chain, verifiable in any browser.
