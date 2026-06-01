@@ -218,6 +218,10 @@ class KorgexAgent:
         # Lazy: only construct the session when actually streaming
         self._session = None
 
+        # The current task prompt, used by the 'auto' permission classifier as the
+        # user's stated intent. Set per run_task; defaulted so the gate never KeyErrors.
+        self._active_intent = ""
+
     def _assemble_system_prompt(self) -> str:
         """Base prompt + project instructions + persistent memory index.
 
@@ -635,6 +639,9 @@ class KorgexAgent:
         if tools_filter is None:
             from src.tool_abstraction import clear_staged_tools
             clear_staged_tools()
+        # Remember the user's stated intent so the 'auto' permission classifier can
+        # judge whether a soft-denied action is authorized by what they asked for.
+        self._active_intent = prompt
         tools_payload = self._get_provider_tools(tools_filter)
 
         if self.provider == "anthropic":
@@ -980,10 +987,16 @@ class KorgexAgent:
         path = _EP.mutating_path(call.get("name"), args)
         if path is None:
             return None
-        proceed, action, reason = _EP.guard_decision(
-            path, policy=self.edit_policy, cwd=self.repo_root,
-            interactive=self.interactive, confirmer=self._edit_confirmer,
-        )
+        # 'auto' policy: an LLM classifies the action against the user's rules
+        # (4 buckets). The hard-block floor still applies first — a classifier can
+        # never re-allow a protected path (.git/.ssh/.gnupg).
+        if self.edit_policy == "auto" and not _EP.is_hard_blocked(path):
+            proceed, action, reason = self._classify_edit(call, path)
+        else:
+            proceed, action, reason = _EP.guard_decision(
+                path, policy=self.edit_policy, cwd=self.repo_root,
+                interactive=self.interactive, confirmer=self._edit_confirmer,
+            )
         sha = self._checkpoint_before_mutation(path) if proceed else None
         korg.record_tool_call(
             tool_name="edit_policy",
@@ -995,6 +1008,45 @@ class KorgexAgent:
             return {"error": "edit refused by approval policy",
                     "verdict": action.upper().replace("-", "_"), "reason": reason}
         return None
+
+    def _classify_edit(self, call: dict, path: str) -> tuple:
+        """Run the 'auto' classifier policy for one edit. Loads the user's permission
+        rules (from ~/.korgex/config.json under "permission_rules"), asks a cheap
+        model to bucket the action against them, and resolves to (proceed, action,
+        reason). No rules configured, or any failure, fails safe to the deterministic
+        workspace policy — 'auto' never silently allows."""
+        from src import policy_classifier as PC
+        try:
+            import json as _json
+            from src.config import default_path
+            try:
+                with open(default_path()) as f:
+                    raw_rules = (_json.load(f) or {}).get("permission_rules") or {}
+            except (FileNotFoundError, ValueError, OSError):
+                raw_rules = {}
+            rules = PC.parse_rules(raw_rules)
+            if rules.is_empty():
+                # nothing to classify against → fall back to deterministic gate
+                return _EP.guard_decision(path, policy=_EP.WORKSPACE, cwd=self.repo_root,
+                                          interactive=self.interactive, confirmer=self._edit_confirmer)
+            action_desc = f"{call.get('name')} {path}"
+            return PC.decide_action(action_desc, intent=self._active_intent or "",
+                                    rules=rules, env=rules.environment, judge=self._policy_judge)
+        except Exception:
+            # Any wiring failure must not silently allow — defer to workspace policy.
+            return _EP.guard_decision(path, policy=_EP.WORKSPACE, cwd=self.repo_root,
+                                      interactive=self.interactive, confirmer=self._edit_confirmer)
+
+    def _policy_judge(self, action_desc: str, intent: str, rules, env) -> dict:
+        """The real judge: ask a cheap model to bucket the action. Cheap + fast;
+        a malformed/failed reply is handled upstream as fail-safe (→ ask)."""
+        from src import policy_classifier as PC
+        prompt = PC.build_judge_prompt(action_desc, intent, rules)
+        client = self._get_client()
+        # One-shot, no tools, tiny output — use the existing non-streaming call.
+        resp = self._call(client, [{"role": "user", "content": prompt}], [],
+                           system_prompt="You are a terse JSON-only permission classifier.")
+        return PC.parse_judge_reply(self._extract_final_text(resp))
 
     def _lsp_enforce_block(self, call: dict, diagnostics, korg, llm_seq, pre_content):
         """LSP enforcement gate (Gate L) — opt-in hard-block on severity-1 errors.
