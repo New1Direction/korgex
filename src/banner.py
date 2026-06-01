@@ -140,41 +140,51 @@ def dashboard(model: str, cwd: str, version: str, *, providers: list,
     return "\n".join(L)
 
 
-# Mascot — a Spartan/Corinthian helmet (korgex's own ASCII): tall crest, domed
-# helm, T-slit visor. Painted with the same gradient as the wordmark (crest bright,
-# fading down the helm) so the left column ties into the red KORGEX above it.
-_MASCOT = r"""         ▟▙
-        ▟██▙
-       ▟████▙
-      ▟██████▙
-    ▗▟████████▙▖
-   ▟████████████▙
-  ▟██▀▀▀▀▀▀▀▀▀▀██▙
-  ██  ▘     ▝   ██
-  ██   ▗▄▄▄▖    ██
-  ██     █      ██
-  ▜█▙    █     ▟█▛
-   ▜██▄▄▄█▄▄▄██▛
-     ▀▀█████▀▀
-        ▀▀▀"""
+# Mascot — a hypnotic "portal": concentric rings fading from a dense outer edge to
+# a hollow glowing core. Abstract + generative (not a literal object), and its
+# RADIAL density maps perfectly onto the gradient — outer ring deepest, inner glow
+# brightest. korgex's own design.
+_MASCOT = r"""●●●◉◉◉◉◉◉◉◉◉◉◉◉◉●●●
+◉◉◉◉○○○○○○○○○○○◉◉◉◉
+◉○○○◦◦◦◦◦◦◦◦◦◦◦○○○◉
+○○◦◦◦≀≀≀≀≀≀≀≀≀◦◦◦○○
+○◦◦≀≀≀∴∴∴∴∴∴∴≀≀≀◦◦○
+◦◦≀≀≀∴∴·····∴∴≀≀≀◦◦
+◦◦≀≀∴∴··   ··∴∴≀≀◦◦
+◦◦≀≀≀∴∴·····∴∴≀≀≀◦◦
+○◦◦≀≀≀∴∴∴∴∴∴∴≀≀≀◦◦○
+○○◦◦◦≀≀≀≀≀≀≀≀≀◦◦◦○○
+◉○○○◦◦◦◦◦◦◦◦◦◦◦○○○◉
+◉◉◉◉○○○○○○○○○○○◉◉◉◉
+●●●◉◉◉◉◉◉◉◉◉◉◉◉◉●●●"""
+
+# Density of each ramp glyph (dense outer → faint core), used to pick a gradient
+# tier per character so the portal glows: bright at the hollow center, deep at the edge.
+_RAMP_DENSITY = {"●": 0, "◉": 1, "○": 2, "◦": 3, "≀": 4, "∴": 5, "·": 5, " ": 5}
 
 
 def mascot() -> str:
-    """The Spartan-helmet mascot as a plain multi-line string."""
+    """The portal mascot as a plain multi-line string."""
     return _MASCOT
 
 
 def mascot_lines(palette: str = _DEFAULT_PALETTE) -> list:
-    """The mascot as ``(style, text)`` rows, tinted with the gradient palette
-    (crest brightest at top → deep at the base). Stretches the palette across all
-    rows so the helmet shades smoothly."""
+    """The mascot as ``(style, text)`` rows. Each row is tinted by its *dominant*
+    glyph's radial density so the portal shades from a deep outer ring to a bright
+    inner glow, matching the wordmark's palette."""
     tiers = wordmark_tiers(palette)
     rows = _MASCOT.split("\n")
     out = []
-    for i, row in enumerate(rows):
-        # map row index across the palette so the gradient spans the whole figure
-        ti = min(len(tiers) - 1, i * len(tiers) // max(1, len(rows)))
-        out.append((f"bold {tiers[ti]}", row))
+    for row in rows:
+        glyphs = [c for c in row if c.strip()]
+        # average density of this row's glyphs → a gradient tier (inner=bright)
+        if glyphs:
+            avg = sum(_RAMP_DENSITY.get(c, 3) for c in glyphs) / len(glyphs)
+        else:
+            avg = 5
+        ti = min(len(tiers) - 1, int(avg * (len(tiers) - 1) / 5))
+        # invert: low density (dense outer ●) = deep tier; high density (core) = bright
+        out.append((f"bold {tiers[len(tiers) - 1 - ti]}", row))
     return out
 
 

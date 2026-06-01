@@ -130,10 +130,10 @@ def test_center_block_pads_to_width():
 
 # ── spartan helmet mascot ──────────────────────────────────────────────────────
 
-def test_mascot_is_a_multiline_helmet():
+def test_mascot_is_a_multiline_figure():
     m = B.mascot()
-    assert m.count("\n") >= 6           # a real multi-row figure, not a blob
-    assert any(c in m for c in "▟█▙▜")  # block-drawing art present
+    assert m.count("\n") >= 6                # a real multi-row figure, not a blob
+    assert any(c in m for c in "●◉○◦≀∴")     # the portal's ring glyphs present
 
 
 def test_mascot_render_lines_are_color_tagged():
