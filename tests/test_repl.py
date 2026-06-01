@@ -80,7 +80,7 @@ def test_loop_dispatches_lines_until_exit(monkeypatch):
     lines = iter(["hello", "/help", "/exit"])
     r._read_line = lambda: next(lines)
     r._banner = lambda: None  # skip the rich banner in the loop test
-    r.run()
+    r._run_simple()
     assert seen == ["turn", "help", "exit"]
 
 
@@ -92,7 +92,7 @@ def test_loop_stops_on_eof(monkeypatch):
         raise EOFError
     r._read_line = eof
     r._banner = lambda: None
-    r.run()  # must return cleanly, not hang or raise
+    r._run_simple()  # must return cleanly, not hang or raise
     assert seen == []
 
 
