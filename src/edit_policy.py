@@ -21,6 +21,9 @@ from dataclasses import dataclass
 ASK = "ask"            # confirm every edit
 WORKSPACE = "workspace"  # auto-approve inside the workspace/tmp; confirm outside
 SESSION = "session"    # auto-approve for the whole session
+AUTO = "auto"          # an LLM classifies each action vs the user's permission rules
+                       # (allow/soft_deny/hard_deny buckets) — see policy_classifier.py.
+                       # The hard-block floor (is_hard_blocked) always applies first.
 
 # ── decision actions ────────────────────────────────────────────────────────
 ALLOW = "allow"
