@@ -135,6 +135,9 @@ Usage:
 - Prefer dedicated tools (Read, Edit, Write, Glob, Grep) over Bash when one fits.
   Reserve Bash for shell-only operations (git, npm, pip, system commands).
 - For long-running commands, set an appropriate timeout.
+- For commands that take a while (builds, test suites, dev servers, watchers), pass
+  background=true: it returns a task_id immediately instead of blocking. Check
+  progress/result later with the BashOutput tool.
 - Use simple, one-shot commands. Chain commands with && or ; when needed.
 - When running commands that produce large output, pipe through head or grep.
 
@@ -142,7 +145,14 @@ IMPORTANT: Do not run interactive or pager commands (less, vim, nano, etc.).
 """.strip(), [
     {"name": "command", "type": "string", "description": "The command to execute", "required": True},
     {"name": "timeout", "type": "integer", "description": "Optional timeout in milliseconds (max 600000)", "default": 180000},
+    {"name": "background", "type": "boolean", "description": "Run in the background and return a task_id immediately (poll with BashOutput). Use for long-running commands.", "default": False},
     {"name": "description", "type": "string", "description": "Clear, concise description of what this command does. For simple commands keep it brief (5-10 words)."},
+])
+
+register_user_tool("BashOutput",
+    "Check a background bash task's status and output — pass the task_id returned by "
+    "Bash(background=true). Returns status (running/done/failed), exit_code, and output so far.", [
+    {"name": "task_id", "type": "string", "description": "the background task id", "required": True},
 ])
 
 register_user_tool("Grep", """
@@ -441,6 +451,7 @@ _TOOL_ROUTING = {
               "adapter": _adapter_edit},
     "Bash":  {"handler": "tool_run_in_bash_session",       "module": "src.tools_impl",
               "param_map": {"command": "command"}},
+    "BashOutput": {"handler": "tool_bash_output",          "module": "src.tools_impl"},
     "Grep":  {"handler": "tool_grep",                      "module": "src.tools_impl",
               "param_map": {"pattern": "pattern"}},
     "Glob":  {"handler": "tool_list_files",                "module": "src.tools_impl",

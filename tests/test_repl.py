@@ -62,6 +62,10 @@ def test_slash_tasks_parses():
     assert R.parse_repl_input("/tasks").kind == "tasks"
 
 
+def test_slash_jobs_parses():
+    assert R.parse_repl_input("/jobs").kind == "jobs"
+
+
 def test_slash_rewind_parses():
     assert R.parse_repl_input("/rewind").kind == "rewind"
     assert R.parse_repl_input("/rewind").arg is None

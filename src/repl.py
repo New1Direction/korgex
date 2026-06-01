@@ -23,6 +23,7 @@ korgex — commands
   /plan [on|off]  plan mode: agent stays read-only until you approve its plan
   /skills         list skills (✦ = learned by the agent) and their usage
   /tasks          show the agent's live task checklist for this conversation
+  /jobs           list background shell tasks (Bash background=true) + their status
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
   /clear          start a fresh conversation
   /help  /?       this help
@@ -62,6 +63,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("skills", rest or None)
         if head == "/tasks":
             return Command("tasks")
+        if head == "/jobs":
+            return Command("jobs")
         if head == "/rewind":
             return Command("rewind", rest or None)
         return Command("unknown", head.lstrip("/"))
@@ -286,6 +289,17 @@ class Repl:
             else:
                 self._print(f"tasks ({led.summary()}):")
                 self._print(led.render())
+            return True
+        if cmd.kind == "jobs":
+            from src.background_tasks import get_runner
+            jobs = get_runner().all()
+            if not jobs:
+                self._print("no background jobs — the agent backgrounds long commands with Bash(background=true)")
+            else:
+                self._print("background jobs:")
+                for j in jobs:
+                    mark = {"running": "⏳", "done": "✓", "failed": "✗"}.get(j.status, "·")
+                    self._print(f"  {mark} {j.id}  [{j.status}]  {j.command[:60]}")
             return True
         if cmd.kind == "rewind":
             self._do_rewind(cmd.arg)
