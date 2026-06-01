@@ -179,10 +179,14 @@ class Repl:
         return True
 
     def _run_turn(self, text: str):
-        """Stream one agent turn. Thin shell over the existing agent loop."""
+        """Stream one agent turn. The prompt isn't active during a turn (you've
+        already hit enter), so we write directly to the terminal — the spinner uses
+        raw \\r to overwrite in place, streamed content goes through the ANSI sink.
+        (No patch_stdout here: it does nothing useful mid-turn and strips the \\r.)"""
         agent = self._ensure_agent()
         try:
             agent.run_task(text)
+            print()  # newline so the next turn's input starts clean
         except KeyboardInterrupt:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session

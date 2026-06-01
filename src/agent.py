@@ -592,6 +592,16 @@ class KorgexAgent:
                     if fn.arguments:
                         slot["args_str"] += fn.arguments
 
+        # The OpenAI stream emits no content_block_stop, so close the assistant
+        # accent block here (flush its trailing newline + reset for the next turn).
+        try:
+            r = session.renderer
+            if getattr(r, "_text_block", None) is not None:
+                r._text_block.close()
+                r._text_block = None
+        except Exception:
+            pass
+
         # Build a fake response object shaped like a non-streamed ChatCompletion
         return _StubOpenAIResponse(full_text, partials)
 
