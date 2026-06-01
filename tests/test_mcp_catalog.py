@@ -42,3 +42,22 @@ def test_entries_lists_aliases_with_transport_and_needs():
     assert "everything" in rows and rows["everything"]["transport"] == "stdio"
     assert "korgex" in rows                       # our own server is in the catalog
     assert isinstance(rows["github"]["needs"], list) and "GITHUB_TOKEN" in rows["github"]["needs"]
+
+
+def test_catalog_is_richly_populated():
+    rows = {e["alias"]: e for e in entries()}
+    # the canonical servers every agent uses, across transports
+    for alias in ("git", "postgres", "slack", "memory", "time", "linear", "sentry"):
+        assert alias in rows, f"{alias} missing from catalog"
+    assert len(rows) >= 16
+
+
+def test_remote_presets_are_http():
+    rows = {e["alias"]: e for e in entries()}
+    assert rows["linear"]["transport"] == "http"
+    assert rows["sentry"]["transport"] == "http"
+
+
+def test_resolve_uvx_server():
+    cfg = resolve("git")
+    assert cfg["command"] == "uvx" and "mcp-server-git" in cfg["args"]
