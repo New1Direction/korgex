@@ -23,22 +23,17 @@ This is 5 subsystems. We build in slices; this spec covers **Slice 1 (the spine)
 
 ### A. Config layer — `~/.korgex/config.toml`
 
-A new module `src/config.py`. Pure functions over a TOML file at `~/.korgex/config.toml` (override `$KORGEX_CONFIG`). Schema is a **list of providers** so "all providers" is just list entries — adding one later never rewrites anything:
+A new module `src/config.py`. Pure functions over a JSON file at `~/.korgex/config.json` (override `$KORGEX_CONFIG`). **JSON, not TOML** — the target runs Python 3.9 which has no stdlib `tomllib` (3.11+), and adding a TOML dep risks the clean-install crashes korgex has been bitten by before; JSON is stdlib, zero-dep. Schema is a **list of providers** so "all providers" is just list entries — adding one later never rewrites anything:
 
-```toml
-default_model = "claude-opus-4-8"
-
-[[providers]]
-type = "openrouter"          # one key → hundreds of models
-api_key = "sk-or-..."
-
-[[providers]]
-type = "anthropic"
-api_key = "sk-ant-..."
-
-[[providers]]
-type = "ollama"              # local, no key
-base_url = "http://localhost:11434"
+```json
+{
+  "default_model": "claude-opus-4-8",
+  "providers": [
+    { "type": "openrouter", "api_key": "sk-or-..." },
+    { "type": "anthropic",  "api_key": "sk-ant-..." },
+    { "type": "ollama",     "base_url": "http://localhost:11434" }
+  ]
+}
 ```
 
 - `load_config() -> Config` — reads the file; missing file → empty config (never raises).
