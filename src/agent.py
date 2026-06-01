@@ -342,7 +342,12 @@ class KorgexAgent:
         used to give a subagent a narrower surface than the parent.
         """
         if tools_filter is None:
-            items = list(USER_TOOLS.values())
+            # Tiered exposure: send direct tools (+ any ToolSearch-staged deferred
+            # tools), not the whole registry — keeps the prompt small as MCP/plugin
+            # tools accumulate. A subagent's explicit tools_filter still wins.
+            from src.tool_abstraction import visible_tool_names
+            allow = set(visible_tool_names())
+            items = [t for n, t in USER_TOOLS.items() if n in allow]
         else:
             allow = set(tools_filter)
             items = [t for n, t in USER_TOOLS.items() if n in allow]
@@ -626,6 +631,10 @@ class KorgexAgent:
             if ups.get("additional_context"):
                 effective_prompt = f"{prompt}\n\n[hook context]\n{ups['additional_context']}"
 
+        # Fresh task → reset any deferred tools ToolSearch staged in a prior run.
+        if tools_filter is None:
+            from src.tool_abstraction import clear_staged_tools
+            clear_staged_tools()
         tools_payload = self._get_provider_tools(tools_filter)
 
         if self.provider == "anthropic":
@@ -856,6 +865,11 @@ class KorgexAgent:
                             )
 
                     messages.append(self._tool_result_turn(call["id"], tool_result))
+
+                # If a ToolSearch this round staged deferred tools, refresh the
+                # payload so they're offered on the next round-trip.
+                if tools_filter is None and any(c["name"] == "ToolSearch" for c in tool_calls):
+                    tools_payload = self._get_provider_tools(tools_filter)
 
                 # Advance the LLM trigger for the next round-trip to the last llm_seq
                 prompt_seq = llm_seq
