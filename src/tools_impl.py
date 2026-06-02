@@ -6,19 +6,19 @@ The complete tool handler surface for korgex.
 import os
 import json
 import subprocess
-import shutil
+
 import shlex
 import tempfile
 import threading
-from pathlib import Path
+
 from src.tool_base import register_tool, ToolParam
 from src.sandbox import SandboxManager
 from src.github_api import (
     create_pr, list_prs, get_pr_comments, reply_to_pr_comment,
-    create_issue, label_issue, get_repo_info, init_from_cli
+    create_issue,   init_from_cli
 )
 from src.swarm import AgentSwarm, SubTask
-from src.diff_engine import DiffEngine
+
 from src.self_healing import TDDHealer, extract_traceback_info
 from src.dependency_graph import DependencyAnalyzer
 from src.profiler import PerformanceProfiler
@@ -325,7 +325,7 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
         tb = extract_traceback_info(result.get("output", ""))
         result["traceback"] = tb
     
-    return result
+    
 
 
 @register_tool("google_search", "Online Google search to retrieve up-to-date information.", [
@@ -506,7 +506,7 @@ def tool_view_image(url: str, context: dict = None):
         from src.vision import VisionEngine
         result = VisionEngine.analyze_image(tmp_path)
         result["source_url"] = url
-        return result
+        
     except Exception as e:
         return {"error": f"Failed to load image from {url}: {e}"}
 
@@ -638,8 +638,8 @@ def tool_overwrite_file_with_block(filepath: str, content: str, context: dict = 
 ])
 def tool_github_create_pr(owner: str, repo: str, title: str, body: str, head: str, base: str = "main", context: dict = None):
     _ensure_github()
-    result = create_pr(owner, repo, title, body, head, base)
-    return result
+    create_pr(owner, repo, title, body, head, base)
+    
 
 
 @register_tool("github_list_prs", "Lists pull requests for a repository.", [
@@ -685,7 +685,7 @@ def tool_github_reply_to_pr_comment(owner: str, repo: str, comment_id: str, repl
 ])
 def tool_github_create_issue(owner: str, repo: str, title: str, body: str = "", labels: str = "", context: dict = None):
     _ensure_github()
-    label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else None
+    label_list = [label.strip() for label in labels.split(",") if label.strip()] if labels else None
     result = create_issue(owner, repo, title, body, label_list)
     return result
 
@@ -857,10 +857,10 @@ def tool_memory_list(mem_type: str = None, context: dict = None):
     ToolParam("plan_file", "STRING", "Path to write the plan file to.", required=True),
 ])
 def tool_enter_plan_mode(plan_file: str, context: dict = None):
-    from src.mode_schemas import ModeStateMachine
+    
     from src.model_router import on_mode_change
-    machine = ModeStateMachine("execute")
-    result = machine.enter_mode("plan")
+    
+    
     on_mode_change("plan")
     return {
         "mode": "plan",
@@ -875,10 +875,10 @@ def tool_enter_plan_mode(plan_file: str, context: dict = None):
     ToolParam("plan_file", "STRING", "Path to the plan file you wrote.", required=True),
 ])
 def tool_exit_plan_mode(plan_file: str, context: dict = None):
-    from src.mode_schemas import ModeStateMachine
+    
     from src.model_router import on_mode_change
-    machine = ModeStateMachine("plan")
-    result = machine.exit_mode()
+    
+    
     on_mode_change("execute")
     return {
         "mode": "execute",
