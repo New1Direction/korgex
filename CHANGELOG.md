@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.3] — 2026-06-02
+
+A patch over three bugs found dogfooding 0.14.2 on the wire — all green in the unit suite, broken when driving the real CLI.
+
 ### Fixed
 - **Retrieve results were being re-compressed** (regression in 0.14.2's context compression). When the model called `Retrieve(ref)` to pull the full deferred bytes, that result re-entered `_compress_tool_result` and got sealed into *another* compact view — so the model never actually received the content and looped Retrieve→view→Retrieve until it stalled. Retrieve's whole job is to undo compression, so its output is now exempt and reaches the model verbatim. (Found dogfooding on the wire; the unit tests exercised `tool_retrieve_blob` directly, never the agent-loop path.)
 - **`korgex verify` crashed on real session journals.** The live (default/bridge) ledger writes a pretty-printed JSON *array*, but `verify_journal_file` parsed strictly line-by-line and raised `JSONDecodeError` — so the flagship "prove the ledger intact" command was broken for the journals actual runs produce, while `korgex trace` (array-aware) worked. `verify` now reads both shapes (array and JSONL) raw, and the event count is correct (was counting lines).
