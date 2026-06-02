@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-06-01
+
+Reliability pass — real bugs found by running korgex on actual coding tasks (dogfooding) and backfilling tests on the untested core. Every fix is locked with a test.
+
+### Fixed
+- **`korgex "task"` used the wrong model.** The naked-prompt path ignored your configured `default_model` and fell back to claude-sonnet — sending an OpenRouter key to Anthropic as `x-api-key` → 401. Now honors precedence: explicit `--model` → `--mode` → `config.default_model` → `KORGEX_MODEL` → builtin.
+- **`korgex "task"` printed nothing** in script / non-TTY mode — the final answer only emitted under `--quiet`. Now prints whenever it wasn't streamed live.
+- **`list_files` returned nothing on macOS** — it used the GNU-only `ls --group-directories-first`, which BSD `ls` (macOS) rejects, so every directory looked empty. Now the portable `ls -a -1F`.
+- **The Edit handler returned a hardcoded string**, discarding the real filepath/changes — restored the real result and added the regression test it never had.
+- **Control-byte corruption in edits** — a mangled em-dash could reach disk as `\x1a\x14`. Write/Edit now strip C0/DEL control characters at the write boundary (all printable text and Unicode pass through).
+- **Bare `pytest` failed** with `ModuleNotFoundError: src` (no `pythonpath` config) — added `pythonpath = ["."]`, so self-verification and CI work under any invocation.
+- **`humanize_error`** now also maps 503 / service-unavailable / overloaded to clear guidance.
+
+### Added
+- `korgex --version` / `-V` flag.
+- `/version` REPL command.
+- `korgex skills` subcommand — lists every available skill (project-aware).
+
+### Tests
+- Backfilled coverage on the core tool handlers (Read / Write / list_files / delete / Bash / Edit) that previously had none — closing the gap that let regressions slip through.
+
 ## [0.12.0] — 2026-06-01
 
 The **working-machine** batch — speed, autonomy, and daily-driver ergonomics synthesized from the best of the frontier coding agents, plus a critical fix that revived self-learning.
