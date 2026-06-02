@@ -188,6 +188,42 @@ def _write_blob(data: bytes) -> tuple[str, int]:
     return digest, len(data)
 
 
+def blob_path_for(ref: str) -> Path:
+    """On-disk path of a content-addressed blob. Accepts "sha256:<hex>" or a
+    bare hex digest. Mirrors _write_blob's shard layout ({prefix}/{digest})."""
+    digest = ref[len("sha256:"):] if ref.startswith("sha256:") else ref
+    return _blob_dir() / digest[:2] / digest
+
+
+def read_blob(ref: str) -> bytes:
+    """Return the exact sealed bytes for a content-ref, re-verifying the sha256.
+
+    This is the READ side of _write_blob — the SAME store, no second copy. A
+    missing blob or an on-disk corruption is a ledger integrity failure and is
+    raised loudly (spec §7.3) rather than returning wrong bytes silently.
+    """
+    if not isinstance(ref, str):
+        raise ValueError(f"blob ref must be a string, got {type(ref).__name__}")
+    digest = ref[len("sha256:"):] if ref.startswith("sha256:") else ref
+    # Validate BEFORE building any path: a ref must be a 64-char lowercase hex
+    # sha256. This closes path-traversal via a crafted ref (e.g. "../../etc/..")
+    # and a None/garbage ref, before `digest` is ever interpolated into a path.
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError(f"invalid blob ref (expected a 64-char hex sha256): {ref!r}")
+    path = blob_path_for(digest)
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError as e:
+        raise ValueError(f"blob not found: sha256:{digest}") from e
+    actual = _sha256(data)
+    if actual != digest:
+        raise ValueError(
+            f"blob integrity failure: sha256 mismatch for {digest} "
+            f"(on-disk hashes to {actual})"
+        )
+    return data
+
+
 # ---------------------------------------------------------------------------
 # Content-ref helpers — spec §3
 # ---------------------------------------------------------------------------

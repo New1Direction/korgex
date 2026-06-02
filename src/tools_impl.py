@@ -1454,3 +1454,28 @@ def tool_browser_audit(url: str, _session=None, context=None):
         }
     except B.BrowserUnavailable:
         return _browser_unavailable_result()
+
+
+@register_tool("retrieve_blob",
+               "Pull the FULL sealed original of a tool result that was compressed "
+               "away, by its sha256 content handle. Returns the exact bytes, "
+               "sha256-verified.", [
+    ToolParam("ref", "STRING", "The sha256:.. content handle from a compressed result.", required=True),
+])
+def tool_retrieve_blob(ref: str, context: dict = None):
+    """Read the exact sealed bytes for a content-ref from the ledger blob store,
+    re-verifying the sha256. The full original is content-addressed + hash-chained,
+    so this round-trips byte-for-byte. On a missing blob or integrity mismatch,
+    return a clear typed error (read_blob raises; we surface it to the model)."""
+    from src import korg_ledger
+    try:
+        data = korg_ledger.read_blob(ref)
+    except ValueError as e:
+        return {"error": str(e), "ref": ref}
+    digest = ref[len("sha256:"):] if ref.startswith("sha256:") else ref
+    return {
+        "verified": True,
+        "sha256": digest,
+        "size_bytes": len(data),
+        "content": data.decode("utf-8", "replace"),
+    }
