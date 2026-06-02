@@ -173,7 +173,7 @@ def test_loop_refreshes_tools_after_toolsearch(monkeypatch, tmp_path):
         monkeypatch.setattr(agent, "_assistant_turn", lambda r: {"role": "assistant", "content": ""})
         monkeypatch.setattr(agent, "_tool_result_turn", lambda cid, res: {"role": "user", "content": "ok"})
         monkeypatch.setattr(agent, "_dispatch_call",
-                            lambda call, seq: TA.route_tool_call(call["name"], call["args"]))
+                            lambda call, seq, tf=None: TA.route_tool_call(call["name"], call["args"]))
 
         agent.run_task("get the rocket up")
 
