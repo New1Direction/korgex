@@ -124,6 +124,10 @@ def test_slash_why_parses():
     assert cmd.kind == "why" and cmd.arg == "src/auth.py"
 
 
+def test_slash_cost_parses():
+    assert R.parse_repl_input("/cost").kind == "cost"
+
+
 def test_slash_loop_parses_with_and_without_task():
     cmd = R.parse_repl_input("/loop build the parser")
     assert cmd.kind == "loop"

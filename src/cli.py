@@ -286,7 +286,31 @@ def cmd_trace():
         print("  (no cognition recorded yet)")
         return 0
     print(out)
-    print(f"\n  {len(events)} events · prove it wasn't edited:  korgex verify {path}")
+    from src.cost import estimate_cost, format_cost
+    print(f"\n  {format_cost(estimate_cost(events))}")
+    print(f"  {len(events)} events · prove it wasn't edited:  korgex verify {path}")
+    return 0
+
+
+def cmd_cost():
+    """Estimated $ spend for the session, from the ledger's recorded token counts."""
+    from src import recall as R
+    from src.cost import estimate_cost, format_cost
+
+    argv = sys.argv[1:]
+    rest = ([a for a in argv[argv.index("cost") + 1:] if not a.startswith("-")]
+            if "cost" in argv else [])
+    path = rest[0] if rest else os.environ.get(
+        "KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+    if not Path(path).exists():
+        print(f"  No ledger journal at {path}")
+        return 1
+    s = estimate_cost(R.load_events(path))
+    print(f"  {format_cost(s)}")
+    for model, m in sorted(s["by_model"].items(), key=lambda kv: -kv[1]["usd"]):
+        mark = "" if m["known"] else "  (unpriced)"
+        print(f"    {model:<28} {m['input']:>9,} in  {m['output']:>9,} out  ${m['usd']:.4f}{mark}")
+    print("  tokens are from the verifiable ledger; $ is an estimate (public list prices).")
     return 0
 
 
@@ -740,6 +764,7 @@ SUBCOMMANDS = {
     "verify":            cmd_verify,
     "trace":             cmd_trace,
     "why":               cmd_why,
+    "cost":              cmd_cost,
     "drift":             cmd_drift,
     "import":            cmd_import,
     "audit":             cmd_audit,
@@ -850,6 +875,9 @@ def _build_subcommand_parser():
         elif name == "why":
             sp.add_argument("file", help="the file/path to explain")
             sp.add_argument("journal", nargs="?",
+                            help="journal JSONL (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+        elif name == "cost":
+            sp.add_argument("path", nargs="?",
                             help="journal JSONL (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
         elif name == "import":
             sp.add_argument("vendor", nargs="?", help="claude-code")
