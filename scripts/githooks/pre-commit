@@ -12,9 +12,13 @@ set -u
 
 [ "${OPSEC_GUARD_OK:-}" = "1" ] && exit 0
 
-# Case-insensitive content patterns. \bMITM\b (word-bounded) deliberately avoids the
-# "comMITMent" false positive; the trailing grep -v strips other benign substrings.
-PATTERN='mitmproxy|manual mitm|\bmitm\b|reverse[- ]?engineer|captured from (claude|the api|api\.)|claude max|mahoraga|\bhermes\b|\bjules\b|nousresearch|hermes_tools|kikkaskills|kabukiskills|intercepted from'
+# Case-insensitive content patterns — RE / vendor-internal ARTIFACTS only, NOT
+# provider names. Legit BYO-OAuth integrations (NousResearch, Grok, Gemini) name
+# their endpoints/clients (nousresearch.com, hermes-cli, api.x.ai) and MUST pass —
+# so bare "hermes"/"nousresearch" are intentionally absent; only the RE-specific
+# module `hermes_tools` is blocked. \bMITM\b (word-bounded) avoids the "comMITMent"
+# false positive; the trailing grep -v strips other benign substrings.
+PATTERN='mitmproxy|manual mitm|\bmitm\b|reverse[- ]?engineer|captured from (claude|the api|api\.)|claude max|mahoraga|\bjules\b|hermes_tools|kikkaskills|kabukiskills|intercepted from'
 
 # 1) Sensitive file NAMES being added.
 bad_files=$(git diff --cached --name-only --diff-filter=A \
@@ -22,7 +26,7 @@ bad_files=$(git diff --cached --name-only --diff-filter=A \
 
 # 2) Sensitive ADDED lines (only new content, not context). The guard's own files
 # legitimately contain these patterns (the definition + its docs), so exclude them.
-hits=$(git diff --cached --unified=0 -- . ':(exclude)scripts/githooks' ':(exclude).gitignore' ':(exclude)CONTRIBUTING.md' \
+hits=$(git diff --cached --unified=0 -- . ':(exclude)scripts/githooks' ':(exclude).gitignore' ':(exclude)CONTRIBUTING.md' ':(exclude)tests/test_opsec_guard.py' \
   | grep -E '^\+' | grep -vE '^\+\+\+' \
   | grep -inE "$PATTERN" \
   | grep -viE 'commitment|environment|experiment|reverse the' || true)

@@ -31,6 +31,33 @@ from typing import Any, Optional, Protocol
 from src.feature_flags import is_enabled
 
 
+def _to_epoch(value, ms: bool = False) -> float:
+    """Coerce a stored token-expiry to a Unix epoch float.
+
+    Accepts a float/int, a numeric string, or an ISO-8601 timestamp; ``ms=True``
+    treats numeric inputs as milliseconds. Garbage / missing → 0.0 (treated as
+    already expired). Guards _is_expired() against `float > str` crashes — some
+    provider CLIs (grok) store expires_at as a string.
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value) / 1000.0 if ms else float(value)
+    s = str(value).strip()
+    if not s:
+        return 0.0
+    try:
+        n = float(s)
+        return n / 1000.0 if ms else n
+    except ValueError:
+        pass
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    except (ValueError, OSError):
+        return 0.0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MODEL DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -115,10 +142,29 @@ DEFAULT_MODELS: dict[str, ModelConfig] = {
         cost_per_mtok_output=10.0,
         supports_thinking=False,
     ),
+    # ── Venice AI models — OpenAI-compatible, API key required ──
+    "venice-uncensored": ModelConfig(
+        provider="venice",
+        model_id="venice-uncensored-1-2",
+        display_name="Venice Uncensored",
+        max_tokens=64000,
+        cost_per_mtok_input=0.50,
+        cost_per_mtok_output=2.00,
+        supports_thinking=False,
+    ),
+    "venice-default": ModelConfig(
+        provider="venice",
+        model_id="default",
+        display_name="Venice Default",
+        max_tokens=64000,
+        cost_per_mtok_input=0.50,
+        cost_per_mtok_output=2.00,
+        supports_thinking=False,
+    ),
     # ── Grok (xAI) models — uses grok-build OAuth, no API key needed ──
     "grok4": ModelConfig(
         provider="grok",
-        model_id="latest",             # aliased to grok-4.3-latest
+        model_id="grok-4.3",           # valid xAI id (was "latest", which 400s)
         display_name="Grok 4",
         max_tokens=64000,
         thinking_budget=None,
@@ -128,7 +174,7 @@ DEFAULT_MODELS: dict[str, ModelConfig] = {
     ),
     "grok-reasoning": ModelConfig(
         provider="grok",
-        model_id="grok-420-reasoning",
+        model_id="grok-4.20-0309-reasoning",
         display_name="Grok Reasoning",
         max_tokens=64000,
         thinking_budget=None,
@@ -138,7 +184,7 @@ DEFAULT_MODELS: dict[str, ModelConfig] = {
     ),
     "grok-mini": ModelConfig(
         provider="grok",
-        model_id="grok-4-mini-thinking-tahoe",
+        model_id="grok-4.20-0309-non-reasoning",
         display_name="Grok Mini",
         max_tokens=32000,
         thinking_budget=None,
@@ -329,7 +375,7 @@ class GrokClient:
             if self.AUTH_URL in key and isinstance(val, dict):
                 self._jwt = val.get("key", "")
                 self._refresh_token = val.get("refresh_token", "")
-                self._expires_at = val.get("expires_at", 0.0)
+                self._expires_at = _to_epoch(val.get("expires_at", 0.0))
                 break
 
     def _save_token(self):
@@ -525,14 +571,8 @@ class GeminiClient:
                 self._client_id = tok.get("client_id", data.get("client_id", ""))
             if not self._client_secret:
                 self._client_secret = tok.get("client_secret", data.get("client_secret", ""))
-            # Antigravity stores ms-precision ISO, ADC doesn't store
-            if "expiry" in tok:
-                try:
-                    from datetime import datetime
-                    dt = datetime.fromisoformat(tok["expiry"])
-                    self._expires_at = dt.timestamp()
-                except (ValueError, OSError):
-                    self._expires_at = 0
+            # expiry may be an ISO string (Antigravity) or absent (ADC) — coerce
+            self._expires_at = _to_epoch(tok.get("expiry", 0))
             if self._refresh_token:
                 break
 
@@ -687,6 +727,230 @@ class GeminiClient:
         )
 
 
+class NousClient:
+    """Nous Portal inference client — uses Hermes Agent OAuth from auth.json.
+
+    Reads the agent_key JWT from ~/.hermes/auth.json (the same credential
+    Hermes Agent CLI uses). Auto-refreshes via portal.nousresearch.com
+    device-code OAuth2 token refresh + agent-key minting.
+    Uses the Nous Inference API (OpenAI-compatible endpoint).
+    """
+
+    BASE_URL = "https://inference-api.nousresearch.com/v1/chat/completions"
+    AUTH_JSON = os.path.expanduser("~/.hermes/auth.json")
+    PORTAL_URL = "https://portal.nousresearch.com"
+    CLIENT_ID = "hermes-cli"
+
+    def __init__(self, api_key: str = None):
+        self._agent_key: str | None = None
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._expires_at: float = 0.0
+        self._load_auth()
+
+    # ── auth management ───────────────────────────────────────────────
+
+    def _load_auth(self):
+        """Read agent_key and refresh tokens from ~/.hermes/auth.json."""
+        try:
+            with open(self.AUTH_JSON) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+
+        nous = data.get("providers", {}).get("nous", {})
+        if not nous:
+            # Check credential pool
+            for cred in data.get("credential_pool", {}).get("nous", []):
+                nous = cred
+                break
+
+        self._agent_key = nous.get("agent_key", "")
+        self._access_token = nous.get("access_token", "")
+        self._refresh_token = nous.get("refresh_token", "")
+
+        # Parse expiry
+        expires_str = nous.get("expires_at", nous.get("agent_key_expires_at", ""))
+        if expires_str:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
+                self._expires_at = dt.timestamp()
+            except (ValueError, OSError):
+                self._expires_at = 0
+
+    def _save_auth(self):
+        """Write refreshed tokens back to ~/.hermes/auth.json."""
+        try:
+            with open(self.AUTH_JSON) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+
+        nous = data.setdefault("providers", {}).setdefault("nous", {})
+        nous["agent_key"] = self._agent_key
+        nous["access_token"] = self._access_token
+        nous["refresh_token"] = self._refresh_token
+        nous["expires_at"] = datetime.fromtimestamp(
+            self._expires_at, tz=timezone.utc
+        ).isoformat()
+
+        try:
+            with open(self.AUTH_JSON, "w") as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass
+
+    def _is_expired(self) -> bool:
+        return not self._agent_key or (time.time() > self._expires_at)
+
+    def _refresh_token_via_portal(self) -> bool:
+        """Refresh access_token using the stored refresh_token."""
+        if not self._refresh_token:
+            return False
+        import httpx
+
+        try:
+            r = httpx.post(
+                f"{self.PORTAL_URL}/api/oauth/token",
+                headers={"x-nous-refresh-token": self._refresh_token},
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self.CLIENT_ID,
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            payload = r.json()
+            self._access_token = payload["access_token"]
+            self._refresh_token = payload.get("refresh_token", self._refresh_token)
+            return True
+        except Exception:
+            return False
+
+    def _mint_agent_key(self) -> bool:
+        """Mint a new agent_key using the access_token."""
+        if not self._access_token:
+            return False
+        import httpx
+
+        try:
+            r = httpx.post(
+                f"{self.PORTAL_URL}/api/oauth/agent-key",
+                headers={"Authorization": f"Bearer {self._access_token}"},
+                json={"min_ttl_seconds": 300},
+                timeout=15,
+            )
+            r.raise_for_status()
+            payload = r.json()
+            self._agent_key = payload["api_key"]
+            self._expires_at = time.time() + 300  # 5 min estimate
+            self._save_auth()
+            return True
+        except Exception:
+            return False
+
+    def _ensure_key(self) -> str:
+        """Return a valid agent_key, refreshing+minting if needed."""
+        if self._is_expired():
+            if self._refresh_token_via_portal():
+                self._mint_agent_key()
+        if not self._agent_key:
+            raise RuntimeError(
+                "No Nous OAuth session. Run 'hermes auth add nous' to authenticate."
+            )
+        return self._agent_key
+
+    # ── API call ──────────────────────────────────────────────────────
+
+    def send(self, messages: list[dict], system: list[dict],
+             tools: list[dict], params: dict) -> APIResponse:
+        """Send messages to Nous Inference API (OpenAI-compatible)."""
+        import httpx
+        from datetime import datetime, timezone
+
+        key = self._ensure_key()
+
+        # Convert Anthropic system blocks → OpenAI system messages
+        openai_messages = []
+        for block in system:
+            if block.get("type") == "text":
+                openai_messages.append({
+                    "role": "system",
+                    "content": block.get("text", ""),
+                })
+        openai_messages.extend(messages)
+
+        openai_tools = []
+        for tool in tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {}),
+                },
+            })
+
+        body = {
+            "model": params["model"],
+            "max_tokens": params.get("max_tokens", 64000),
+            "messages": openai_messages,
+            "tools": openai_tools if openai_tools else None,
+            "temperature": params.get("temperature", 0.3),
+        }
+        if body["tools"] is None:
+            del body["tools"]
+
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            response = httpx.post(
+                self.BASE_URL, headers=headers, json=body, timeout=300
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else str(e)
+            raise RuntimeError(
+                f"Nous API error ({e.response.status_code}): {error_body}"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Nous API request failed: {e}")
+
+        choice = data.get("choices", [{}])[0]
+        msg = choice.get("message", {})
+        usage = data.get("usage", {})
+
+        content = []
+        if msg.get("content"):
+            content.append({"type": "text", "text": msg["content"]})
+        for tc in msg.get("tool_calls", []):
+            try:
+                func_args = json.loads(tc["function"]["arguments"])
+            except (json.JSONDecodeError, KeyError):
+                func_args = {}
+            content.append({
+                "type": "tool_use",
+                "name": tc["function"]["name"],
+                "input": func_args,
+                "id": tc.get("id", ""),
+            })
+
+        return APIResponse(
+            content=content,
+            model=data.get("model", params["model"]),
+            usage={
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
+            stop_reason=choice.get("finish_reason", "stop"),
+        )
+
+
 class ClaudeClient:
     """Anthropic Messages API via Claude Code OAuth — no API key needed.
 
@@ -728,7 +992,7 @@ class ClaudeClient:
             oauth = data.get("claudeAiOauth", {})
             self._access_token = oauth.get("accessToken", "")
             self._refresh_token = oauth.get("refreshToken", "")
-            self._expires_at = oauth.get("expiresAt", 0) / 1000.0  # ms → s
+            self._expires_at = _to_epoch(oauth.get("expiresAt", 0), ms=True)  # ms → s
         except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError):
             return
 
@@ -865,6 +1129,112 @@ class ClaudeClient:
             raise RuntimeError(f"Claude API error ({e.response.status_code}): {error_body}")
         except Exception as e:
             raise RuntimeError(f"Claude API request failed: {e}")
+
+
+class VeniceClient:
+    """Venice AI client — OpenAI-compatible, API key auth.
+
+    Venice is a privacy-first, uncensored AI API with 84+ models.
+    Base URL: https://api.venice.ai/api/v1
+    Auth: Bearer token from VENICE_API_KEY env var or settings page.
+    """
+
+    BASE_URL = "https://api.venice.ai/api/v1/chat/completions"
+
+    def __init__(self, api_key: str = None):
+        self.api_key = api_key or os.environ.get("VENICE_API_KEY", "")
+
+    def send(self, messages: list[dict], system: list[dict],
+             tools: list[dict], params: dict) -> APIResponse:
+        """Send messages to Venice API (OpenAI-compatible)."""
+        import httpx
+
+        if not self.api_key:
+            raise RuntimeError(
+                "No Venice API key. Get one at https://venice.ai/settings/api "
+                "and set VENICE_API_KEY env var."
+            )
+
+        # Convert Anthropic system blocks → OpenAI system messages
+        openai_messages = []
+        for block in system:
+            if block.get("type") == "text":
+                openai_messages.append({
+                    "role": "system",
+                    "content": block.get("text", ""),
+                })
+        openai_messages.extend(messages)
+
+        # Convert Anthropic tools → OpenAI function tools
+        openai_tools = []
+        for tool in tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {}),
+                },
+            })
+
+        body = {
+            "model": params["model"],
+            "max_tokens": params.get("max_tokens", 64000),
+            "messages": openai_messages,
+            "tools": openai_tools if openai_tools else None,
+            "temperature": params.get("temperature", 0.3),
+        }
+        if body["tools"] is None:
+            del body["tools"]
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            response = httpx.post(
+                self.BASE_URL, headers=headers, json=body, timeout=300
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else str(e)
+            raise RuntimeError(
+                f"Venice API error ({e.response.status_code}): {error_body}"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Venice API request failed: {e}")
+
+        choice = data.get("choices", [{}])[0]
+        msg = choice.get("message", {})
+        usage = data.get("usage", {})
+
+        # Convert OpenAI tool_calls → Anthropic format
+        content = []
+        if msg.get("content"):
+            content.append({"type": "text", "text": msg["content"]})
+        for tc in msg.get("tool_calls", []):
+            try:
+                func_args = json.loads(tc["function"]["arguments"])
+            except (json.JSONDecodeError, KeyError):
+                func_args = {}
+            content.append({
+                "type": "tool_use",
+                "name": tc["function"]["name"],
+                "input": func_args,
+                "id": tc.get("id", ""),
+            })
+
+        return APIResponse(
+            content=content,
+            model=data.get("model", params["model"]),
+            usage={
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
+            stop_reason=choice.get("finish_reason", "stop"),
+        )
 
 
 class OpenRouterClient:
@@ -1018,6 +1388,10 @@ class ModelRouter:
                 self._clients["claude"] = ClaudeClient()
             elif config.provider == "gemini":
                 self._clients["gemini"] = GeminiClient()
+            elif config.provider == "venice":
+                self._clients["venice"] = VeniceClient()
+            elif config.provider == "nous":
+                self._clients["nous"] = NousClient()
             elif config.provider == "openrouter":
                 self._clients["openrouter"] = OpenRouterClient()
             elif config.provider == "grok":
