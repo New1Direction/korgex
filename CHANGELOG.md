@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] — 2026-06-02
+
+The **verifiable cognition** batch — korgex's tamper-evident audit ledger, made legible. The thing the closed agents can't offer: cognition you can both *read* and *prove*.
+
+### Added
+- **Cognition trace** (`src/ledger_trace.py`): `korgex trace [journal]` and `/trace [all]` reconstruct the causal DAG every event carries (user_prompt → llm_inference rounds → the tool_calls each round caused) into a readable tree of what the agent did and *what caused it*.
+- **`/why <file>`** + **`korgex why <file> [journal]`**: trace why a file changed — back through the causal chain to the prompt that caused it, one scannable line per touch.
+- **`/explain`**: open a self-verifying HTML cognition audit — what the agent did, token cost, the hash chain, and a **live in-browser tamper test**. `/explain on` (or `KORGEX_EXPLAIN=1`) auto-opens it after every run. Re-verifies locally; no trust in the tool that made it.
+- **Auto-publish to PyPI on release** via Trusted Publishing (`.github/workflows/publish.yml`) — OIDC, no stored token.
+- **Opsec pre-commit guard** (`scripts/githooks/pre-commit`) that keeps sensitive vendor-internal material out of the public repo.
+
+### Changed
+- Docs: full README + `cli-reference` refresh — current install paths, the `--version`/`-V` flag, the `korgex skills` / `korgex setup` / `korgex trace` / `korgex why` subcommands, and the new REPL commands.
+
 ## [0.12.1] — 2026-06-01
 
 Reliability pass — real bugs found by running korgex on actual coding tasks (dogfooding) and backfilling tests on the untested core. Every fix is locked with a test.
