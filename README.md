@@ -26,6 +26,7 @@ $ korgex "add a /healthz endpoint that returns 200 with uptime"
 - [Environment variables](#environment-variables)
 - [Multi-model routing](#multi-model-routing)
 - [MCP integration](#mcp-integration)
+- [Plugins](#plugins)
 - [Streaming TUI](#streaming-tui)
 - [VS Code sidecar](#vs-code-sidecar)
 - [Dashboard API](#dashboard-api)
@@ -382,6 +383,33 @@ korgex --mcp "create a GitHub issue summarizing today's bug"
 ```
 
 The agent discovers each server's tools at startup, registers them into the user-facing tool list, and routes calls back to the originating server. Server failures are logged and skipped — they never crash the agent.
+
+---
+
+## Plugins
+
+Extend korgex without forking it. Drop a `.py` file into `~/.korgex/plugins/` (global) or `<repo>/.korgex/plugins/` (project-local) that defines a `register(registry)` function, and it hooks into the agent loop at startup.
+
+```python
+# ~/.korgex/plugins/notify.py — ping me when a file is edited
+def register(reg):
+    @reg.on("post_tool")
+    def on_edit(payload):
+        call = payload["call"]
+        if call["name"] in ("Edit", "Write"):
+            print(f"  ✎ touched {call['args'].get('file_path')}")
+```
+
+**Lifecycle hooks** a plugin can register on:
+
+| Hook | Fires | Payload |
+|---|---|---|
+| `on_user_prompt` | each user turn starts | `{prompt, seq}` |
+| `pre_tool` | before a tool runs | the tool `call` |
+| `post_tool` | after a tool returns | `{call, result}` |
+| `on_stop` | the run finishes | the final `result` |
+
+Plugins run **in-process** with full access, so only install ones you trust. They're **fail-safe**: a plugin that fails to import, lacks `register`, or raises is recorded and skipped — it never crashes startup, and the others still load.
 
 ---
 

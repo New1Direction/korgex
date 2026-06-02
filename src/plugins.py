@@ -16,6 +16,8 @@ the agent loop. An empty registry is a true no-op (zero overhead).
 """
 from __future__ import annotations
 
+import importlib.util
+import os
 from typing import Callable
 
 # The in-process lifecycle points plugins may register on.
@@ -57,3 +59,50 @@ class PluginRegistry:
         if hook is not None:
             return len(self._hooks.get(hook, ()))
         return sum(len(v) for v in self._hooks.values())
+
+
+# ── Loading user plugins from disk ───────────────────────────────────────────
+# A plugin is a ``.py`` file that defines ``register(registry)`` and wires its
+# hooks there. This is what makes korgex extensible without forking it.
+
+def default_plugin_dirs(repo_root: str | None = None, home: str | None = None) -> list:
+    """Where drop-in plugins live: ~/.korgex/plugins (user-global) and
+    <repo>/.korgex/plugins (project-local)."""
+    home = home if home is not None else os.path.expanduser("~")
+    dirs = [os.path.join(home, ".korgex", "plugins")]
+    if repo_root:
+        dirs.append(os.path.join(repo_root, ".korgex", "plugins"))
+    return dirs
+
+
+def load_plugins(registry: "PluginRegistry", dirs) -> list:
+    """Import every ``*.py`` in `dirs` and call its ``register(registry)``.
+
+    Returns ``[{name, ok, error}]`` for each plugin considered. Fail-safe: a plugin
+    that won't import, lacks ``register``, or raises while registering is recorded
+    with ``ok=False`` and skipped — it never crashes startup, and the others still
+    load. Files named ``__*`` or ``_*`` are ignored (helpers, not plugins).
+    """
+    loaded = []
+    for d in dirs or []:
+        if not d or not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            if not fname.endswith(".py") or fname.startswith("_"):
+                continue
+            name = fname[:-3]
+            path = os.path.join(d, fname)
+            try:
+                spec = importlib.util.spec_from_file_location(f"korgex_plugin_{name}", path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)          # may raise → caught below
+                register = getattr(module, "register", None)
+                if not callable(register):
+                    loaded.append({"name": name, "ok": False,
+                                   "error": "no register(registry) function"})
+                    continue
+                register(registry)                       # may raise → caught below
+                loaded.append({"name": name, "ok": True, "error": None})
+            except Exception as e:
+                loaded.append({"name": name, "ok": False, "error": f"{type(e).__name__}: {e}"})
+    return loaded
