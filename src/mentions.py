@@ -52,21 +52,31 @@ def _read(path: str, max_bytes: int):
 def expand_mentions(text: str, cwd: str, *, max_bytes: int = DEFAULT_MAX_BYTES) -> dict:
     """Inline every ``@file`` that resolves to a real file under `cwd`.
 
-    Returns ``{"text": <expanded>, "attached": [paths...]}``. The instruction text
-    is kept verbatim; inlined bodies are appended under a fenced "Referenced files"
-    section. With no resolvable mentions the text is returned unchanged.
+    Returns ``{"text": <expanded>, "attached": [paths...], "missed": [paths...]}``.
+    The instruction text is kept verbatim; inlined bodies are appended under a fenced
+    "Referenced files" section. ``missed`` lists path-shaped mentions that didn't
+    resolve (likely typos) so the caller can flag them; a bare ``@handle`` with no
+    path shape is ignored, not reported. With no resolvable mentions the text is
+    returned unchanged.
     """
-    blocks, attached = [], []
+    blocks, attached, missed = [], [], []
     for m in find_mentions(text):
         target = os.path.join(cwd, m) if not os.path.isabs(m) else m
         got = _read(os.path.expanduser(target), max_bytes)
         if got is None:
-            continue                      # bare @handle / missing path / a dir → leave it
+            if _looks_like_path(m):       # path-shaped but unresolved → likely a typo
+                missed.append(m)
+            continue                      # bare @handle / a dir → leave it
         content, truncated = got
         note = "  (truncated)" if truncated else ""
         blocks.append(f"## @{m}{note}\n```\n{content}\n```")
         attached.append(m)
-    if not blocks:
-        return {"text": text, "attached": []}
-    expanded = text + "\n\n# Referenced files\n\n" + "\n\n".join(blocks)
-    return {"text": expanded, "attached": attached}
+    expanded = text if not blocks else (
+        text + "\n\n# Referenced files\n\n" + "\n\n".join(blocks))
+    return {"text": expanded, "attached": attached, "missed": missed}
+
+
+def _looks_like_path(m: str) -> bool:
+    """Heuristic: does this mention look like a file reference (has a path
+    separator or a file extension) vs. an incidental ``@handle``?"""
+    return "/" in m or "." in m
