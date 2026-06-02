@@ -23,3 +23,13 @@ def test_skips_when_streamed_live():
 def test_empty_text_is_never_emitted():
     assert _should_emit_final("", interactive=False) is False
     assert _should_emit_final(None, interactive=False) is False
+
+
+def test_cmd_skills_lists_skills_and_exits_zero(capsys):
+    # Coverage for the `korgex skills` subcommand (added via dogfood) — prints
+    # "name: description" lines for the available skills and returns 0.
+    from src.cli import cmd_skills
+    rc = cmd_skills()
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert any(": " in line for line in out.splitlines())   # at least one skill line

@@ -109,6 +109,17 @@ def _start_background_server():
 
 # ── Subcommands ──────────────────────────────────────────────────────────
 
+def cmd_skills():
+    """Print all available skills and their descriptions."""
+    from src.skills import load_skills, default_skill_roots
+    # Pass cwd so project-local .korgex/skills are listed too, not just
+    # built-in + user-global.
+    skill_registry = load_skills(default_skill_roots(os.getcwd()))
+    for name in skill_registry.names():
+        skill = skill_registry.get(name)
+        print(f"{skill.name}: {skill.description}")
+    return 0
+
 def cmd_default():
     """Default: start backend + open VS Code with the sidecar."""
     _log("Korgex — starting backend...")
@@ -686,6 +697,7 @@ SUBCOMMANDS = {
     "mcp":               cmd_mcp,                 # add/list/remove MCP servers
     "mcp-server":        cmd_mcp_server,
     "setup":             cmd_setup,               # connect model providers
+    "skills":            cmd_skills,              # print available skills
 }
 
 
