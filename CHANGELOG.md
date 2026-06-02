@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-06-02
+
+Routing fix — the BYO-OAuth providers from 0.13.0 weren't actually reaching their own endpoints when a gateway key was configured.
+
+### Fixed
+- **Grok models were silently routed to OpenRouter instead of xAI.** With an OpenRouter key configured, `_get_client` skipped the BYO-OAuth path (it only ran "when no api-key"), so every grok model went to OpenRouter — which serves `grok-4.3` but not `grok-4.20-0309-*`, so `grok-reasoning` / `grok-mini` returned `400 not a valid model ID`. A grok model now uses its dedicated xAI endpoint whenever a local token is available, falling back to the configured key only when there's no token. All three grok variants verified on the wire.
+
+### Changed
+- **Gemini falls back to the configured key (e.g. OpenRouter).** The local Google (Antigravity/ADC) OAuth token is `401`'d by the `generativelanguage` endpoint (scope/project mismatch), so Gemini is no longer routed through that OAuth path.
+- CI: bumped `actions/checkout@v4→v5` and `actions/setup-python@v5→v6` (Node 20 deprecation).
+
 ## [0.13.0] — 2026-06-02
 
 The **multi-provider** batch — bring your own login. korgex now reaches Grok, Gemini, the Nous gateway, and Venice using the same credential their own CLI/app already stores, plus dollar-cost accounting straight from the verifiable ledger.
