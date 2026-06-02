@@ -50,6 +50,7 @@ _NOT_SECRET_KEYS = frozenset({
     "prompt_tokens", "completion_tokens", "total_tokens", "tokens",
     "input_tokens", "output_tokens", "cache_read_input_tokens",
     "cache_creation_input_tokens", "max_tokens", "max_output_tokens",
+    "tokens_before", "tokens_after",  # cache-aware compaction event counts
 })
 
 

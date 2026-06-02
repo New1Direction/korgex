@@ -23,10 +23,16 @@ def test_token_count_fields_are_not_redacted():
     # prompt_tokens/completion_tokens CONTAIN "token" but are counts, not secrets —
     # redacting them needlessly destroyed cost + audit data.
     out = redact({"prompt_tokens": 1234, "completion_tokens": 56, "max_tokens": 4096,
+                  "tokens_before": 9000, "tokens_after": 1200,  # compaction event counts
                   "api_token": "sk-secret"})
     assert out["prompt_tokens"] == 1234        # kept
     assert out["completion_tokens"] == 56      # kept
     assert out["max_tokens"] == 4096           # kept
+    # REGRESSION (found dogfooding on the wire): the cache-aware compaction event
+    # records tokens_before/after — they CONTAIN "token" but are counts, and were
+    # being nuked to [REDACTED] in the live ledger, destroying trace/cost data.
+    assert out["tokens_before"] == 9000        # kept
+    assert out["tokens_after"] == 1200         # kept
     assert out["api_token"] == R               # a real credential is STILL redacted
 
 

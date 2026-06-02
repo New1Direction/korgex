@@ -232,7 +232,7 @@ def cmd_install_extension():
 
 def cmd_verify():
     """Prove the cognition ledger is intact (hash-chain + causal DAG)."""
-    from src.korg_ledger import verify_journal_file, _ledger_hmac_key
+    from src.korg_ledger import verify_journal_file, load_journal_raw, _ledger_hmac_key
 
     argv = sys.argv[1:]
     path = None
@@ -248,7 +248,7 @@ def cmd_verify():
         print(f"  (set KORG_JOURNAL_PATH or pass: korgex verify <path>)")
         return 1
 
-    n = sum(1 for ln in Path(path).read_text().splitlines() if ln.strip())
+    n = len(load_journal_raw(path))  # real event count (array OR jsonl), not line count
     errors = verify_journal_file(path, key=_ledger_hmac_key())
     if not errors:
         keyed = " (HMAC-keyed)" if _ledger_hmac_key() else ""

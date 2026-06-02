@@ -800,14 +800,32 @@ def _ledger_hmac_key() -> bytes | None:
     return k.encode("utf-8") if k else None
 
 
+def load_journal_raw(path: str) -> list:
+    """Load journal events RAW (no normalization — entry_hash/prev_hash survive)
+    from EITHER on-disk shape: a single JSON array (the live bridge/default ledger
+    writes a pretty-printed array) or JSON Lines (LocalJournalClient). Tries the
+    whole-file array first, then falls back to line-by-line.
+
+    recall.load_events does the same shape-detection but FLATTENS events, dropping
+    entry_hash, so anything that recomputes the chain (verify) must use THIS."""
+    raw = Path(path).read_text()
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else [data]
+    except (json.JSONDecodeError, ValueError):
+        events = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if line:
+                events.append(json.loads(line))
+        return events
+
+
 def verify_journal_file(path: str, key: bytes | None = None) -> list:
-    """verify_chain over a JSONL journal on disk. Also runs verify_dag, so a
-    single call proves both structural soundness AND byte-level integrity."""
-    events = []
-    for line in Path(path).read_text().splitlines():
-        line = line.strip()
-        if line:
-            events.append(json.loads(line))
+    """verify_chain + verify_dag over a journal on disk, so a single call proves
+    both structural soundness AND byte-level integrity. Reads either on-disk shape
+    via load_journal_raw."""
+    events = load_journal_raw(path)
     return verify_dag(events) + verify_chain(events, key=key)
 
 

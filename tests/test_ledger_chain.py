@@ -263,3 +263,31 @@ def test_cli_verify_command_reports_intact_then_tampered(tmp_path, monkeypatch, 
     monkeypatch.setattr(cli.sys, "argv", ["korgex", "verify", str(jp)])
     assert cli.main() == 1
     assert "tamper" in capsys.readouterr().out.lower()
+
+
+def test_verify_journal_file_reads_json_array_and_jsonl_identically(tmp_path):
+    # REGRESSION (found dogfooding korgex on the wire): the live agent's default
+    # ledger writes a pretty-printed JSON ARRAY, but verify_journal_file parsed
+    # strictly line-by-line and crashed (JSONDecodeError) on the journals real
+    # sessions produce — so `korgex verify` was broken for actual runs while
+    # `korgex trace` (recall.load_events, array-aware) worked. verify needs the RAW
+    # events (entry_hash intact), so it can't reuse recall's normalizing loader.
+    events = _chain([
+        {"seq_id": 1, "tool_name": "user_prompt"},
+        {"seq_id": 2, "tool_name": "Read", "triggered_by": 1},
+        {"seq_id": 3, "tool_name": "llm_inference", "triggered_by": 2},
+    ])
+    jsonl = tmp_path / "j.jsonl"
+    jsonl.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    arr = tmp_path / "j_array.json"
+    arr.write_text(json.dumps(events, indent=2))  # the bridge's on-disk shape
+
+    # both formats load without crashing AND report the same (intact) verdict
+    assert L.verify_journal_file(str(jsonl)) == []
+    assert L.verify_journal_file(str(arr)) == []
+
+    # a tamper in the ARRAY form is still caught (not silently passed)
+    tampered = [dict(e) for e in events]
+    tampered[1]["tool_name"] = "Write"  # edit content, leave the stale hash
+    arr.write_text(json.dumps(tampered, indent=2))
+    assert L.verify_journal_file(str(arr)) != []
