@@ -80,6 +80,11 @@ def test_slash_rewind_parses():
     assert R.parse_repl_input("/rewind 2").arg == "2"
 
 
+def test_slash_version_parses():
+    assert R.parse_repl_input("/version").kind == "version"
+    assert R.parse_repl_input("/version").arg is None
+
+
 def test_suggest_command_finds_close_typos():
     assert R.suggest_command("skils") == "skills"
     assert R.suggest_command("hlep") == "help"
