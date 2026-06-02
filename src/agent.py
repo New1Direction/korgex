@@ -140,12 +140,14 @@ def subagent_tools(subagent_type: str) -> list:
     """Tool name subset a subagent of `subagent_type` is allowed to use.
 
     Read-only types (explore/plan/review/research) get search/read tools only.
-    The default ("code") gets every tool EXCEPT Agent — subagents must not
-    recursively spawn subagents (nesting is one level deep).
+    The default ("code") gets every tool EXCEPT Agent and Orchestrate — a
+    subagent must not recursively spawn subagents OR fan out a DAG of them
+    (nesting is one level deep: only the top-level agent orchestrates, its
+    children are leaves → bounded blast radius, ledger depth, and threads).
     """
     if subagent_type in ("explore", "plan", "review", "research"):
         return list(_READONLY_SUBAGENT_TOOLS)
-    return [name for name in USER_TOOLS.keys() if name != "Agent"]
+    return [name for name in USER_TOOLS.keys() if name not in ("Agent", "Orchestrate")]
 
 
 def _resolve_params(mode: str) -> dict:
@@ -1081,7 +1083,111 @@ class KorgexAgent:
                     }, korg, prompt_seq, mutated)
 
                 messages.append(self._assistant_turn(response))
-                for call in tool_calls:
+
+                # ── Parallel Agent-call dispatch (opt-in, Agent-ONLY) ────────
+                # A contiguous LEADING run of >=2 pure-Agent calls is fanned out
+                # concurrently (KORGEX_PARALLEL_AGENTS>1) over a ThreadSafeLedger;
+                # everything else (`serial_calls`) runs through the UNCHANGED
+                # serial body below. Agent never touches the filesystem, so every
+                # FS-racing gate (checkpoint/capture/rewind/LSP-revert) is a
+                # provable no-op on this path. Result ORDER is preserved: the
+                # post-pass appends tool-result turns in ORIGINAL call order, so
+                # the LLM's next turn sees results ordered to match its turn.
+                agent_batch, serial_calls = self._partition_parallel_agent_calls(tool_calls, tools_filter)
+                if agent_batch:
+                    # Serial pre-pass: run the per-call gates for the Agent batch
+                    # FIRST (cheap / no-ops for Agent) and collect any blocks.
+                    blocks: dict = {}
+                    to_run = []
+                    for call in agent_batch:
+                        ws_block = self._workspace_block(call)
+                        if ws_block is not None:
+                            korg.record_tool_call(
+                                tool_name="workspace.guard",
+                                args={"tool": call["name"], "path": call["args"].get("file_path")},
+                                result=ws_block, success=False, duration_ms=0,
+                                triggered_by=llm_seq)
+                            blocks[call["id"]] = ws_block
+                            continue
+                        gr_block = self._guardrail_block(call)
+                        if gr_block is not None:
+                            korg.record_tool_call(
+                                tool_name="guardrail.block",
+                                args={"tool": call["name"], "path": call["args"].get("file_path")},
+                                result=gr_block, success=False, duration_ms=0,
+                                triggered_by=llm_seq)
+                            blocks[call["id"]] = gr_block
+                            continue
+                        pm_block = self._plan_mode_block(call, korg, llm_seq)
+                        if pm_block is not None:
+                            blocks[call["id"]] = pm_block
+                            continue
+                        ep_block = self._edit_policy_block(call, korg, llm_seq)
+                        if ep_block is not None:
+                            blocks[call["id"]] = ep_block
+                            continue
+                        if hooks:
+                            pre = run_event(
+                                "PreToolUse", call["name"],
+                                {"event": "PreToolUse", "tool_name": call["name"],
+                                 "tool_input": call["args"], "cwd": self.repo_root},
+                                hooks, cwd=self.repo_root,
+                            )
+                            if pre["ran"]:
+                                verdict = "BLOCKED" if pre["decision"] == "block" else "APPROVED"
+                                korg.record_tool_call(
+                                    tool_name="hook.PreToolUse",
+                                    args={"tool": call["name"]},
+                                    result={"verdict": verdict, "reason": pre["reason"],
+                                            "policy_hash": pre["policy_hash"]},
+                                    success=(verdict == "APPROVED"),
+                                    duration_ms=0, triggered_by=llm_seq)
+                            if pre["decision"] == "block":
+                                blocks[call["id"]] = {
+                                    "error": "blocked by PreToolUse hook",
+                                    "reason": pre["reason"] or "policy denied this tool call"}
+                                continue
+                        self.plugins.invoke("pre_tool", call)
+                        to_run.append(call)
+
+                    # Fan out the UNBLOCKED Agent calls concurrently.
+                    _bt0 = time.monotonic()
+                    batch_results = self._dispatch_agent_batch(to_run, llm_seq)
+                    _bms = int((time.monotonic() - _bt0) * 1000)
+
+                    # Serial post-pass: record + emit results in ORIGINAL order.
+                    for call in agent_batch:
+                        if call["id"] in blocks:
+                            messages.append(self._tool_result_turn(call["id"], blocks[call["id"]]))
+                            continue
+                        tool_result = batch_results.get(call["id"], {
+                            "agent_type": (call.get("args") or {}).get("subagent_type", "code"),
+                            "success": False, "result": "subagent crashed (see logs)"})
+                        _success = ("error" not in tool_result
+                                    if isinstance(tool_result, dict) else True)
+                        korg.record_tool_call(
+                            tool_name=call["name"], args=call["args"],
+                            result=tool_result, success=_success,
+                            duration_ms=_bms, triggered_by=llm_seq)
+                        self.plugins.invoke("post_tool", {"call": call, "result": tool_result})
+                        if hooks:
+                            post = run_event(
+                                "PostToolUse", call["name"],
+                                {"event": "PostToolUse", "tool_name": call["name"],
+                                 "tool_input": call["args"], "tool_result": tool_result,
+                                 "cwd": self.repo_root},
+                                hooks, cwd=self.repo_root,
+                            )
+                            if post["ran"]:
+                                korg.record_tool_call(
+                                    tool_name="hook.PostToolUse",
+                                    args={"tool": call["name"]},
+                                    result={"verdict": "OBSERVED",
+                                            "policy_hash": post["policy_hash"]},
+                                    success=True, duration_ms=0, triggered_by=llm_seq)
+                        messages.append(self._tool_result_turn(call["id"], tool_result))
+
+                for call in serial_calls:
                     # ── Workspace boundary guard (Gate A): hard safety ───────
                     # When isolated, a Write/Edit whose resolved path escapes the
                     # workspace root is blocked outright and recorded as a
@@ -1170,11 +1276,11 @@ class KorgexAgent:
                         # Show a transient spinner while the tool runs
                         with session.spinner(f"{call['name']}({_short_args(call['args'])})"):
                             _t0 = time.monotonic()
-                            tool_result = self._dispatch_call(call, llm_seq)
+                            tool_result = self._dispatch_call(call, llm_seq, tools_filter)
                             _ms = int((time.monotonic() - _t0) * 1000)
                     else:
                         _t0 = time.monotonic()
-                        tool_result = self._dispatch_call(call, llm_seq)
+                        tool_result = self._dispatch_call(call, llm_seq, tools_filter)
                         _ms = int((time.monotonic() - _t0) * 1000)
 
                     # ── korg: one event per completed tool call ─────────────
@@ -1322,15 +1428,102 @@ class KorgexAgent:
                                 f"accepted. Output:\n{g['output'][:2000]}")
         return result
 
-    def _dispatch_call(self, call: dict, parent_seq) -> dict:
+    def _partition_parallel_agent_calls(self, tool_calls: list, tools_filter=None) -> tuple:
+        """Split off the LEADING contiguous run of pure-Agent calls IFF it is
+        worth fanning out — i.e. there are >=2 Agent calls in that run AND the
+        parallelism dial (KORGEX_PARALLEL_AGENTS, default 4) is > 1.
+
+        Returns (agent_batch, rest). agent_batch is the contiguous Agent prefix;
+        rest is everything after it (which runs through the unchanged serial
+        loop). A single Agent, a mixed batch (Agent + Write in one round), or a
+        disabled dial all yield agent_batch=[] → byte-for-byte unchanged serial
+        behavior for the common case. Conservative on purpose: only a clean run
+        of Agent calls (where every FS-touching gate is provably a no-op) is ever
+        fanned out."""
+        # One-level nesting: a subagent (tools_filter set) that wasn't granted
+        # Agent must not fan one out — keep everything serial so _dispatch_call
+        # hard-blocks any (hallucinated) Agent call.
+        if tools_filter is not None and "Agent" not in set(tools_filter):
+            return [], list(tool_calls)
+        try:
+            cap = int(os.environ.get("KORGEX_PARALLEL_AGENTS", "4"))
+        except (TypeError, ValueError):
+            cap = 4
+        if cap <= 1:
+            return [], list(tool_calls)
+        batch = []
+        for call in tool_calls:
+            if call.get("name") == "Agent":
+                batch.append(call)
+            else:
+                break
+        if len(batch) < 2:
+            return [], list(tool_calls)
+        return batch, list(tool_calls[len(batch):])
+
+    def _dispatch_agent_batch(self, agent_calls: list, llm_seq) -> dict:
+        """Fan out a batch of pure-Agent calls concurrently and return
+        {call_id: result}. Results carry the same shape _run_subagent returns.
+
+        The ledger is wrapped in a ThreadSafeLedger for the batch (isinstance-
+        guarded against double-wrap; the RLock is reentrant so an accidental
+        double-wrap would still be correct) and restored in a finally — exactly
+        mirroring run_korgantic_task. Each call becomes one thunk so all siblings
+        write through the safe wrapper under triggered_by=llm_seq (a valid DAG).
+        A crashed child (parallel() returns None for it) is mapped to a
+        success=False result — never reported to the LLM as success."""
+        from src import korgantic as _KQ
+        from src.korg_ledger import ThreadSafeLedger
+
+        try:
+            cap = int(os.environ.get("KORGEX_PARALLEL_AGENTS", "4"))
+        except (TypeError, ValueError):
+            cap = 4
+
+        base = self.ledger if self.ledger is not None else _korg()
+        already_safe = isinstance(base, ThreadSafeLedger)
+        safe = base if already_safe else ThreadSafeLedger(base)
+        prev_ledger = self.ledger
+        self.ledger = safe
+        try:
+            thunks = [
+                (lambda c=call: self._run_subagent(c["args"], llm_seq))
+                for call in agent_calls
+            ]
+            results = _KQ.parallel(thunks, max_workers=cap)
+        finally:
+            self.ledger = prev_ledger
+
+        out = {}
+        for call, res in zip(agent_calls, results):
+            if res is None:
+                # parallel() logs a raised thunk and yields None; a None must
+                # NEVER reach the LLM as success.
+                res = {"agent_type": (call.get("args") or {}).get("subagent_type", "code"),
+                       "success": False, "result": "subagent crashed (see logs)"}
+            out[call["id"]] = res
+        return out
+
+    def _dispatch_call(self, call: dict, parent_seq, tools_filter=None) -> dict:
         """Run one tool call. The Agent tool spawns a real nested subagent;
         every other tool routes to its in-process / MCP handler. File/Bash tools
         resolve under the workspace root (the isolated worktree) when set."""
-        if call["name"] in ("TaskCreate", "TaskUpdate"):
+        name = call["name"]
+        # Hard one-level-nesting gate: a subagent (tools_filter set) that emits a
+        # delegation tool it was NOT granted (Agent/Orchestrate) is blocked here —
+        # not merely omitted from its advertised tool list — so a hallucinated or
+        # prompt-injected delegation can't spawn a nested swarm.
+        if (name in ("Agent", "Orchestrate") and tools_filter is not None
+                and name not in set(tools_filter)):
+            return {"error": f"'{name}' is not permitted for this subagent "
+                             "(one-level nesting enforced)"}
+        if name in ("TaskCreate", "TaskUpdate"):
             return self._task_tool(call)
-        if call["name"] == "Agent":
+        if name == "Agent":
             return self._run_subagent(call["args"], parent_seq)
-        return route_tool_call(call["name"], call["args"],
+        if name == "Orchestrate":
+            return self._run_orchestration(call["args"], parent_seq)
+        return route_tool_call(name, call["args"],
                                repo_root=self.workspace_root or self.repo_root)
 
     def _task_tool(self, call: dict) -> dict:
@@ -1775,6 +1968,102 @@ class KorgexAgent:
             "iterations": child_result.get("iterations"),
             "root_seq": child_root,
         }
+
+    def _ledger_events_snapshot(self) -> list:
+        """Best-effort read of this run's ledger events for inline verification.
+
+        Unwraps a ThreadSafeLedger, then returns the inner client's in-memory
+        `.events` if it has them, else reads a LocalJournalClient's JSONL file.
+        Returns [] when neither is available (a remote/bridge ledger) — the
+        caller treats an empty snapshot as "could not verify here"."""
+        from src.korg_ledger import LocalJournalClient, ThreadSafeLedger
+
+        led = self.ledger
+        if isinstance(led, ThreadSafeLedger):
+            led = led._inner
+        events = getattr(led, "events", None)
+        if isinstance(events, list):
+            return list(events)
+        if isinstance(led, LocalJournalClient):
+            try:
+                out = []
+                for line in led.path.read_text().splitlines():
+                    line = line.strip()
+                    if line:
+                        out.append(json.loads(line))
+                return out
+            except (OSError, ValueError):
+                return []
+        return []
+
+    def _run_orchestration(self, args: dict, parent_seq) -> dict:
+        """Run the Orchestrate tool: a user-defined DAG of subagents that compose
+        into ONE connected, verifiable causal subtree.
+
+        Builds the production runner closure (each node calls _run_subagent under
+        the ONE orchestrate root, inheriting tool-filtering + the typed
+        subagent.result node + the one-level-nesting bound), runs the DAG via
+        src.orchestrate.run_orchestration, then VERIFIES ITS OWN SUBTREE
+        (verify_dag over events with seq >= root_seq) and surfaces the result
+        inline as `dag_verified`."""
+        from src.korg_ledger import ThreadSafeLedger, verify_dag
+        from src.orchestrate import run_orchestration
+
+        # Concurrency: wrap self.ledger in a ThreadSafeLedger for the whole run so
+        # EVERY concurrent node subagent — which writes via `korg = self.ledger`
+        # inside _run_subagent — routes through the one lock, not just
+        # orchestrate's own bookkeeping. Both the tool path and the programmatic
+        # run_orchestration_task hit this. isinstance-guarded (no double-wrap);
+        # restored in finally. (Assumes one run_task per agent instance at a time
+        # — the same self.ledger-swap contract as run_korgantic_task.)
+        base = self.ledger if self.ledger is not None else _korg()
+        safe = base if isinstance(base, ThreadSafeLedger) else ThreadSafeLedger(base)
+        prev_ledger = self.ledger
+        self.ledger = safe
+
+        def runner(node, root_seq):
+            step = node.task
+            return self._run_subagent(
+                {"prompt": step.get("prompt"),
+                 "subagent_type": step.get("subagent_type", "code"),
+                 "model": step.get("model"),
+                 "description": step.get("id")},
+                root_seq,
+            )
+
+        try:
+            out = run_orchestration(args, runner, safe, parent_seq)
+        finally:
+            self.ledger = prev_ledger
+        root_seq = out.get("root_seq")
+
+        # The differentiator, surfaced inline: verify the run's causal DAG is
+        # sound. dag_verified is None when the events can't be read in-process
+        # (a remote/bridge ledger) — DISTINCT from False ("DAG actually invalid");
+        # the on-disk `korgex verify` path covers what can't be read here.
+        dag_verified = None
+        try:
+            events = self._ledger_events_snapshot()
+            if events:
+                dag_verified = verify_dag(events) == []
+        except Exception:
+            dag_verified = None
+
+        return {
+            "root_seq": root_seq,
+            "completed": out["completed"],
+            "failed": out["failed"],
+            "skipped": out["skipped"],
+            "results": out["results"],
+            "dag_verified": dag_verified,
+        }
+
+    def run_orchestration_task(self, spec: dict) -> dict:
+        """Programmatic entry for the orchestration primitive (REPL/CLI/tests),
+        symmetric with run_korgantic_task. The ThreadSafeLedger wrap + restore
+        now lives in _run_orchestration, so the tool path and this path are
+        concurrency-safe identically. Returns the orchestration result dict."""
+        return self._run_orchestration(spec, None)
 
     def run_korgantic_task(self, task: str, effort: str = "auto") -> dict:
         """Max-power mode: run the effort-scaled korgantic workflow chain.

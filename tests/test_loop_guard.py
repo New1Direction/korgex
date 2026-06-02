@@ -111,7 +111,7 @@ def test_repeat_rail_blocks_a_failing_loop(tmp_path, monkeypatch):
         return r
     monkeypatch.setattr(a, "_call", fake_call)
     monkeypatch.setattr(a, "_extract_tool_calls", lambda r: r._calls)
-    monkeypatch.setattr(a, "_dispatch_call", lambda call, seq: {"error": "boom"})
+    monkeypatch.setattr(a, "_dispatch_call", lambda call, seq, tf=None: {"error": "boom"})
     monkeypatch.setenv("KORGEX_MAX_ITERATIONS", "8")
 
     a.run_task("run the tests")

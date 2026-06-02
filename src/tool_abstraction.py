@@ -210,6 +210,41 @@ Do NOT use Agent for simple, single-step operations that you can do directly.
     {"name": "run_in_background", "type": "boolean", "description": "Run this agent in the background. You'll be notified when it completes.", "default": False},
 ])
 
+register_user_tool("Orchestrate", """
+Run a user-defined DAG of subagents as ONE verifiable, fault-isolated workflow.
+
+Where Agent launches independent subagents, Orchestrate runs a graph of them with
+explicit dependencies: independent nodes run in parallel; a node runs only after
+all its deps complete; if a node fails, its (transitive) dependents are skipped
+rather than run against a broken precondition. The whole run is one connected
+causal DAG in the ledger — the tool verifies its own subtree before returning.
+
+Each node is a subagent (same types as Agent: explore, plan, code, review,
+research). Nodes cannot themselves orchestrate or spawn agents (one level deep).
+
+Use Orchestrate when:
+- Sub-tasks have dependencies (e.g. explore → plan → implement → review)
+- You want fan-out with fault isolation and a provable execution record
+
+Use the simpler Agent tool when sub-tasks are fully independent and flat.
+""".strip(), [
+    {"name": "nodes", "type": "array", "description": "The DAG nodes to run", "required": True,
+     "items": {
+         "type": "object",
+         "properties": {
+             "id": {"type": "string", "description": "Unique node id, referenced by other nodes' deps"},
+             "prompt": {"type": "string", "description": "The task for this node's subagent"},
+             "subagent_type": {"type": "string", "description": "explore, plan, code, review, or research",
+                               "enum": ["explore", "plan", "code", "review", "research"]},
+             "deps": {"type": "array", "items": {"type": "string"},
+                      "description": "Ids of nodes that must complete before this one runs"},
+             "model": {"type": "string", "description": "Optional model override: sonnet, opus, haiku",
+                       "enum": ["sonnet", "opus", "haiku"]},
+         },
+     }},
+    {"name": "max_parallel", "type": "integer", "description": "Max nodes to run at once", "default": 5},
+])
+
 register_user_tool("AskUserQuestion", """
 Use this tool when you need to ask the user questions during execution.
 This allows you to:

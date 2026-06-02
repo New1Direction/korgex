@@ -13,8 +13,6 @@ import os
 import sys
 from types import SimpleNamespace
 
-import pytest
-
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -41,6 +39,16 @@ def test_subagent_tools_code_excludes_agent_to_prevent_recursion():
     code = set(subagent_tools("code"))
     assert "Agent" not in code  # subagents can't spawn subagents
     assert "Write" in code      # but otherwise full access
+
+
+def test_subagent_tools_exclude_both_agent_and_orchestrate():
+    # One-level-nesting invariant: a subagent gets NEITHER Agent NOR Orchestrate,
+    # so only the top-level agent fans out. A child cannot orchestrate either =>
+    # bounded blast radius, bounded ledger depth, bounded threads.
+    for st in ("code", "explore", "plan", "review", "research"):
+        tools = set(subagent_tools(st))
+        assert "Agent" not in tools, st
+        assert "Orchestrate" not in tools, st
 
 
 # ── 2. ledger: root chains under a parent seq ─────────────────────────────
@@ -127,6 +135,20 @@ def _openai_agent_call(call_id, prompt, subagent_type):
                 name="Agent",
                 arguments=json.dumps({"prompt": prompt, "subagent_type": subagent_type,
                                       "description": "do a thing"}),
+            ),
+        )],
+    )
+    return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=msg)])
+
+
+def _openai_orchestrate_call(call_id, nodes):
+    msg = SimpleNamespace(
+        content=None,
+        tool_calls=[SimpleNamespace(
+            id=call_id,
+            function=SimpleNamespace(
+                name="Orchestrate",
+                arguments=json.dumps({"nodes": nodes, "max_parallel": 5}),
             ),
         )],
     )
@@ -265,3 +287,97 @@ def test_swarm_run_concurrent_aggregates_real_agents():
     ])
     assert len(results) == 2
     assert all(r.success for r in results)
+
+
+# ── 5. the Orchestrate tool (Slice 2) ─────────────────────────────────────
+
+class _SeqLedger:
+    """A ledger that records seq_id + triggered_by so verify_dag can run over
+    its events (the _FakeLedger above omits seq_id)."""
+
+    def __init__(self):
+        self.events = []
+        self._seq = 0
+
+    def _append(self, kind, triggered_by, **extra):
+        self._seq += 1
+        ev = {"seq_id": self._seq, "kind": kind, "triggered_by": triggered_by, **extra}
+        self.events.append(ev)
+        return self._seq
+
+    def record_user_prompt(self, prompt, triggered_by=None):
+        return self._append("user_prompt", triggered_by)
+
+    def record_llm_call(self, **kw):
+        return self._append("llm", kw.get("triggered_by"))
+
+    def record_tool_call(self, **kw):
+        return self._append("tool", kw.get("triggered_by"),
+                            tool_name=kw.get("tool_name"), args=kw.get("args"),
+                            result=kw.get("result"))
+
+
+def test_orchestrate_tool_dispatches_self_verifies_and_respects_nesting():
+    parent = _ScriptedAgent([
+        _openai_orchestrate_call("call_1", [
+            {"id": "x", "prompt": "do x", "subagent_type": "explore", "deps": []},
+            {"id": "y", "prompt": "do y", "subagent_type": "explore", "deps": ["x"]},
+        ]),
+        _openai_text("parent done"),
+    ])
+    parent.ledger = _SeqLedger()
+
+    seen = {"parent_seqs": [], "tools_filters": []}
+
+    class _Child:
+        def __init__(self, ledger):
+            self.ledger = ledger
+
+        def run_task(self, prompt, parent_seq=None, tools_filter=None, output_schema=None):
+            seen["parent_seqs"].append(parent_seq)
+            seen["tools_filters"].append(list(tools_filter) if tools_filter else [])
+            child_root = self.ledger.record_user_prompt(prompt, triggered_by=parent_seq)
+            return {"success": True, "result": f"did {prompt}", "iterations": 1,
+                    "root_seq": child_root}
+
+    # _run_orchestration must be invoked with parent_seq; spy on it.
+    real_run_orch = parent._run_orchestration
+    spy = {"called_with_parent_seq": None}
+
+    def _spy(args, parent_seq):
+        spy["called_with_parent_seq"] = parent_seq
+        return real_run_orch(args, parent_seq)
+
+    parent._run_orchestration = _spy
+    parent.subagent_factory = lambda **kw: _Child(kw["ledger"])
+    result = parent.run_task("delegate an orchestration")
+
+    assert result["success"] is True
+    assert spy["called_with_parent_seq"] is not None  # dispatched with parent_seq
+
+    # both step children chained under ONE orchestrate root in the shared ledger.
+    roots = [e for e in parent.ledger.events if e["kind"] == "user_prompt"]
+    # there is exactly one user_prompt that the two child roots point back to.
+    child_parent_seqs = set(seen["parent_seqs"])
+    assert len(child_parent_seqs) == 1
+    orch_root_seq = child_parent_seqs.pop()
+    node_roots = [e for e in roots if e["triggered_by"] == orch_root_seq]
+    assert len(node_roots) == 2
+
+    # a typed orchestrate.result event names both child root seqs.
+    agg = [e for e in parent.ledger.events
+           if e.get("tool_name") == "orchestrate.result"]
+    assert len(agg) == 1
+    assert len(agg[0]["result"]["child_root_seqs"]) == 2
+
+    # children were tool-filtered (explore is read-only: no Write/Agent/Orchestrate).
+    for tf in seen["tools_filters"]:
+        assert "Write" not in tf and "Agent" not in tf and "Orchestrate" not in tf
+
+    # the tool VERIFIED ITS OWN SUBTREE before returning.
+    # The Orchestrate tool-result is recorded on the ledger; find the returned dict
+    # by reading the Orchestrate tool event the parent recorded.
+    orch_tool_ev = [e for e in parent.ledger.events
+                    if e.get("tool_name") == "Orchestrate"]
+    assert len(orch_tool_ev) == 1
+    assert orch_tool_ev[0]["result"]["dag_verified"] is True
