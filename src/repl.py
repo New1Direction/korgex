@@ -447,7 +447,8 @@ class Repl:
         except KeyboardInterrupt:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session
-            self._print(f"[error] {e}")
+            from src.errors import humanize_error
+            self._print(f"⚠ {humanize_error(e)}")
 
     def _run_shell(self, cmd: str):
         """`!cmd` — run a shell command the USER typed (a terminal escape), in the
