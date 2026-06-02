@@ -740,14 +740,21 @@ def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
         print(f"korgex: {e}", file=sys.stderr)
         return 2
     except Exception as e:
-        print(f"korgex: agent crashed: {type(e).__name__}: {e}", file=sys.stderr)
+        from src.errors import humanize_error
+        print(f"korgex: {humanize_error(e)}", file=sys.stderr)
         return 2
 
     text = (result or {}).get("result", "")
-    if text and quiet:
-        # In quiet mode the streamer didn't print; emit the final text now
+    if _should_emit_final(text, getattr(agent, "interactive", None)):
         print(text)
     return 0 if (result or {}).get("success", False) else 1
+
+
+def _should_emit_final(text: str, interactive) -> bool:
+    """Print the agent's final text iff it wasn't already streamed live. The
+    naked-prompt path doesn't stream (interactive is None/False), so the result
+    must be emitted here — otherwise `korgex "task"` prints nothing."""
+    return bool(text) and not interactive
 
 
 _DESCRIPTION = ("Korgex — autonomous coding agent. "

@@ -110,8 +110,11 @@ def _resolve_params(mode: str) -> dict:
 def _resolve_model(model: str, mode: str) -> str:
     """Pick the active model.
 
-    Precedence: explicit --model wins, then --mode → MODE_MODEL_MAP,
-    then KORGEX_MODEL env, then default Sonnet 4.6.
+    Precedence: explicit --model → --mode → the configured default (`korgex setup`)
+    → KORGEX_MODEL env → built-in Sonnet 4.6. Consulting config.default_model here
+    is load-bearing: without it, `korgex "task"` ignored the model the user picked
+    in setup and crashed with a provider/key mismatch (e.g. an OpenRouter user's key
+    sent to Anthropic as x-api-key → 401).
     """
     if model:
         return model
@@ -122,8 +125,13 @@ def _resolve_model(model: str, mode: str) -> str:
             if key and key in DEFAULT_MODELS:
                 return DEFAULT_MODELS[key].model_id
         except Exception:
-            pass  # fall through to env/default
-    return os.environ.get("KORGEX_MODEL", "claude-sonnet-4-6")
+            pass  # fall through to config/env/default
+    try:
+        from src.config import load_config
+        cfg_default = load_config().default_model
+    except Exception:
+        cfg_default = None  # config missing/unreadable → fall through, never crash
+    return cfg_default or os.environ.get("KORGEX_MODEL") or "claude-sonnet-4-6"
 
 
 class KorgexAgent:
