@@ -31,6 +31,7 @@ korgex — commands
   /clear          start a fresh conversation
   /help  /?       this help
   /exit  /quit    leave (also Ctrl-D)
+  !<command>      run a shell command right here (e.g. !git status, !pytest -q)
 anything else is a message to the agent.
 tip: mention files inline with @path — e.g. "refactor @src/auth.py" inlines it.
 """
@@ -48,6 +49,10 @@ def parse_repl_input(line: str) -> Command:
     s = (line or "").strip()
     if not s:
         return Command("noop")
+    # "!cmd" is a shell escape — run it directly, not as an agent turn. Only at the
+    # very start (a trailing "ship it!" is a normal message).
+    if s.startswith("!"):
+        return Command("shell", s[1:].strip())
     # A command is a line that STARTS with "/". Text merely containing a slash
     # mid-sentence (e.g. "what does /etc/hosts do") is a turn.
     if s.startswith("/"):
@@ -383,6 +388,9 @@ class Repl:
                     mark = {"running": "⏳", "done": "✓", "failed": "✗"}.get(j.status, "·")
                     self._print(f"  {mark} {j.id}  [{j.status}]  {j.command[:60]}")
             return True
+        if cmd.kind == "shell":
+            self._run_shell(cmd.arg)
+            return True
         if cmd.kind == "rewind":
             self._do_rewind(cmd.arg)
             return True
@@ -433,6 +441,30 @@ class Repl:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session
             self._print(f"[error] {e}")
+
+    def _run_shell(self, cmd: str):
+        """`!cmd` — run a shell command the USER typed (a terminal escape), in the
+        project root, and print its output. This is the user's own command, not the
+        agent acting, so it just runs. Best-effort; never kills the session."""
+        cmd = (cmd or "").strip()
+        if not cmd:
+            self._print("usage: !<command>  — runs a shell command here, e.g. !git status")
+            return
+        import subprocess
+        self._print(f"$ {cmd}")
+        try:
+            r = subprocess.run(cmd, shell=True, cwd=self.repo_root,
+                               capture_output=True, text=True, timeout=120)
+            if r.stdout:
+                self._print(r.stdout.rstrip("\n"))
+            if r.stderr:
+                self._print(r.stderr.rstrip("\n"))
+            if r.returncode != 0:
+                self._print(f"(exit {r.returncode})")
+        except subprocess.TimeoutExpired:
+            self._print("(timed out after 120s)")
+        except Exception as e:
+            self._print(f"(shell error: {e})")
 
     def _open_task_count(self) -> int:
         led = getattr(self._agent, "_task_ledger", None)
