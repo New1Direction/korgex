@@ -109,7 +109,8 @@ class SkillRegistry:
 
 
 def load_skills(roots) -> SkillRegistry:
-    """Scan each root directory for ``*/SKILL.md`` and build a registry. Missing
+    """Scan each root for ``*/SKILL.md`` (directory layout) and ``*.SKILL.md``
+    (flat layout, e.g. the spellbook library) and build a registry. Missing
     roots are skipped. Later roots override earlier ones on a name clash (so a
     user skill can shadow a built-in of the same name)."""
     found = []
@@ -118,8 +119,16 @@ def load_skills(roots) -> SkillRegistry:
             continue
         for entry in sorted(os.listdir(root)):
             md = os.path.join(root, entry, "SKILL.md")
-            if os.path.isfile(md):
+            if os.path.isfile(md):                       # directory layout: <name>/SKILL.md
                 sk = parse_skill(md)
+                if sk:
+                    found.append(sk)
+                continue
+            # Flat layout (e.g. the spellbook library): <name>.SKILL.md directly in
+            # the root. The skill's name comes from the frontmatter, not the path.
+            flat = os.path.join(root, entry)
+            if entry.endswith(".SKILL.md") and os.path.isfile(flat):
+                sk = parse_skill(flat)
                 if sk:
                     found.append(sk)
     return SkillRegistry(found)

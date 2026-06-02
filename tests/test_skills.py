@@ -52,6 +52,17 @@ def test_load_skills_finds_all(tmp_path):
     assert set(reg.names()) == {"alpha", "beta"}
 
 
+def test_load_skills_supports_flat_skill_md_files(tmp_path):
+    # Flat layout (e.g. the spellbook library): `<name>.SKILL.md` directly in the
+    # root, not just `<name>/SKILL.md`. Both layouts must load and coexist.
+    _write_skill(tmp_path, "api-design", "design good APIs")           # directory
+    (tmp_path / "systematic-debugging.SKILL.md").write_text(           # flat file
+        "---\nname: systematic-debugging\ndescription: four-phase debugging\n---\nbody\n")
+    reg = S.load_skills([str(tmp_path)])
+    assert set(reg.names()) == {"api-design", "systematic-debugging"}
+    assert reg.get("systematic-debugging").description == "four-phase debugging"
+
+
 def test_load_skills_empty_when_no_dir(tmp_path):
     reg = S.load_skills([str(tmp_path / "does-not-exist")])
     assert reg.names() == []
