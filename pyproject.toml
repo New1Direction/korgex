@@ -48,6 +48,15 @@ dev = [
     "build>=1.0.0,<2.0.0",
     "twine>=5.0.0,<7.0.0",
 ]
+# Verifiable browser suite (src/browser.py, browser_* tools). Optional: these are
+# imported lazily inside functions only (open_session / tiered fetch), so the core
+# install and the offline test suite never require them. Enable with:
+#   pip install 'korgex[browser]' && playwright install chromium
+browser = [
+    "playwright>=1.40.0,<2.0.0",
+    "patchright>=1.40.0",
+    "curl_cffi>=0.6.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/New1Direction/Korgex"
