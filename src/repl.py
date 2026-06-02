@@ -85,6 +85,25 @@ def parse_repl_input(line: str) -> Command:
     return Command("turn", s)
 
 
+# The real command vocabulary — used to suggest a fix for a mistyped command.
+KNOWN_COMMANDS = [
+    "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "loop",
+    "clear", "help", "exit", "quit",
+]
+
+
+def suggest_command(typed: str, known=None) -> str | None:
+    """Closest real command to a mistyped one (``/skils`` → ``skills``), or None
+    when nothing is close enough."""
+    import difflib
+
+    typed = (typed or "").strip().lstrip("/")
+    if not typed:
+        return None
+    matches = difflib.get_close_matches(typed, known or KNOWN_COMMANDS, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
 # Suggested models per provider — suggestions, NOT an allowlist (we're not locked
 # to any catalog; free-text model ids always work).
 SUGGESTED = {
@@ -131,7 +150,8 @@ class Repl:
         try:
             answer = input("model> ")
         except (EOFError, KeyboardInterrupt):
-            self._print(""); return
+            self._print("")
+            return
         choice = _MS.pick(rows, answer)
         if choice:
             self._switch_model(choice)
@@ -404,7 +424,11 @@ class Repl:
             self._run_loop(cmd.arg)
             return True
         if cmd.kind == "unknown":
-            self._print(f"unknown command: /{cmd.arg} — try /help")
+            hint = suggest_command(cmd.arg)
+            if hint:
+                self._print(f"unknown command: /{cmd.arg} — did you mean /{hint}?  (/help for all)")
+            else:
+                self._print(f"unknown command: /{cmd.arg} — try /help")
             return True
         if cmd.kind == "turn":
             self._run_turn(cmd.arg)
@@ -428,6 +452,9 @@ class Repl:
             if exp["attached"]:
                 self._print("· included " + ", ".join("@" + p for p in exp["attached"]))
                 prompt = exp["text"]
+            if exp.get("missed"):
+                self._print("· skipped " + ", ".join("@" + p for p in exp["missed"])
+                            + " — not found")
         except Exception:
             pass
         # Track this prompt as a rewind point and snapshot start-of-turn file state.
