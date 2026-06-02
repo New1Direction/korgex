@@ -68,6 +68,59 @@ def _looks_anthropic(model_id: str) -> bool:
     return "claude" in m or m.startswith("anthropic/")
 
 
+# Bring-your-own-OAuth providers: the OpenAI-compatible endpoint each one speaks.
+# The agent loop authenticates against these with a bearer token minted from the
+# SAME local credential the provider's own CLI uses (reusing the model_router
+# token-loaders), so no separate api-key is needed. (Claude is intentionally NOT
+# here: the Claude Code OAuth token is rejected by the raw Anthropic API, so
+# Claude stays on its api-key path — see _get_client.)
+_OAUTH_BASE_URLS = {
+    "grok": "https://api.x.ai/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+}
+
+
+def _oauth_provider_for(model_id: str) -> Optional[str]:
+    """Map a model to its BYO-OAuth provider (grok/gemini/claude), or None.
+
+    Consults the DEFAULT_MODELS registry first (by alias key or concrete model_id),
+    then falls back to a substring heuristic on the model name.
+    """
+    m = (model_id or "").lower()
+    if not m:
+        return None
+    try:
+        from src.model_router import DEFAULT_MODELS
+        cfg = DEFAULT_MODELS.get(model_id)
+        if cfg is None:
+            cfg = next((c for c in DEFAULT_MODELS.values() if c.model_id == model_id), None)
+        if cfg and cfg.provider in _OAUTH_BASE_URLS:
+            return cfg.provider
+    except Exception:
+        pass
+    if "grok" in m:
+        return "grok"
+    if "gemini" in m:
+        return "gemini"
+    return None
+
+
+def _oauth_token_and_base(provider: str):
+    """Mint a bearer token from the local OAuth credential for a BYO provider.
+
+    Returns ``(token, base_url)``. token is None when no credential is available,
+    so the caller falls back to the configured api-key path. Reuses the
+    model_router loaders so there's one source of truth per provider.
+    """
+    base = _OAUTH_BASE_URLS.get(provider)
+    try:
+        from src.model_router import GeminiClient, GrokClient
+        loader = {"grok": GrokClient, "gemini": GeminiClient}[provider]
+        return (loader()._ensure_token() or None), base
+    except Exception:
+        return None, base
+
+
 # Read-only tool subset handed to non-mutating subagents (Recall is read-only).
 _READONLY_SUBAGENT_TOOLS = ["Read", "Grep", "Glob", "Recall"]
 
@@ -117,6 +170,12 @@ def _resolve_model(model: str, mode: str) -> str:
     sent to Anthropic as x-api-key → 401).
     """
     if model:
+        try:
+            from src.model_router import DEFAULT_MODELS
+            if model in DEFAULT_MODELS:          # short alias → concrete API model id
+                return DEFAULT_MODELS[model].model_id
+        except Exception:
+            pass
         return model
     if mode:
         try:
@@ -493,6 +552,20 @@ class KorgexAgent:
         # Remembered for the prompt-cache layer: whether we're on OpenRouter (and
         # thus can use its cache_control breakpoints) is a base_url question.
         self._base_url = base_url
+
+        # BYO-OAuth fallback: when no api-key is configured and this model belongs
+        # to a bring-your-own-OAuth provider (grok/gemini, both OpenAI-compatible),
+        # mint a bearer token from the local credential (the provider's own CLI
+        # login) and point the SDK at that provider's endpoint. A configured
+        # api-key always wins (this branch is skipped when `key` is set).
+        if not key:
+            oauth = _oauth_provider_for(self.model)
+            if oauth:
+                token, oauth_base = _oauth_token_and_base(oauth)
+                if token:
+                    self._base_url = oauth_base
+                    from openai import OpenAI
+                    return OpenAI(api_key=token, base_url=oauth_base)
 
         if self.provider == "anthropic":
             if not key:
