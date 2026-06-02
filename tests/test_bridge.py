@@ -101,13 +101,16 @@ def test_openrouter_anthropic_id_detected():
     assert a.provider == "anthropic"
 
 
-def test_missing_api_key_raises_cleanly(tmp_path):
+def test_missing_api_key_raises_cleanly(tmp_path, monkeypatch):
     saved = {k: os.environ.pop(k, None) for k in
              ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "KORGEX_API_KEY")}
     # Point config at an empty file too, so a real ~/.korgex/config.json with a
     # saved key doesn't satisfy the lookup (the agent now reads config + env).
     saved_cfg = os.environ.pop("KORGEX_CONFIG", None)
     os.environ["KORGEX_CONFIG"] = str(tmp_path / "empty.json")
+    # No api-key AND no BYO-OAuth credential available → the genuine no-auth path.
+    # (Without this the host's Claude Code / grok / gemini login would satisfy auth.)
+    monkeypatch.setattr("src.agent._oauth_token_and_base", lambda p: (None, None))
     try:
         a = KorgexAgent(model="claude-sonnet-4-6")
         with pytest.raises(RuntimeError, match="API key"):
@@ -430,6 +433,8 @@ def test_swarm_refactor_returns_clean_error_without_api_key(client, monkeypatch,
         monkeypatch.delenv(k, raising=False)
     # also neutralize any real ~/.korgex/config.json (the agent reads config now)
     monkeypatch.setenv("KORGEX_CONFIG", str(tmp_path / "empty.json"))
+    # and no ambient BYO-OAuth credential, so "no auth at all" is genuinely true
+    monkeypatch.setattr("src.agent._oauth_token_and_base", lambda p: (None, None))
     r = client.post("/api/swarm/refactor", json={"filepath": "src/cli.py"})
     assert r.status_code == 200
     body = r.json()
