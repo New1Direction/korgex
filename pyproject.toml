@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "korgex"
-version = "0.11.0"
+version = "0.12.0"
 description = "Autonomous AI coding agent — provider-agnostic, MCP-native, plan-first"
 readme = "README.md"
 license = { text = "MIT" }
@@ -62,10 +62,10 @@ include = ["src*"]
 exclude = ["tests*", "korgex-vscode*", "sandbox*"]
 
 [tool.setuptools.package-data]
-# Ship non-Python runtime assets (the in-browser ledger verifier embedded by
-# `korgex audit --html`). Without this the .js is absent from the wheel and
-# render_html() FileNotFoundErrors on a clean install.
-src = ["assets/*.js"]
+# Ship non-Python runtime assets: the in-browser ledger verifier (embedded by
+# `korgex audit --html`) and the bundled built-in skill library (SKILL.md files
+# discovered at runtime). Without these they're absent from the wheel.
+src = ["assets/*.js", "skills_builtin/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

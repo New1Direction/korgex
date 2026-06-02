@@ -1,8 +1,8 @@
 """
-Korgex Feature Flags & Beta Headers — inspired by Claude Code's anthropic-beta system.
+Korgex Feature Flags & Beta Headers — inspired by the anthropic-beta header system.
 
 Each feature flag controls a specific capability. Flags are serialized into
-beta headers sent with API requests, just like Claude Code's anthropic-beta header.
+beta headers sent with API requests, just like the anthropic-beta header.
 
 Flags also control runtime behavior: tool availability, model settings, etc.
 """
@@ -23,7 +23,7 @@ class FeatureFlag:
 
 
 # ── Feature Flag Registry ──────────────────────────────────────────────
-# Maps directly to Claude Code's anthropic-beta header architecture
+# Maps directly to the anthropic-beta header architecture
 
 FEATURES: dict[str, FeatureFlag] = {}
 
@@ -36,7 +36,7 @@ def register_flag(name: str, header: str, description: str,
     return flag
 
 
-# Claude Code-compatible beta flags
+# beta flags
 register_flag(
     "agent_core", "korgex-2025-01-01",
     "Core Korgex agent identity",

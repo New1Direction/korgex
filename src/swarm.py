@@ -206,7 +206,29 @@ class AgentSwarm:
             status = "✅" if result.success else "❌"
             print(f"  {status} [{task.agent_type}] {task.description} ({result.duration_seconds}s)")
         return results
-    
+
+    def run_graph(self, nodes) -> dict:
+        """Run subtasks as a dependency DAG instead of a flat fan-out.
+
+        `nodes` are ``exec_graph.Node`` objects whose ``.task`` is a SubTask and
+        whose ``.deps`` are other node ids. Independent nodes run in parallel (up
+        to ``max_parallel``); a subtask that fails blocks its dependents, which are
+        reported as skipped rather than run against a broken precondition. Returns
+        the exec_graph run report — ``results[node_id]`` is the SubTaskResult.
+        """
+        from src.exec_graph import ExecGraph
+
+        def _execute(node):
+            worker = SubagentWorker(node.task, self.sandbox_mode, self.agent_factory)
+            res = worker.run()
+            if not res.success:
+                # Surface failure to the DAG so dependents skip instead of running
+                # against an unmet precondition.
+                raise RuntimeError(res.error or "subtask failed")
+            return res
+
+        return ExecGraph(nodes).run(_execute, max_parallel=self.max_parallel)
+
     def analyze_pr(self, repo_root: str, pr_description: str) -> dict:
         """Analyze a PR by running multiple specialist agents in parallel."""
         tasks = [

@@ -1,6 +1,6 @@
 """
 All 30 active + 3 deprecated tool handlers for Korgex.
-Mirrors Jules' complete tool surface extracted from Gemini 4 Pro.
+The complete tool handler surface for korgex.
 """
 
 import os
@@ -98,6 +98,8 @@ def tool_read_file(filepath: str, context: dict = None):
     try:
         with open(full_path, "r") as f:
             content = f.read()
+        from src import edit_freshness
+        edit_freshness.record_read(full_path)  # baseline for stale-file detection
         return {"content": content, "filepath": filepath, "size": len(content)}
     except Exception as e:
         return {"error": str(e)}
@@ -110,10 +112,15 @@ def tool_read_file(filepath: str, context: dict = None):
 def tool_write_file(filepath: str, content: str, context: dict = None):
     cwd = context.get("repo_root") if context else os.getcwd()
     full_path = os.path.join(cwd, filepath)
+    from src import edit_freshness
+    status, reason = edit_freshness.check_fresh(full_path)
+    if status == "stale":
+        return {"error": reason, "verdict": "stale_file"}
     os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
     try:
         with open(full_path, "w") as f:
             f.write(content)
+        edit_freshness.record_read(full_path)  # our write is the new baseline
         return {"result": "File written successfully", "filepath": filepath, "size": len(content)}
     except Exception as e:
         return {"error": str(e)}
@@ -129,40 +136,56 @@ def tool_replace_with_git_merge_diff(filepath: str, merge_diff: str, context: di
     full_path = os.path.join(cwd, filepath)
     if not os.path.isfile(full_path):
         return {"error": f"File does not exist: {filepath}"}
-    
+
+    from src import edit_freshness
+    status, reason = edit_freshness.check_fresh(full_path)
+    if status == "stale":
+        return {"error": reason, "verdict": "stale_file"}
+
     with open(full_path, "r") as f:
         content = f.read()
-    
+
     # Parse SEARCH/REPLACE blocks
     blocks = merge_diff.split("<<<<<<< SEARCH")
     if len(blocks) < 2:
         return {"error": "No SEARCH blocks found. Use <<<<<<< SEARCH / ======= / >>>>>>> REPLACE format."}
     
+    from src.fuzzy_patch import find_and_replace
+
     modified = content
     changes = 0
-    
+    fuzzy_notes = []
+
     for block in blocks[1:]:
         if "=======" not in block:
             continue
         if ">>>>>>> REPLACE" not in block:
             continue
-        
+
         search_part = block.split("=======")[0].strip()
         replace_part = block.split("=======")[1].split(">>>>>>> REPLACE")[0].strip()
-        
-        if search_part in modified:
-            modified = modified.replace(search_part, replace_part, 1)
-            changes += 1
-        else:
-            return {"error": f"SEARCH block not found in file:\n{search_part[:200]}"}
-    
+
+        # Exact first, then whitespace-tolerant — an edit shouldn't fail over a few
+        # spaces of indent drift. Never similarity-guesses (could edit the wrong code).
+        modified, status, detail = find_and_replace(modified, search_part, replace_part)
+        if status in ("not-found", "empty-search"):
+            return {"error": "SEARCH block not found (exact or whitespace-tolerant). "
+                             f"Re-Read the file and copy the exact text:\n{search_part[:200]}"}
+        changes += 1
+        if status != "exact":
+            fuzzy_notes.append(detail or status)
+
     if changes == 0:
         return {"error": "No changes applied. Check SEARCH/REPLACE format."}
-    
+
     with open(full_path, "w") as f:
         f.write(modified)
-    
-    return {"result": f"Applied {changes} change(s)", "filepath": filepath}
+    edit_freshness.record_read(full_path)  # our edit is the new baseline
+
+    result = {"result": f"Applied {changes} change(s)", "filepath": filepath}
+    if fuzzy_notes:
+        result["note"] = "whitespace-tolerant match used: " + "; ".join(fuzzy_notes)
+    return result
 
 
 @register_tool("delete_file", "Deletes the specified file.", [
@@ -219,23 +242,40 @@ def tool_restore_file(filepath: str, context: dict = None):
 @register_tool("run_in_bash_session", "Runs a bash command in an isolated sandbox (cloud VM, Docker, or local).", [
     ToolParam("command", "STRING", "The bash command to run.", required=True),
 ])
-def tool_run_in_bash_session(command: str, context: dict = None):
-    """Run command in sandbox (cloud VM > Docker > direct fallback)."""
+def tool_run_in_bash_session(command: str, background: bool = False, context: dict = None):
+    """Run a bash command. With background=True, launch it as a background task and
+    return a task_id immediately (poll with BashOutput) — for long-running commands
+    (builds, test suites, dev servers, watchers) that shouldn't block the turn."""
+    cwd = context.get("repo_root") if context else os.getcwd()
+
+    if background:
+        from src.background_tasks import get_runner
+        tid = get_runner().launch(command, cwd=cwd)
+        return {"task_id": tid, "status": "running",
+                "message": f"running in background as {tid} — check it with BashOutput(task_id=\"{tid}\")"}
+
     global SANDBOX
-    
-    # Use sandbox if available
     if SANDBOX:
         result = SANDBOX.run(command)
     else:
-        # Fallback to local execution
-        cwd = context.get("repo_root") if context else os.getcwd()
         result = _run_bash(command, cwd)
-    
+
     return {
         "stdout": result.get("stdout", ""),
         "stderr": result.get("stderr", ""),
         "exit_code": result.get("exit_code", -1),
     }
+
+
+@register_tool("bash_output", "Check a background bash task's status + output (by task_id).", [
+    ToolParam("task_id", "STRING", "the background task id returned by Bash(background=true)", required=True),
+])
+def tool_bash_output(task_id: str, context: dict = None):
+    from src.background_tasks import get_runner
+    snap = get_runner().poll(task_id)
+    if snap is None:
+        return {"error": f"no background task '{task_id}'"}
+    return snap
 
 
 @register_tool("run_test_with_self_healing", "Runs tests and automatically self-corrects any failures up to 5 times using the TDD Healer.", [
@@ -254,13 +294,13 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
     try:
         from openai import OpenAI
         client = OpenAI(
-            base_url=os.environ.get("KORGEX_API_URL", "https://inference-api.provider.com/v1"),
+            base_url=os.environ.get("KORGEX_API_URL") or None,
             api_key=os.environ.get("KORGEX_API_KEY", ""),
         )
     except ImportError:
         return {"error": "openai package required: pip install openai"}
-    
-    model = os.environ.get("KORGEX_MODEL", "deepseek/deepseek-v4-flash")
+
+    model = os.environ.get("KORGEX_MODEL", "gpt-4o-mini")
     
     healer = TDDHealer(
         sandbox=SANDBOX,
@@ -283,13 +323,9 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
     ToolParam("query", "STRING", "The query to search for.", required=True),
 ])
 def tool_google_search(query: str, context: dict = None):
-    """Uses the configured search tool."""
-    from web_tools import web_search
-    try:
-        result = web_search(query=query, limit=5)
-        return result
-    except ImportError:
-        return {"error": "web_search not available. Install web_tools or configure a search provider."}
+    """Web search via korgex's built-in (no-key) web search."""
+    from src.web_tools import tool_web_search
+    return tool_web_search(query, max_results=5)
 
 
 @register_tool("view_text_website", "Fetches website content as plain text.", [
@@ -769,7 +805,7 @@ def tool_sandbox_status(context: dict = None):
     return {"mode": "none", "status": "not initialized"}
 
 
-# ─── Memory System (Claude Code-inspired) ─────────────────────────────
+# ─── Memory System (frontier-agent-inspired) ─────────────────────────────
 
 @register_tool("memory_save", "Save a persistent memory about the user, project, or workflow. Immutable — use memory_delete first if updating.", [
     ToolParam("name", "STRING", "Short kebab-case slug (e.g. 'prefers-bun-over-npm').", required=True),

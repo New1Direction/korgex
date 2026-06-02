@@ -17,7 +17,7 @@ Architecture:
         ▼
   [Model MUST wait for result; cannot fabricate output]
 
-Key design (mirrors Claude Code's setStrictToolResultPairing):
+Key design (strict tool-result pairing):
 - Each tool call gets a unique, cryptographically random tool_use_id
 - Results in the prompt are ALWAYS paired with their originating ID
 - The system prompt enforces: "Never generate tool results yourself"
@@ -173,7 +173,7 @@ def format_tool_call_for_prompt(tool_name: str, params: dict,
                                  tool_use_id: str) -> str:
     """Format a tool call for inclusion in the prompt.
     
-    Format (matches Claude Code convention):
+    Format (a standard convention):
       tool_use_id: "call_abc123"
       Tool: Bash(command="pytest")
     """
@@ -184,7 +184,7 @@ def format_tool_call_for_prompt(tool_name: str, params: dict,
 def format_tool_result_for_prompt(paired_result: dict) -> str:
     """Format a tool result for inclusion in the prompt.
     
-    Format (matches Claude Code convention):
+    Format (a standard convention):
       Tool Result (call_abc123):
       <actual output>
       

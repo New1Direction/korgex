@@ -144,7 +144,7 @@ class _ScriptedAgent(KorgexAgent):
     def _get_client(self):
         return object()
 
-    def _call(self, client, messages, tools, output_schema=None, system_prompt=None):
+    def _call(self, client, messages, tools, output_schema=None, system_prompt=None, system_volatile=None):
         return self._responses.pop(0)
 
 
@@ -194,6 +194,40 @@ def test_agent_tool_spawns_real_subagent_into_shared_ledger():
                     if e["kind"] == "tool" and e.get("tool_name") == "Agent"]
     assert agent_events
     assert "explored 12 files" in json.dumps(agent_events[0]["result"])
+
+
+def test_subagent_result_is_a_typed_aggregation_node_in_the_ledger():
+    # Beyond the raw Agent tool event, the delegation outcome is recorded as a
+    # first-class `subagent.result` node naming the child's root seq — so the
+    # audit/recall layer can traverse parent -> child subtrees without parsing a
+    # tool-result blob, and a multi-agent run stays coherent + rewindable.
+    parent = _ScriptedAgent([
+        _openai_agent_call("call_1", "explore the codebase", "explore"),
+        _openai_text("parent done"),
+    ])
+
+    class _Child:
+        def __init__(self, ledger):
+            self.ledger = ledger
+
+        def run_task(self, prompt, parent_seq=None, tools_filter=None, output_schema=None):
+            child_root = self.ledger.record_user_prompt(prompt, triggered_by=parent_seq)
+            return {"success": True, "result": "explored 12 files", "iterations": 3,
+                    "root_seq": child_root}
+
+    parent.subagent_factory = lambda **kw: _Child(kw["ledger"])
+    parent.run_task("delegate exploration")
+
+    agg = [e for e in parent.ledger.events
+           if e["kind"] == "tool" and e.get("tool_name") == "subagent.result"]
+    assert len(agg) == 1
+    ev = agg[0]
+    assert ev["success"] is True
+    assert ev["args"]["agent_type"] == "explore"
+    assert ev["result"]["iterations"] == 3
+    assert ev["result"]["child_root_seq"] is not None     # the drill-down pointer
+    assert "explored 12 files" in ev["result"]["result"]
+    assert ev["triggered_by"] is not None                 # chained under the spawning turn
 
 
 # ── 4. swarm runs REAL agents, not python3 ────────────────────────────────

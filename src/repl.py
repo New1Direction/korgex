@@ -8,6 +8,7 @@ that's hard to unit-test (a live readline loop + a network stream) stays minimal
 """
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 
@@ -21,10 +22,18 @@ _HELP_TEXT = """\
 korgex — commands
   /model [name]   show models, or switch the live model mid-session
   /plan [on|off]  plan mode: agent stays read-only until you approve its plan
+  /skills         list skills (✦ = learned by the agent) and their usage
+  /skills curate  merge duplicate learned (✦) skills into one (agent-owned only)
+  /tasks          show the agent's live task checklist for this conversation
+  /jobs           list background shell tasks (Bash background=true) + their status
+  /rewind [n]     list undo points, or restore files to BEFORE prompt n
+  /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
   /exit  /quit    leave (also Ctrl-D)
+  !<command>      run a shell command right here (e.g. !git status, !pytest -q)
 anything else is a message to the agent.
+tip: mention files inline with @path — e.g. "refactor @src/auth.py" inlines it.
 """
 
 
@@ -40,6 +49,10 @@ def parse_repl_input(line: str) -> Command:
     s = (line or "").strip()
     if not s:
         return Command("noop")
+    # "!cmd" is a shell escape — run it directly, not as an agent turn. Only at the
+    # very start (a trailing "ship it!" is a normal message).
+    if s.startswith("!"):
+        return Command("shell", s[1:].strip())
     # A command is a line that STARTS with "/". Text merely containing a slash
     # mid-sentence (e.g. "what does /etc/hosts do") is a turn.
     if s.startswith("/"):
@@ -55,6 +68,16 @@ def parse_repl_input(line: str) -> Command:
             return Command("model", rest or None)
         if head == "/plan":
             return Command("plan", rest or None)
+        if head == "/skills":
+            return Command("skills", rest or None)
+        if head == "/tasks":
+            return Command("tasks")
+        if head == "/jobs":
+            return Command("jobs")
+        if head == "/rewind":
+            return Command("rewind", rest or None)
+        if head == "/loop":
+            return Command("loop", rest or None)
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
 
@@ -76,8 +99,14 @@ class Repl:
         self.cfg = cfg if cfg is not None else _config.load_config()
         self.out = out or sys.stdout
         self.model, self.api_key = _config.resolve_model_and_key(None, self.cfg)
+        # The project root = the launch dir (matches the lazily-built agent's
+        # default). Used by /skills, @-mentions, skill learning + the curator —
+        # all of which silently no-op'd while this was unset.
+        self.repo_root = os.getcwd()
         self._agent = None  # lazy: built on first turn
         self._session_obj = None  # lazy prompt_toolkit session (bottom-anchored input)
+        self._turn = 0           # user-prompt counter, for rewind points
+        self._rewind = None      # lazy RewindLog: start-of-turn file snapshots
 
     def _print(self, *a):
         print(*a, file=self.out)
@@ -121,11 +150,175 @@ class Repl:
                 self._agent = None  # safest: rebuild fresh next turn
         self._print(f"→ switched to {self.model}")
 
+    def _mcp_configured(self) -> bool:
+        """True if any MCP servers are configured (any source). Cheap — just reads
+        config files, doesn't connect."""
+        import os
+        try:
+            from src import mcp_config
+            return bool(mcp_config.load_servers(cwd=os.getcwd()))
+        except Exception:
+            return False
+
     def _ensure_agent(self):
         if self._agent is None:
             from src.agent import KorgexAgent
-            self._agent = KorgexAgent(model=self.model, interactive=True)
+            # Load MCP servers when any are configured, so their tools are actually
+            # available in-session (this was the gap: the REPL never enabled MCP).
+            self._agent = KorgexAgent(model=self.model, interactive=True,
+                                      load_mcp=self._mcp_configured())
         return self._agent
+
+    def _show_skills(self):
+        """List skills with usage + lifecycle state. ✦ marks ones korgex learned."""
+        from src import skill_usage as _SU
+        from src import skills as _SK
+        reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+        if not reg.names():
+            self._print("no skills yet — korgex writes them as it learns (✦ agent), "
+                        "or add your own under .korgex/skills/<name>/SKILL.md")
+            return
+        store = _SU.UsageStore(_SU.usage_path(_SU.global_skills_dir()))
+        self._print("skills:")
+        for r in _SU.overview(reg, store):
+            mark = " ✦" if r["trust"] == "agent" else ""
+            state = "" if r["state"] == "active" else f" · {r['state']}"
+            self._print(f"  {r['name']}{mark}  —  {r['uses']} use(s){state}")
+        if sum(1 for r in _SU.overview(reg, store) if r["trust"] == "agent") >= 2:
+            self._print("→ /skills curate  merges duplicate learned (✦) skills")
+
+    # Floor below which there's nothing worth consolidating; above it a fresh
+    # learned skill triggers an auto-curation pass (new skills are rare → throttled).
+    _CURATE_THRESHOLD = 8
+
+    def _curate_skills(self, *, blocking: bool):
+        """Consolidate agent-LEARNED skills: an LLM groups near-duplicates, each
+        group is merged into one skill and the redundant ones deleted. Manual via
+        `/skills curate` (blocking, prints); also auto-run in the background after
+        the learned library grows. Only ever touches trust:agent skills. Opt out
+        with KORGEX_NO_CURATE=1; best-effort — never disturbs the session."""
+        import os
+        if os.environ.get("KORGEX_NO_CURATE", "").strip().lower() in ("1", "true", "yes"):
+            if blocking:
+                self._print("curation disabled (KORGEX_NO_CURATE)")
+            return
+
+        def _work():
+            try:
+                from src import skill_curator as _C
+                from src import skill_usage as _SU
+                from src import skills as _SK
+                from src.pt_output import emit
+
+                agent = self._ensure_agent()
+                if agent is None:
+                    if blocking:
+                        self._print("connect a provider first — run `korgex setup`")
+                    return
+
+                def complete(system, user):
+                    client = agent._get_client()
+                    resp = agent._call(client, [{"role": "user", "content": user}], [],
+                                       system_prompt=system)
+                    return agent._extract_final_text(resp)
+
+                reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+                if len(_C.agent_skills(reg)) < 2:
+                    if blocking:
+                        self._print("nothing to curate — fewer than 2 learned skills")
+                    return
+                plan = _C.plan_curation(reg, _C.make_curator(complete))
+                if not plan.groups:
+                    if blocking:
+                        self._print("✓ learned skills already tidy — nothing to merge")
+                    return
+                res = _C.apply_curation(plan, _SU.global_skills_dir(), reg)
+                removed = len(res.get("removed", []))
+                kept = ", ".join(res.get("merged", [])) or "(none)"
+                msg = f"✦ curated skills: consolidated into {kept} · removed {removed} duplicate(s)"
+                self._print(msg) if blocking else emit("\n" + msg + "\n")
+            except Exception:
+                if blocking:
+                    self._print("curation failed (best-effort) — skills left unchanged")
+
+        if blocking:
+            _work()
+        else:
+            import threading
+            threading.Thread(target=_work, daemon=True).start()
+
+    def _do_rewind(self, arg):
+        """/rewind — list undo points, or restore files to BEFORE a given prompt."""
+        pts = self._rewind.points() if self._rewind else []
+        if not pts:
+            self._print("nothing to rewind — no file changes recorded this session yet")
+            return
+        if arg is None:
+            self._print("rewind points (restore files to BEFORE the prompt):")
+            for p in pts:
+                preview = p.prompt if len(p.prompt) <= 60 else p.prompt[:59] + "…"
+                self._print(f"  {p.turn}.  {preview}")
+            self._print("→ /rewind <n> restores the files changed from prompt n onward")
+            return
+        try:
+            target = int((arg or "").strip())
+        except ValueError:
+            self._print("usage: /rewind <prompt-number>  (run /rewind to list them)")
+            return
+        actions = self._rewind.restore(target)
+        if not actions:
+            self._print(f"no file changes recorded at or after prompt {target}")
+            return
+        self._rewind.forget_from(target)
+        self._print(f"⟲ rewound to before prompt {target} — {len(actions)} file(s):")
+        for path, act in actions:
+            self._print(f"  {act}: {path}")
+        self._print("(conversation kept — /clear to also reset the chat)")
+
+    def _learn_from_turn(self, user_text: str, summary: str):
+        """Background self-review: after a turn, ask the model (in a daemon thread,
+        never blocking the REPL) whether a reusable skill emerged, and if so write it
+        as an agent-owned skill. Best-effort — any failure is swallowed. Opt out with
+        KORGEX_NO_LEARN=1."""
+        import os
+        if os.environ.get("KORGEX_NO_LEARN", "").strip().lower() in ("1", "true", "yes"):
+            return
+        agent = self._agent
+        if agent is None:
+            return
+
+        def _bg():
+            try:
+                from src import skill_review as _SR
+                from src import skill_usage as _SU
+                from src import skills as _SK
+                from src.pt_output import emit
+
+                def complete(system, user):
+                    client = agent._get_client()
+                    resp = agent._call(client, [{"role": "user", "content": user}], [],
+                                       system_prompt=system)
+                    return agent._extract_final_text(resp)
+
+                reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+                verdict = _SR.review_turn(user_text, summary, reg.names(),
+                                          reviewer=_SR.make_reviewer(complete))
+                if verdict.action in ("create", "update"):
+                    res = _SR.apply_verdict(verdict, _SU.global_skills_dir(), registry=reg)
+                    if res.get("saved"):
+                        emit(f"\n✦ learned skill: {res['name']}\n")
+                        # The library just grew — if it's past the floor, consolidate
+                        # near-duplicates in the background (new skills are rare, so
+                        # this is naturally throttled to growth moments).
+                        from src import skill_curator as _C
+                        reg2 = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+                        if len(_C.agent_skills(reg2)) >= self._CURATE_THRESHOLD:
+                            self._curate_skills(blocking=False)
+            except Exception:
+                pass  # learning is an enhancement; never disturb the session
+
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _toggle_plan(self, arg):
         """/plan [on|off] — turn plan mode on (read-only until you approve) or off.
@@ -170,6 +363,40 @@ class Repl:
         if cmd.kind == "plan":
             self._toggle_plan(cmd.arg)
             return True
+        if cmd.kind == "skills":
+            if (cmd.arg or "").strip().lower() == "curate":
+                self._curate_skills(blocking=True)
+            else:
+                self._show_skills()
+            return True
+        if cmd.kind == "tasks":
+            led = getattr(self._agent, "_task_ledger", None)
+            if led is None or not led.tasks():
+                self._print("no tasks yet — the agent creates a checklist when it plans multi-step work")
+            else:
+                self._print(f"tasks ({led.summary()}):")
+                self._print(led.render())
+            return True
+        if cmd.kind == "jobs":
+            from src.background_tasks import get_runner
+            jobs = get_runner().all()
+            if not jobs:
+                self._print("no background jobs — the agent backgrounds long commands with Bash(background=true)")
+            else:
+                self._print("background jobs:")
+                for j in jobs:
+                    mark = {"running": "⏳", "done": "✓", "failed": "✗"}.get(j.status, "·")
+                    self._print(f"  {mark} {j.id}  [{j.status}]  {j.command[:60]}")
+            return True
+        if cmd.kind == "shell":
+            self._run_shell(cmd.arg)
+            return True
+        if cmd.kind == "rewind":
+            self._do_rewind(cmd.arg)
+            return True
+        if cmd.kind == "loop":
+            self._run_loop(cmd.arg)
+            return True
         if cmd.kind == "unknown":
             self._print(f"unknown command: /{cmd.arg} — try /help")
             return True
@@ -179,26 +406,125 @@ class Repl:
         return True
 
     def _run_turn(self, text: str):
-        """Stream one agent turn. The prompt isn't active during a turn (you've
-        already hit enter), so we write directly to the terminal — the spinner uses
-        raw \\r to overwrite in place, streamed content goes through the ANSI sink.
-        (No patch_stdout here: it does nothing useful mid-turn and strips the \\r.)"""
+        """Stream one agent turn. The PromptSession has already exited (you pressed
+        Enter, and your "› {text}" line is sitting in scrollback), so there is NO
+        live app to fight: the spinner uses raw \\r to overwrite in place and the
+        streamed reply prints directly to the terminal and stays put. (No
+        patch_stdout — nothing useful mid-turn, and it would mangle the \\r spinner.)"""
         agent = self._ensure_agent()
-        # Echo the user's turn as a ▎ you block so the exchange reads cleanly in
-        # scrollback (your turn, then the reply), like the reference TUIs.
+        # @-file mentions: inline any @path the user referenced so "refactor
+        # @src/a.py to use @src/b.py" just works. The model gets the file bodies;
+        # the rewind label and skill-learning keep the ORIGINAL typed text.
+        prompt = text
         try:
-            from src import render as _R
-            from src.pt_output import emit, render_rich
-            emit("\n" + render_rich(_R.echo_user(text)).rstrip("\n") + "\n")
+            from src import mentions as _MEN
+            exp = _MEN.expand_mentions(text, cwd=self.repo_root)
+            if exp["attached"]:
+                self._print("· included " + ", ".join("@" + p for p in exp["attached"]))
+                prompt = exp["text"]
         except Exception:
             pass
+        # Track this prompt as a rewind point and snapshot start-of-turn file state.
+        self._turn += 1
+        if self._rewind is None:
+            from src.rewind import RewindLog
+            self._rewind = RewindLog()
+        self._rewind.begin_turn(self._turn, text)
+        _turn = self._turn
+        agent._rewind_sink = lambda path, pre: self._rewind.record_pre(_turn, path, pre)
         try:
-            agent.run_task(text)
-            print()  # newline so the next turn's input starts clean
+            result = agent.run_task(prompt)
+            print()  # newline so the next turn's prompt starts clean
+            self._print_change_summary(_turn)
+            summary = (result or {}).get("result", "") if isinstance(result, dict) else ""
+            self._learn_from_turn(text, summary)  # background; never blocks
         except KeyboardInterrupt:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session
             self._print(f"[error] {e}")
+
+    def _run_shell(self, cmd: str):
+        """`!cmd` — run a shell command the USER typed (a terminal escape), in the
+        project root, and print its output. This is the user's own command, not the
+        agent acting, so it just runs. Best-effort; never kills the session."""
+        cmd = (cmd or "").strip()
+        if not cmd:
+            self._print("usage: !<command>  — runs a shell command here, e.g. !git status")
+            return
+        import subprocess
+        self._print(f"$ {cmd}")
+        try:
+            r = subprocess.run(cmd, shell=True, cwd=self.repo_root,
+                               capture_output=True, text=True, timeout=120)
+            if r.stdout:
+                self._print(r.stdout.rstrip("\n"))
+            if r.stderr:
+                self._print(r.stderr.rstrip("\n"))
+            if r.returncode != 0:
+                self._print(f"(exit {r.returncode})")
+        except subprocess.TimeoutExpired:
+            self._print("(timed out after 120s)")
+        except Exception as e:
+            self._print(f"(shell error: {e})")
+
+    def _print_change_summary(self, turn: int):
+        """Show what the agent changed this turn — '✎ changed N file(s): …' —
+        computed from the rewind snapshots vs the files on disk. Best-effort."""
+        if self._rewind is None:
+            return
+        try:
+            from src.rewind import render_change_summary, summarize_changes
+
+            def _read(p):
+                try:
+                    return open(p).read()
+                except OSError:
+                    return None
+
+            line = render_change_summary(
+                summarize_changes(self._rewind.records_for_turn(turn), _read))
+            if line:
+                self._print(line)
+        except Exception:
+            pass
+
+    def _open_task_count(self) -> int:
+        led = getattr(self._agent, "_task_ledger", None)
+        try:
+            return len(led.open_tasks()) if led is not None else 0
+        except Exception:
+            return 0
+
+    def _run_loop(self, arg):
+        """/loop <task> — grind a task list unattended: seed the work, then
+        auto-continue while open tasks remain, up to a hard cap (the runaway guard).
+        `/loop` with no arg resumes grinding the current open task list. Ctrl-C
+        stops and hands control back."""
+        from src import loop_control as _LC
+
+        if arg:
+            self._run_turn(_LC.seed_prompt(arg))      # seed: nudges a TaskCreate plan
+        elif self._open_task_count() == 0:
+            self._print("usage: /loop <task> — runs it and auto-continues until the "
+                        "task list is done (Ctrl-C to stop)")
+            return
+
+        max_iter = _LC.default_max_iterations()
+        iterations = 0
+        try:
+            while True:
+                go, reason = _LC.should_continue(
+                    enabled=True, open_tasks=self._open_task_count(),
+                    iterations=iterations, max_iterations=max_iter)
+                if not go:
+                    self._print(f"↻ loop done — {reason}")
+                    return
+                iterations += 1
+                self._print(f"↻ loop {iterations}/{max_iter} — "
+                            f"{self._open_task_count()} task(s) left")
+                self._run_turn(_LC.CONTINUE_PROMPT)
+        except KeyboardInterrupt:
+            self._print("\n↻ loop stopped (interrupted)")
 
     def _banner(self, animated_portal: bool = False):
         """Paint the startup banner. With `animated_portal`, the wordmark still
@@ -236,24 +562,55 @@ class Repl:
                 pass
 
     def _mcp_names(self) -> list:
-        """Configured MCP server names from mcp.json (best-effort, empty on miss)."""
-        import json
+        """MCP servers to show on the dashboard: CONNECTED ones if MCP is loaded
+        (live truth), else the full CONFIGURED set across all sources (mcp.json +
+        .mcp.json + .claude + .cursor + global) — matching `korgex mcp list`."""
         import os
-        for path in ("mcp.json", os.path.join(os.getcwd(), "mcp.json")):
-            try:
-                with open(path) as f:
-                    data = json.load(f)
-                servers = data.get("mcpServers") or data.get("servers") or {}
-                return list(servers.keys())
-            except (FileNotFoundError, ValueError, OSError):
-                continue
-        return []
+        try:  # connected servers (after the agent loaded MCP) are the real truth
+            from src.mcp_router import get_router
+            connected = [s.get("server") for s in get_router().list_servers() if s.get("server")]
+            if connected:
+                return connected
+        except Exception:
+            pass
+        try:  # otherwise show what's configured (all sources)
+            from src import mcp_config
+            return list(mcp_config.load_servers(cwd=os.getcwd()).keys())
+        except Exception:
+            return []
+
+    def _mode_label(self) -> str:
+        policy = (getattr(self._agent, "edit_policy", None) or "free")
+        mode = "⚡ free" if policy in ("free", "session") else (
+            "⚡ bypass" if policy == "bypass" else policy)
+        plan = " · ◐ PLAN" if getattr(self._agent, "plan_mode_active", False) else ""
+        return f"{mode}{plan}"
 
     def _bottom_toolbar(self):
-        """The status line pinned to the BOTTOM of the window: model · plan-state.
-        Re-evaluated by prompt_toolkit on every render, so it stays current."""
-        plan = " · ◐ PLAN (read-only)" if getattr(self._agent, "plan_mode_active", False) else ""
-        return f" korgex · {self.model}{plan} · /help · /exit "
+        """Keybind / command hints, dim along the bottom (the status lives in the
+        input's top border). Re-evaluated each render so it stays current."""
+        return "  Enter send  ·  /help commands  ·  /plan  ·  /skills  ·  /rewind  ·  Ctrl-C quit  "
+
+    def _prompt_message(self):
+        """A framed prompt: a top border carrying the status, then the ›  caret.
+        (A reliable inline frame — the full bordered box is the full-screen TUI,
+        which previously hid streamed replies.)"""
+        import shutil
+
+        from prompt_toolkit.formatted_text import FormattedText
+        width = shutil.get_terminal_size((80, 24)).columns
+        label = f" korgex · {self.model} · {self._mode_label()} "
+        fill = max(0, width - len(label) - 3)
+        top = "╭─" + label + "─" * fill + "╮"
+        return FormattedText([("class:frame", top + "\n"), ("class:caret", "› ")])
+
+    def _prompt_style(self):
+        from prompt_toolkit.styles import Style
+        return Style.from_dict({
+            "frame": "#46525f",                 # dim border
+            "caret": "#a5de67 bold",            # green caret
+            "bottom-toolbar": "#6b7480 noreverse",  # dim hints, not a reversed bar
+        })
 
     def _session(self):
         """Lazily build the prompt_toolkit session: bottom-anchored input with
@@ -265,27 +622,57 @@ class Repl:
         return self._session_obj
 
     def _read_line(self) -> str:
-        """Read one line via the prompt_toolkit session — input pinned to the
-        bottom of the window, with the status toolbar beneath it. Raises
-        EOFError/KeyboardInterrupt to end the loop (caught in run())."""
-        return self._session().prompt("› ", bottom_toolbar=self._bottom_toolbar)
+        """Read one line via the prompt_toolkit session: a framed prompt (top border
+        + ›  caret) with a dim hint bar beneath. Raises EOFError/KeyboardInterrupt to
+        end the loop (caught in run())."""
+        return self._session().prompt(self._prompt_message,
+                                      bottom_toolbar=self._bottom_toolbar,
+                                      style=self._prompt_style())
 
     def run(self):
-        """Start the REPL. Prefer the bottom-pinned inline TUI (input fixed on the
-        last row, output scrolling above in preserved scrollback); fall back to the
-        simple PromptSession loop if that stack isn't available."""
-        try:
-            from src import tui_app
-            if tui_app.is_available():
-                tui_app.run_app(self)   # paints its own banner + bottom-pinned input
-                return
-        except Exception:
-            pass  # any TUI failure → fall back to the simple loop below
+        """Start the REPL.
+
+        Input is driven by a transient PromptSession, NOT a persistent full-screen
+        Application — and that choice is about correctness, not simplicity. A
+        PromptSession's prompt() exits the instant you press Enter, so while a turn
+        streams there is NO application rendering: the reply prints straight to the
+        terminal and stays in scrollback. The earlier Application kept an app alive
+        across the whole turn, and its renderer swallowed/clobbered the streamed
+        reply (it came out invisible). The robust rule: when no app
+        is running, a direct print is the safe path; it only keeps a live app by
+        running the agent on a background thread and marshalling every line back to
+        the UI thread via run_in_terminal+patch_stdout. Until we build that
+        machinery, the transient prompt is the reliable, legible path.
+        """
         self._run_simple()
+
+    def _sweep_skills(self):
+        """Age agent-learned skills by idle time on startup (active→stale→archived,
+        never deleted; only agent-owned skills). Cheap, pure, best-effort."""
+        try:
+            import time
+
+            from src import skill_usage as _SU
+            from src import skills as _SK
+            reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
+            store = _SU.UsageStore(_SU.usage_path(_SU.global_skills_dir()))
+            _SU.sweep(store, reg, now=time.time())
+        except Exception:
+            pass
 
     def _run_simple(self):
         """Fallback loop: inline PromptSession (input wherever the cursor is)."""
+        # Connect MCP servers BEFORE the banner so the dashboard shows the real
+        # connected servers + their tools (and they're ready for turn 1). Skipped
+        # entirely when nothing is configured, so startup stays instant.
+        if self._mcp_configured():
+            self._print("· connecting MCP server(s)…")
+            try:
+                self._ensure_agent()
+            except Exception:
+                pass
         self._banner()
+        self._sweep_skills()
         while True:
             try:
                 line = self._read_line()

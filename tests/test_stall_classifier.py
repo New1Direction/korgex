@@ -92,7 +92,7 @@ def test_agent_records_false_completion_when_done_but_unmutated(tmp_path, monkey
     a = KorgexAgent(model="claude-sonnet-4-6", interactive=False,
                     repo_root=str(tmp_path), ledger=_Led())
     # the task asks for a CHANGE (action verb), but the model just claims done
-    def fake_call(client, messages, tools_payload, system_prompt=None):
+    def fake_call(client, messages, tools_payload, system_prompt=None, system_volatile=None):
         class R: pass
         r = R(); r._text = "All done — implemented the feature."; r.usage = None; r._calls = []
         return r
@@ -111,7 +111,7 @@ def test_agent_records_complete_on_a_question(tmp_path, monkeypatch):
     from src.agent import KorgexAgent
     a = KorgexAgent(model="claude-sonnet-4-6", interactive=False,
                     repo_root=str(tmp_path), ledger=_Led())
-    def fake_call(client, messages, tools_payload, system_prompt=None):
+    def fake_call(client, messages, tools_payload, system_prompt=None, system_volatile=None):
         class R: pass
         r = R(); r._text = "The handler is in app.py at line 10."; r.usage = None; r._calls = []
         return r

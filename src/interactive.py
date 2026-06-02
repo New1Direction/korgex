@@ -1,7 +1,7 @@
 """
 Korgex Interactive TUI — Streaming, Diffs, Spinners, Interrupts.
 
-Bridges the gap between a headless backend and a Claude Code-level feel.
+Bridges the gap between a headless backend and a polished interactive feel.
 
 Features:
 1. SSE stream parser → interleaved thinking (gray) + text (normal) + tool status
@@ -9,33 +9,22 @@ Features:
 3. SIGINT trap → UserInterrupt event (not kill)
 4. Ephemeral spinners that resolve to compact checkmarks
 
-Heavily inspired by the Claude Code MITM capture — our 8-event SSE format
-maps exactly to what we intercepted from api.anthropic.com.
+Parses the documented Anthropic-style streaming SSE format (8 event types),
+as used by korgex's streaming bridge.
 """
 
 import difflib
 import json
 import os
-import re
 import signal
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 # ── Rich imports ────────────────────────────────────────────────────────
-from rich.console import Console, Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+from rich.console import Console
 from rich.prompt import Confirm
-from rich.rule import Rule
-from rich.syntax import Syntax
-from rich.table import Table
-from rich.text import Text
-from rich.tree import Tree
 
 # force_terminal so rich still emits color when stdout is wrapped by
 # prompt_toolkit's patch_stdout (which makes the stream look non-tty otherwise).
@@ -43,7 +32,7 @@ console = Console(force_terminal=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. SSE STREAM PARSER — matches Claude Code's 8-event format
+# 1. SSE STREAM PARSER — the streaming 8-event SSE format
 # ═══════════════════════════════════════════════════════════════════════════
 
 class SSEEvent(Enum):
@@ -84,7 +73,7 @@ def parse_sse_stream(raw_stream: str) -> list[SSEMessage]:
     Handles both the Anthropic API format documented at:
     https://docs.anthropic.com/en/api/messages-streaming
     
-    And Claude Code's custom events from the MITM capture.
+    Plus a few synthesized events for tool status.
     """
     messages = []
     current_event = None
@@ -150,7 +139,7 @@ def _parse_sse_data(data: str) -> dict:
 class StreamRenderer:
     """Renders SSE stream events to the terminal in real-time.
     
-    Thinking → dimmed gray (like Claude Code)
+    Thinking → dimmed gray
     Text → normal terminal output
     Tool use → compact status line with tool name + params
     """
@@ -162,6 +151,7 @@ class StreamRenderer:
         self._tool_start_time = None
         self._last_spinner = 0
         self._text_block = None  # live StreamBlock for the assistant's prose
+        self._respond_spinner = None  # "responding…" spinner while a reply buffers
     
     def handle_event(self, event: SSEMessage):
         """Process a single SSE event and render it."""
@@ -181,15 +171,8 @@ class StreamRenderer:
             pass  # Don't crash on render errors
     
     def _on_message_start(self, event: SSEMessage):
-        msg = event.data.get("message", {})
-        model = msg.get("model", "unknown")
-        usage = msg.get("usage", {})
-        cached = usage.get("cache_read_input_tokens", 0)
-        
-        if cached:
-            console.print(f"[dim]⚡ {model} (cached)[/dim]")
-        else:
-            console.print(f"[dim]⚡ {model}[/dim]")
+        # Intentionally quiet — no per-message "⚡ model" banner (kept the output clean).
+        return
     
     def _on_content_block_start(self, event: SSEMessage):
         block = event.data.get("content_block", {})
@@ -208,29 +191,21 @@ class StreamRenderer:
         delta = event.data.get("delta", {})
         dtype = delta.get("type", "")
         
-        from src.pt_output import emit, render_rich
         if dtype == "thinking_delta":
-            text = delta.get("thinking", "")
-            self._thinking_buffer += text
-            emit(f"\033[2;3m{text}\033[0m")  # dim italic reasoning
+            # Buffer reasoning but don't stream it raw — it's noise in the transcript.
+            self._thinking_buffer += delta.get("thinking", "")
 
         elif dtype == "text_delta":
+            # Stream tokens LIVE so the reply appears as it generates (responsive,
+            # like the reference agents) — buffering the whole thing first felt slow.
+            # A "▎ korgex" header on the first token, then clean flowing prose.
             text = delta.get("text", "")
+            from src.pt_output import emit, render_rich
+            if not self._text_buffer:
+                emit("\n" + render_rich("[bold #a5de67]▎ korgex[/bold #a5de67]").rstrip("\n") + "\n")
             self._text_buffer += text
-            # Stream the assistant's prose inside an accent block: a "▎ korgex"
-            # header on the first token, the accent bar continued on each new line.
-            # The sink pre-renders rich markup (the bar/label) to ANSI but passes
-            # plain token text straight through — so we don't run a full rich
-            # render per token (which would be slow and inject stray newlines).
-            if self._text_block is None:
-                from src.render import StreamBlock
+            emit(text)
 
-                def _sink(s: str):
-                    emit(render_rich(s).rstrip("\n") if "[" in s else s)
-
-                self._text_block = StreamBlock("assistant", label="korgex", sink=_sink)
-            self._text_block.feed(text)
-            
         elif dtype == "input_json_delta":
             partial = delta.get("partial_json", "")
             if partial and self._current_tool:
@@ -260,30 +235,17 @@ class StreamRenderer:
             pass
 
     def _on_content_block_stop(self, event: SSEMessage):
-        # Close the assistant accent block (emits its trailing newline) so the
-        # next block/tool line starts clean; reset for the next turn.
-        if self._text_block is not None:
-            self._maybe_markdown(self._text_block)
-            self._text_block.close()
-            self._text_block = None
-        if self._thinking_buffer:
+        # The text streamed live; just close the block with a newline so the next
+        # output (tool line / next turn) starts clean.
+        if self._text_buffer:
             from src.pt_output import emit
-            emit("\n")  # newline after a thinking block
+            emit("\n")
         self._thinking_buffer = ""
         self._text_buffer = ""
     
     def _on_message_delta(self, event: SSEMessage):
-        stop_reason = event.data.get("delta", {}).get("stop_reason", "")
-        usage = event.data.get("usage", {})
-        output_tokens = usage.get("output_tokens", 0)
-        
-        if stop_reason == "tool_use":
-            # Tool was called — show compact result
-            pass
-        elif stop_reason == "end_turn":
-            console.print()
-            if output_tokens:
-                console.print(f"[dim]━━━ {output_tokens} tok ━━━[/dim]")
+        # Quiet — no "━━━ N tok ━━━" footer; keep the reply clean.
+        return
     
     def _on_message_stop(self, event: SSEMessage):
         # Clear any lingering tool status
@@ -314,7 +276,7 @@ class StreamRenderer:
 def render_unified_diff(file_path: str, old_content: str, new_content: str) -> str:
     """Generate a rich, colorized unified diff.
     
-    Matches the format Claude Code uses for SEARCH/REPLACE edits:
+    A standard unified-diff format for SEARCH/REPLACE edits:
     - Red lines with - prefix for removed content
     - Green lines with + prefix for added content
     - @@ hunks showing line numbers

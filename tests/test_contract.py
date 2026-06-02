@@ -96,38 +96,38 @@ def test_a_signed_commit_proves_authorship(tmp_path):
     from src import signing as SG
     j = str(tmp_path / "deal.jsonl")
     priv, pub = SG.generate_keypair()
-    o = C.offer(j, "korgex", "codex", "task", "criteria")
-    C.accept(j, "codex", o)
-    cseq, salt = C.commit(j, "codex", "the work", sign_with=priv)
+    o = C.offer(j, "korgex", "peer", "task", "criteria")
+    C.accept(j, "peer", o)
+    cseq, salt = C.commit(j, "peer", "the work", sign_with=priv)
     C.mark_deadline(j, "korgex")
-    C.reveal(j, "codex", cseq, "the work", salt)
+    C.reveal(j, "peer", cseq, "the work", salt)
     C.record_test(j, "korgex", cseq, True)
     v = C.verdict(j)
     assert v["status"] == "SETTLED"
-    assert v["signed_by"] == pub                  # codex's key provably sealed it
+    assert v["signed_by"] == pub                  # peer's key provably sealed it
 
 
 def test_an_unsigned_commit_has_no_proven_signer(tmp_path):
     j = str(tmp_path / "deal.jsonl")
-    o = C.offer(j, "korgex", "codex", "task", "criteria")
-    C.accept(j, "codex", o)
-    cseq, salt = C.commit(j, "codex", "the work")
+    o = C.offer(j, "korgex", "peer", "task", "criteria")
+    C.accept(j, "peer", o)
+    cseq, salt = C.commit(j, "peer", "the work")
     C.mark_deadline(j, "korgex")
-    C.reveal(j, "codex", cseq, "the work", salt)
+    C.reveal(j, "peer", cseq, "the work", salt)
     C.record_test(j, "korgex", cseq, True)
     assert C.verdict(j)["signed_by"] is None       # an unsigned name proves nothing about who
 
 
 # ── escrow: the x402 payment leg, gated by the provable verdict ──
 def _full_deal(j, deliverable="the work", reveal=None, passed=True, late=False):
-    o = C.offer(j, "korgex", "codex", "task", "criteria")
-    C.accept(j, "codex", o)
+    o = C.offer(j, "korgex", "peer", "task", "criteria")
+    C.accept(j, "peer", o)
     if not late:
-        cseq, salt = C.commit(j, "codex", deliverable)
+        cseq, salt = C.commit(j, "peer", deliverable)
     C.mark_deadline(j, "korgex")
     if late:
-        cseq, salt = C.commit(j, "codex", deliverable)
-    C.reveal(j, "codex", cseq, reveal if reveal is not None else deliverable, salt)
+        cseq, salt = C.commit(j, "peer", deliverable)
+    C.reveal(j, "peer", cseq, reveal if reveal is not None else deliverable, salt)
     C.record_test(j, "korgex", cseq, passed)
 
 
@@ -135,8 +135,8 @@ def test_fund_records_a_signed_x402_authorization(tmp_path):
     from src import signing as SG
     j = str(tmp_path / "e.jsonl")
     priv, pub = SG.generate_keypair()
-    C.offer(j, "korgex", "codex", "t", "c")
-    C.fund(j, "korgex", "codex", "250.00", sign_with=priv)
+    C.offer(j, "korgex", "peer", "t", "c")
+    C.fund(j, "korgex", "peer", "250.00", sign_with=priv)
     f = [e for e in _events(j) if e["tool_name"] == C.FUND][0]["args"]
     assert f["payment"]["scheme"] == "x402" and f["payment"]["amount"] == "250.00"
     assert f["pubkey"] == pub                       # the buyer signed the payment authorization
@@ -144,15 +144,15 @@ def test_fund_records_a_signed_x402_authorization(tmp_path):
 
 def test_escrow_releases_to_seller_on_settled(tmp_path):
     j = str(tmp_path / "e.jsonl")
-    C.fund(j, "korgex", "codex", "250.00")
+    C.fund(j, "korgex", "peer", "250.00")
     _full_deal(j)
     s = C.escrow_status(j)
-    assert s["delivery"] == "SETTLED" and s["action"] == "release" and s["pays"] == "codex"
+    assert s["delivery"] == "SETTLED" and s["action"] == "release" and s["pays"] == "peer"
 
 
 def test_escrow_refunds_to_buyer_on_fraud(tmp_path):
     j = str(tmp_path / "e.jsonl")
-    C.fund(j, "korgex", "codex", "250.00")
+    C.fund(j, "korgex", "peer", "250.00")
     _full_deal(j, deliverable="real work", reveal="swapped work")
     s = C.escrow_status(j)
     assert s["delivery"] == "FRAUD" and s["action"] == "refund" and s["pays"] == "korgex"
@@ -160,8 +160,8 @@ def test_escrow_refunds_to_buyer_on_fraud(tmp_path):
 
 def test_escrow_refunds_to_buyer_on_default(tmp_path):
     j = str(tmp_path / "e.jsonl")
-    C.fund(j, "korgex", "codex", "250.00")
-    o = C.offer(j, "korgex", "codex", "t", "c"); C.accept(j, "codex", o); C.mark_deadline(j, "korgex")
+    C.fund(j, "korgex", "peer", "250.00")
+    o = C.offer(j, "korgex", "peer", "t", "c"); C.accept(j, "peer", o); C.mark_deadline(j, "korgex")
     s = C.escrow_status(j)
     assert s["delivery"] == "DEFAULTED" and s["action"] == "refund" and s["pays"] == "korgex"
 
@@ -170,6 +170,6 @@ def test_payment_authorization_survives_redaction(tmp_path):
     """The x402 payment dict must persist (the 'authorization' key would be scrubbed by
     redact() — we use 'payment'). Otherwise escrow_status can't read who/how-much."""
     j = str(tmp_path / "e.jsonl")
-    C.fund(j, "korgex", "codex", "250.00")
+    C.fund(j, "korgex", "peer", "250.00")
     f = [e for e in _events(j) if e["tool_name"] == C.FUND][0]["args"]
     assert isinstance(f["payment"], dict) and f["payment"]["amount"] == "250.00"

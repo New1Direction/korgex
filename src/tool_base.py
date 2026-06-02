@@ -1,10 +1,10 @@
 """
-Korgex Tool System — mirrors Jules' 33 extracted tools.
+Korgex Tool System — a compact tool-definition layer.
 
 Each tool is a function registered with a name, description, parameters schema,
 and a handler. The dispatch system routes tool calls to the right handler.
 
-Tool types match Jules: STRING, BOOLEAN, ARRAY, OBJECT (not JSON Schema standard).
+Param types: STRING, BOOLEAN, ARRAY, OBJECT (a compact schema, not full JSON Schema).
 """
 
 import json
@@ -20,7 +20,7 @@ TOOL_REGISTRY = {}
 
 
 class ToolParam:
-    """A parameter definition matching Jules' format."""
+    """A parameter definition."""
     def __init__(self, name: str, type_name: str, description: str = "", required: bool = False):
         self.name = name
         self.type = type_name.upper()  # STRING, BOOLEAN, ARRAY, OBJECT
@@ -33,7 +33,7 @@ class ToolParam:
 
 
 class ToolDef:
-    """A tool definition mirroring Jules' tool schema format."""
+    """A tool definition."""
     def __init__(self, name: str, description: str, parameters: list[ToolParam] = None):
         self.name = name
         self.description = description
@@ -41,7 +41,7 @@ class ToolDef:
         self.handler: Optional[Callable] = None
 
     def to_schema(self) -> dict:
-        """Output in Jules' format: {name, description, parameters: {properties, required, type}}"""
+        """Output schema: {name, description, parameters: {properties, required, type}}"""
         props = {}
         required = []
         for p in self.parameters:
@@ -91,7 +91,7 @@ def register_tool(name: str, description: str, parameters: list[ToolParam] = Non
 
 
 def get_tool_schemas() -> list[dict]:
-    """Return all tool schemas in Jules' array format."""
+    """Return all tool schemas as an array."""
     return [[tool.to_schema()] for tool in TOOL_REGISTRY.values()]
 
 

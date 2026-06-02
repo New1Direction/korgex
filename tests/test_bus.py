@@ -99,7 +99,7 @@ def test_bus_tools_error_without_identity(monkeypatch):
 
 def test_agent_auto_delivers_pending_messages_into_the_prompt(tmp_path, monkeypatch):
     j = str(tmp_path / "bus.jsonl")
-    bus.send(j, "codex", "alice", "the PR is ready for your review")
+    bus.send(j, "peer", "alice", "the PR is ready for your review")
     monkeypatch.setenv("KORG_BUS_JOURNAL", j)
     monkeypatch.setenv("KORG_BUS_AGENT", "alice")
     from src.agent import KorgexAgent

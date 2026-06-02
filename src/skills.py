@@ -26,7 +26,9 @@ import os
 from dataclasses import dataclass
 
 _DEFAULT_TRUST = "user"
-VALID_TRUST = ("built-in", "user", "installed", "untrusted")
+# "agent" = a skill korgex wrote itself (self-learning). The curator/lifecycle ONLY
+# ever auto-edit or age `agent` skills; user/built-in/installed are never touched.
+VALID_TRUST = ("built-in", "user", "installed", "untrusted", "agent")
 
 
 @dataclass
@@ -123,10 +125,16 @@ def load_skills(roots) -> SkillRegistry:
     return SkillRegistry(found)
 
 
+def builtin_skills_root() -> str:
+    """The baseline skill library shipped with korgex (trust: built-in)."""
+    return os.path.join(os.path.dirname(__file__), "skills_builtin")
+
+
 def default_skill_roots(repo_root: str | None = None) -> list:
-    """Where skills live: project skills first, then user-global. (Built-ins could
-    prepend here later.)"""
-    roots = []
+    """Where skills live, in PRECEDENCE order (later roots win on a name clash):
+    bundled built-ins (lowest) → project → user-global (highest). So a user or
+    project skill can shadow a built-in by reusing its name."""
+    roots = [builtin_skills_root()]
     if repo_root:
         roots.append(os.path.join(repo_root, ".korgex", "skills"))
     roots.append(os.path.join(os.path.expanduser("~"), ".korgex", "skills"))

@@ -247,6 +247,53 @@ def test_interactive_can_be_forced_off():
     assert a._get_session() is None  # no session built when not interactive
 
 
+def test_openai_assistant_turn_omits_empty_tool_calls():
+    # OpenAI/OpenRouter reject `tool_calls: []` (empty array). A text-only turn
+    # must omit the key entirely, not send an empty list. (Regression: error 400
+    # "Invalid messages[..].tool_calls: empty array".)
+    a = KorgexAgent(model="gpt-4o", interactive=False)
+    assert a.provider == "openai"
+
+    class _M:
+        content = "hello"
+        tool_calls = None
+
+    class _C:
+        message = _M()
+
+    class _R:
+        choices = [_C()]
+
+    turn = a._assistant_turn(_R())
+    assert turn["role"] == "assistant" and turn["content"] == "hello"
+    assert "tool_calls" not in turn, f"empty tool_calls must be omitted, got {turn}"
+
+
+def test_openai_assistant_turn_keeps_real_tool_calls():
+    a = KorgexAgent(model="gpt-4o", interactive=False)
+
+    class _Fn:
+        name = "Read"
+        arguments = '{"file_path": "x"}'
+
+    class _TC:
+        id = "call_1"
+        function = _Fn()
+
+    class _M:
+        content = None
+        tool_calls = [_TC()]
+
+    class _C:
+        message = _M()
+
+    class _R:
+        choices = [_C()]
+
+    turn = a._assistant_turn(_R())
+    assert turn["tool_calls"][0]["function"]["name"] == "Read"
+
+
 def test_interactive_session_lazily_constructed():
     a = KorgexAgent(model="claude-sonnet-4-6", interactive=True)
     # Constructed lazily on first _get_session call

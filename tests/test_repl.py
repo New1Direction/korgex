@@ -54,6 +54,107 @@ def test_leading_slash_in_a_sentence_is_still_a_turn_only_if_spaced():
     assert R.parse_repl_input("what does /etc/hosts do").kind == "turn"
 
 
+def test_slash_skills_parses():
+    assert R.parse_repl_input("/skills").kind == "skills"
+    assert R.parse_repl_input("/skills").arg is None
+
+
+def test_slash_skills_curate_carries_the_arg():
+    # `/skills curate` routes to the consolidation pass, not the listing.
+    cmd = R.parse_repl_input("/skills curate")
+    assert cmd.kind == "skills"
+    assert cmd.arg == "curate"
+
+
+def test_slash_tasks_parses():
+    assert R.parse_repl_input("/tasks").kind == "tasks"
+
+
+def test_slash_jobs_parses():
+    assert R.parse_repl_input("/jobs").kind == "jobs"
+
+
+def test_slash_rewind_parses():
+    assert R.parse_repl_input("/rewind").kind == "rewind"
+    assert R.parse_repl_input("/rewind").arg is None
+    assert R.parse_repl_input("/rewind 2").arg == "2"
+
+
+def test_slash_loop_parses_with_and_without_task():
+    cmd = R.parse_repl_input("/loop build the parser")
+    assert cmd.kind == "loop"
+    assert cmd.arg == "build the parser"
+    assert R.parse_repl_input("/loop").arg is None
+
+
+def test_bang_runs_a_shell_command_not_an_agent_turn():
+    assert R.parse_repl_input("!ls -la").kind == "shell"
+    assert R.parse_repl_input("!ls -la").arg == "ls -la"
+    assert R.parse_repl_input("  !git status  ").arg == "git status"
+
+
+def test_bare_bang_is_shell_with_empty_arg():
+    assert R.parse_repl_input("!").kind == "shell"
+    assert R.parse_repl_input("!").arg == ""
+
+
+def test_bang_only_at_start_is_a_command():
+    # An exclamation mid-text is a normal message, not a shell escape.
+    assert R.parse_repl_input("ship it!").kind == "turn"
+    assert R.parse_repl_input("does it work!?").kind == "turn"
+
+
+def test_run_shell_executes_and_prints_output():
+    import io
+
+    class _ShellHarness(R.Repl):
+        def __init__(self, cwd):
+            self.out = io.StringIO()
+            self.repo_root = cwd
+
+    h = _ShellHarness(cwd=".")
+    h._run_shell("echo korgex_shell_ok")
+    assert "korgex_shell_ok" in h.out.getvalue()
+
+
+def test_repl_has_repo_root_set_to_cwd():
+    # Regression: self.repo_root is referenced by /skills, @-mentions, skill
+    # learning and the curator. It was never assigned — so those paths hit an
+    # AttributeError (silently, where wrapped), and skills never actually learned.
+    import io
+    import os as _os
+
+    r = R.Repl(out=io.StringIO())
+    assert r.repo_root == _os.getcwd()
+
+
+def test_mcp_configured_reflects_config_file(tmp_path, monkeypatch):
+    import io
+    import json
+
+    import src.mcp_config as MC
+    monkeypatch.chdir(tmp_path)
+    # Isolate from the user's real global config by scoping sources to this dir.
+    monkeypatch.setattr(MC, "default_sources", lambda cwd=None: [str(tmp_path / "mcp.json")])
+    r = R.Repl(out=io.StringIO())
+    assert r._mcp_configured() is False
+    (tmp_path / "mcp.json").write_text(json.dumps({"mcpServers": {"x": {"url": "https://y"}}}))
+    assert r._mcp_configured() is True
+
+
+def test_mcp_names_lists_all_configured_servers(tmp_path, monkeypatch):
+    import io
+    import json
+
+    import src.mcp_config as MC
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(MC, "default_sources", lambda cwd=None: [str(tmp_path / "mcp.json")])
+    (tmp_path / "mcp.json").write_text(json.dumps(
+        {"mcpServers": {"alpha": {"url": "https://a"}, "beta": {"command": "x"}}}))
+    r = R.Repl(out=io.StringIO())
+    assert sorted(r._mcp_names()) == ["alpha", "beta"]
+
+
 def test_slash_plan_parses():
     assert R.parse_repl_input("/plan").kind == "plan"
     assert R.parse_repl_input("/plan").arg is None
