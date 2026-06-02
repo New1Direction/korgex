@@ -79,7 +79,10 @@ def tool_list_files(path: str = None, context: dict = None):
     if not os.path.isdir(target):
         return {"error": f"Directory not found: {path or '(root)'}"}
     
-    result = _run_bash(f"ls -a -1F --group-directories-first {shlex.quote(target)}")
+    # `-a -1F` is portable across BSD (macOS) and GNU ls; the GNU-only
+    # `--group-directories-first` makes BSD ls error out and return nothing,
+    # which silently made every directory look empty on macOS.
+    result = _run_bash(f"ls -a -1F {shlex.quote(target)}")
     return {
         "files": result["stdout"].splitlines(),
         "path": path or "(root)",
