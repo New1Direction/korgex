@@ -85,6 +85,37 @@ DEFAULT_MODELS: dict[str, ModelConfig] = {
         cost_per_mtok_output=4.0,
         supports_thinking=False,
     ),
+    # ── Grok (xAI) models — uses grok-build OAuth, no API key needed ──
+    "grok4": ModelConfig(
+        provider="grok",
+        model_id="latest",             # aliased to grok-4.3-latest
+        display_name="Grok 4",
+        max_tokens=64000,
+        thinking_budget=None,
+        cost_per_mtok_input=2.0,       # list price via api.x.ai
+        cost_per_mtok_output=10.0,
+        supports_thinking=False,
+    ),
+    "grok-reasoning": ModelConfig(
+        provider="grok",
+        model_id="grok-420-reasoning",
+        display_name="Grok Reasoning",
+        max_tokens=64000,
+        thinking_budget=None,
+        cost_per_mtok_input=2.0,
+        cost_per_mtok_output=80.0,
+        supports_thinking=True,
+    ),
+    "grok-mini": ModelConfig(
+        provider="grok",
+        model_id="grok-4-mini-thinking-tahoe",
+        display_name="Grok Mini",
+        max_tokens=32000,
+        thinking_budget=None,
+        cost_per_mtok_input=0.50,
+        cost_per_mtok_output=2.50,
+        supports_thinking=False,
+    ),
 }
 
 # Mode → Model assignment
@@ -231,6 +262,188 @@ class AnthropicClient:
             raise RuntimeError(f"API error ({e.response.status_code}): {error_body}")
         except Exception as e:
             raise RuntimeError(f"API request failed: {e}")
+
+
+class GrokClient:
+    """xAI Grok client — uses Grok Build OAuth from ~/.grok/auth.json.
+    
+    Reads the cached JWT from the grok CLI's auth store. If the token is
+    expired, refreshes via the OAuth2 refresh flow against auth.x.ai.
+    Uses the OpenAI-compatible /v1/chat/completions endpoint.
+    No API key needed — authenticates with the grok-build OAuth client_id.
+    """
+
+    BASE_URL = "https://api.x.ai/v1/chat/completions"
+    CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
+    AUTH_URL = "https://auth.x.ai"
+    AUTH_JSON = os.path.expanduser("~/.grok/auth.json")
+    _token_cache: dict = {}
+
+    def __init__(self, api_key: str = None):
+        self._jwt: str | None = None
+        self._refresh_token: str | None = None
+        self._expires_at: float = 0.0
+        self._load_token()
+
+    # ── token management ──────────────────────────────────────────────
+
+    def _load_token(self):
+        """Read the cached JWT from ~/.grok/auth.json."""
+        try:
+            with open(self.AUTH_JSON) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+        # The auth.json key format is: https://auth.x.ai::<client_id>
+        for key, val in data.items():
+            if self.AUTH_URL in key and isinstance(val, dict):
+                self._jwt = val.get("key", "")
+                self._refresh_token = val.get("refresh_token", "")
+                self._expires_at = val.get("expires_at", 0.0)
+                break
+
+    def _save_token(self):
+        """Write refreshed token back to ~/.grok/auth.json."""
+        try:
+            with open(self.AUTH_JSON) as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+        for key, val in data.items():
+            if self.AUTH_URL in key and isinstance(val, dict):
+                val["key"] = self._jwt
+                val["refresh_token"] = self._refresh_token
+                val["expires_at"] = self._expires_at
+                break
+        try:
+            with open(self.AUTH_JSON, "w") as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass
+
+    def _is_expired(self) -> bool:
+        return not self._jwt or (time.time() > self._expires_at)
+
+    def _refresh(self) -> bool:
+        """Refresh the access token via OAuth2 refresh grant."""
+        if not self._refresh_token:
+            return False
+        import httpx
+        try:
+            r = httpx.post(
+                f"{self.AUTH_URL}/oauth2/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self.CLIENT_ID,
+                    "refresh_token": self._refresh_token,
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+            self._jwt = data["access_token"]
+            self._refresh_token = data.get("refresh_token", self._refresh_token)
+            self._expires_at = time.time() + data.get("expires_in", 21600) - 300
+            self._save_token()
+            return True
+        except Exception:
+            return False
+
+    def _ensure_token(self) -> str:
+        if self._is_expired():
+            self._refresh()
+        if not self._jwt:
+            raise RuntimeError(
+                "No Grok auth token. Run 'grok login' first, or set "
+                "XAI_API_KEY env var for API-key auth."
+            )
+        return self._jwt
+
+    # ── API call ──────────────────────────────────────────────────────
+
+    def send(self, messages: list[dict], system: list[dict],
+             tools: list[dict], params: dict) -> APIResponse:
+        import httpx
+
+        # Convert Anthropic system blocks → OpenAI system messages
+        openai_messages = []
+        for block in system:
+            if block.get("type") == "text":
+                openai_messages.append({
+                    "role": "system",
+                    "content": block.get("text", ""),
+                })
+        openai_messages.extend(messages)
+
+        # Convert Anthropic tools → OpenAI function tools
+        openai_tools = []
+        for tool in tools:
+            openai_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {}),
+                },
+            })
+
+        body = {
+            "model": params["model"],
+            "max_tokens": params.get("max_tokens", 64000),
+            "messages": openai_messages,
+            "tools": openai_tools if openai_tools else None,
+            "temperature": params.get("temperature", 0.3),
+        }
+        if body["tools"] is None:
+            del body["tools"]
+
+        token = self._ensure_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            response = httpx.post(
+                self.BASE_URL, headers=headers, json=body, timeout=300
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else str(e)
+            raise RuntimeError(f"Grok API error ({e.response.status_code}): {error_body}")
+        except Exception as e:
+            raise RuntimeError(f"Grok API request failed: {e}")
+
+        choice = data.get("choices", [{}])[0]
+        msg = choice.get("message", {})
+        usage = data.get("usage", {})
+
+        # Convert OpenAI tool_calls → Anthropic format
+        content = []
+        if msg.get("content"):
+            content.append({"type": "text", "text": msg["content"]})
+        for tc in msg.get("tool_calls", []):
+            try:
+                func_args = json.loads(tc["function"]["arguments"])
+            except (json.JSONDecodeError, KeyError):
+                func_args = {}
+            content.append({
+                "type": "tool_use",
+                "name": tc["function"]["name"],
+                "input": func_args,
+                "id": tc.get("id", ""),
+            })
+
+        return APIResponse(
+            content=content,
+            model=data.get("model", params["model"]),
+            usage={
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
+            stop_reason=choice.get("finish_reason", "stop"),
+        )
 
 
 class OpenRouterClient:
@@ -382,6 +595,8 @@ class ModelRouter:
                 self._clients["anthropic"] = AnthropicClient()
             elif config.provider == "openrouter":
                 self._clients["openrouter"] = OpenRouterClient()
+            elif config.provider == "grok":
+                self._clients["grok"] = GrokClient()
             else:
                 raise ValueError(f"Unknown provider: {config.provider}")
         
