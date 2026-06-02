@@ -29,6 +29,9 @@ korgex — commands
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
   /version        show korgex's running version
   /diff [n]       show colored diffs of what changed in the last turn (or turn n)
+  /trace [all]    show the verifiable cognition trace — what it did + what caused it
+  /explain [on|off]  open a self-verifying HTML cognition audit (on = after every run)
+  /why <file>     trace WHY a file was changed — back to the prompt that caused it
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -82,6 +85,12 @@ def parse_repl_input(line: str) -> Command:
             return Command("loop", rest or None)
         if head == "/diff":
             return Command("diff", rest or None)
+        if head == "/trace":
+            return Command("trace", rest or None)
+        if head == "/explain":
+            return Command("explain", rest or None)
+        if head == "/why":
+            return Command("why", rest or None)
         if head == "/version":
             return Command("version")
         return Command("unknown", head.lstrip("/"))
@@ -90,8 +99,8 @@ def parse_repl_input(line: str) -> Command:
 
 # The real command vocabulary — used to suggest a fix for a mistyped command.
 KNOWN_COMMANDS = [
-    "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "loop",
-    "version", "clear", "help", "exit", "quit",
+    "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "trace", "explain",
+    "why", "loop", "version", "clear", "help", "exit", "quit",
 ]
 
 
@@ -132,6 +141,9 @@ class Repl:
         self._session_obj = None  # lazy prompt_toolkit session (bottom-anchored input)
         self._turn = 0           # user-prompt counter, for rewind points
         self._rewind = None      # lazy RewindLog: start-of-turn file snapshots
+        # Optional: after each run, open a self-verifying HTML cognition audit.
+        self._explain_auto = os.environ.get("KORGEX_EXPLAIN", "").strip().lower() in (
+            "1", "true", "yes", "on")
 
     def _print(self, *a):
         print(*a, file=self.out)
@@ -420,6 +432,15 @@ class Repl:
         if cmd.kind == "diff":
             self._show_diff(cmd.arg)
             return True
+        if cmd.kind == "trace":
+            self._show_trace(cmd.arg)
+            return True
+        if cmd.kind == "explain":
+            self._toggle_explain(cmd.arg)
+            return True
+        if cmd.kind == "why":
+            self._show_why(cmd.arg)
+            return True
         if cmd.kind == "version":
             self._show_version()
             return True
@@ -477,6 +498,8 @@ class Repl:
             self._print_change_summary(_turn)
             summary = (result or {}).get("result", "") if isinstance(result, dict) else ""
             self._learn_from_turn(text, summary)  # background; never blocks
+            if self._explain_auto:
+                self._open_explainer(announce=False)  # opt-in HTML cognition audit
         except KeyboardInterrupt:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session
@@ -532,6 +555,98 @@ class Repl:
         """/version — show the current running version of korgex."""
         from src.cli import _get_version
         self._print(f"korgex version {_get_version()}")
+
+    def _show_trace(self, arg=None):
+        """/trace [all] — the causal cognition trace from the verifiable ledger:
+        what the agent did and what caused it. Bare /trace shows the most recent
+        request; `/trace all` shows the whole journal. It's tamper-evident — prove
+        it with `korgex verify`."""
+        import os
+        path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+            self.repo_root, ".korg", "journal.jsonl")
+        if not os.path.isfile(path):
+            self._print("no cognition recorded yet — run a task first")
+            return
+        try:
+            from src import recall as R
+            from src.ledger_trace import build_forest, render_roots
+            forest = build_forest(R.load_events(path))
+            if not forest:
+                self._print("no cognition recorded yet")
+                return
+            roots = forest if (arg or "").strip() == "all" else forest[-1:]
+            self._print(render_roots(roots, color=True))
+            self._print("  · tamper-evident — prove it:  korgex verify")
+        except Exception:
+            self._print("couldn't read the cognition ledger")
+
+    def _open_explainer(self, announce=True):
+        """Build the self-verifying HTML cognition audit for this session and open it
+        in the browser — what the agent did, the causal chain, token cost, and a live
+        tamper test that re-verifies in-browser. Best-effort; never disturbs a turn."""
+        import json
+        import os
+        import tempfile
+        import webbrowser
+
+        path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+            self.repo_root, ".korg", "journal.jsonl")
+        if not os.path.isfile(path):
+            if announce:
+                self._print("no cognition recorded yet — run a task first")
+            return
+        try:
+            from src import audit_report as AR
+            events = [json.loads(ln) for ln in open(path, encoding="utf-8") if ln.strip()]
+            if not events:
+                if announce:
+                    self._print("no cognition recorded yet")
+                return
+            html = AR.render_html(events, {
+                "session": os.path.basename(self.repo_root) or "session", "vendor": "korgex"})
+            report = os.path.join(tempfile.gettempdir(), "korgex-cognition-audit.html")
+            with open(report, "w", encoding="utf-8") as f:
+                f.write(html)
+            webbrowser.open(f"file://{report}")
+            if announce:
+                self._print(f"✦ opened the verifiable cognition audit → {report}")
+        except Exception as e:
+            if announce:
+                self._print(f"couldn't build the explainer ({e})")
+
+    def _toggle_explain(self, arg):
+        """/explain [on|off] — open a verifiable HTML cognition audit now, or toggle
+        auto-open after every run."""
+        a = (arg or "").strip().lower()
+        if a == "on":
+            self._explain_auto = True
+            self._print("✦ explainer ON — a verifiable HTML cognition audit opens after "
+                        "each run  (/explain off to stop)")
+        elif a == "off":
+            self._explain_auto = False
+            self._print("explainer OFF")
+        else:
+            self._open_explainer()
+
+    def _show_why(self, arg=None):
+        """/why <file> — trace why a file was touched, back through the causal chain
+        to the prompt that caused it (from the verifiable ledger)."""
+        target = (arg or "").strip()
+        if not target:
+            self._print("usage: /why <file>   — e.g. /why src/auth.py")
+            return
+        import os
+        path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+            self.repo_root, ".korg", "journal.jsonl")
+        if not os.path.isfile(path):
+            self._print("no cognition recorded yet")
+            return
+        try:
+            from src import recall as R
+            from src.ledger_trace import explain_why
+            self._print(explain_why(R.load_events(path), target, color=True))
+        except Exception:
+            self._print("couldn't read the cognition ledger")
 
     def _show_diff(self, arg=None):
         """/diff [n] — show colored diffs for the files changed in the last turn
