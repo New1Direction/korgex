@@ -164,11 +164,30 @@ def test_tools_filter_is_enforced_inside_a_code_action(tmp_path):
     # a deny is recorded so the trace shows the refusal, chained under the action
     raw = _events(jpath)
     assert any(e["tool_name"] == "tools_filter.deny" for e in raw)
-    # a tool that IS on the allowlist is not refused by the filter
+    # a tool that IS on the allowlist is not refused by the filter (read a fresh
+    # file — NOT the journal, whose content now contains the deny event's text)
+    ok_file = tmp_path / "ok.txt"
+    ok_file.write_text("hello")
     allowed = agent._bridge_tool_call(
-        "Read", {"file_path": str(jpath)}, code_action_seq=1,
+        "Read", {"file_path": str(ok_file)}, code_action_seq=1,
         tools_filter={"Read", "Grep"})
-    assert "not permitted" not in str(allowed)
+    assert allowed.get("content") == "hello"
+
+
+def test_bridged_results_are_raw_not_compressed(tmp_path):
+    # REGRESSION (wire dogfood): _bridge_tool_call ran _compress_tool_result on the
+    # value handed BACK INTO the kernel, so a large read_file(p) returned a
+    # {_ref, view} stub with no 'content' → read_file(p)['content'] raised KeyError
+    # and CodeAct was unusable. Code must receive the RAW result; compression is only
+    # for the model's CONTEXT. (The autouse fixture pins the compress threshold to
+    # 256 bytes, so this file is well over it.)
+    jpath = tmp_path / "journal.jsonl"
+    agent = _ScriptedAgent([], journal_path=str(jpath), repo_root=str(tmp_path))
+    big = tmp_path / "big.py"
+    big.write_text("def f():\n    pass\n" * 5000)  # ~90KB, far over the 256B threshold
+    out = agent._bridge_tool_call("Read", {"file_path": str(big)}, code_action_seq=1)
+    assert "_compressed" not in out               # NOT a compressed stub
+    assert out.get("content", "").count("def ") == 5000  # code can compute on real data
 
 
 # ════════════════════════════════════════════════════════════════════════════

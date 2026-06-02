@@ -1748,10 +1748,11 @@ class KorgexAgent:
         OWN ledger event chained under the code action's seq, so the trace shows a
         nested DAG and `why <file>` stays attributable (the sub-call carries the
         real file_path; the opaque python action does not). Returns the dict handed
-        back into the kernel verbatim as the function's return value — a refusal
-        comes back as the return value so the code can react, a non-error result
-        passes through _compress_tool_result (except Retrieve) so the never-lose-
-        data + Retrieve-passthrough invariants hold INSIDE code too.
+        back into the kernel as the function's RAW return value — a refusal comes
+        back as the value so the code can react, and a success comes back uncompressed
+        so the code can compute on real data (read_file(p)['content'], etc.).
+        Compression is for the model's CONTEXT, not intra-code data flow; large
+        sub-results are still sealed in the ledger by record_tool_call's content-ref.
         """
         args = args or {}
         korg = self.ledger if self.ledger is not None else _korg()
@@ -1874,15 +1875,17 @@ class KorgexAgent:
                     success=True, duration_ms=0, triggered_by=code_action_seq)
         self.plugins.invoke("post_tool", {"call": call, "result": result})
 
-        # ── Value handed BACK into the kernel ─────────────────────────────────
-        # Retrieve is passed through VERBATIM (re-compressing the bytes it just
-        # un-compressed would loop). Everything else goes through the SAME
-        # verifiable-compression boundary the model sees, so the kernel receives a
-        # compact view + Retrieve-able _ref for large results — never-lose-data
-        # holds inside code too. (compression facts chain under code_action_seq.)
-        if name == "Retrieve":
-            return result
-        return self._compress_tool_result(result, korg, code_action_seq, tool_name=name)
+        # ── Value handed BACK into the kernel: the RAW result ─────────────────
+        # Code must compute on REAL data — read_file(p)['content'], glob(p)['files'],
+        # bash(c)['stdout']. Compression is for what the MODEL sees in CONTEXT, NOT
+        # for data flowing between tool calls inside a code action: a compressed stub
+        # ({_ref, view}) has no 'content', so read_file(p)['content'] raised KeyError
+        # and CodeAct was unusable (found wire-dogfooding). The model only ever sees
+        # the code action's FINAL output (stdout/result), which the loop output-caps
+        # + compresses. Large sub-results are still sealed in the LEDGER by
+        # record_tool_call's own content-ref (_maybe_content_ref), so nothing bloats
+        # and the trace stays verifiable.
+        return result
 
     def _task_tool(self, call: dict) -> dict:
         """Drive the live task ledger. TaskCreate(tasks=[…]) sets the checklist;

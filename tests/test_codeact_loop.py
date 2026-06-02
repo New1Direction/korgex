@@ -244,9 +244,16 @@ def test_recursion_guard_rejects_nested_kernel_and_subagents(tmp_path):
     assert agent.ledger.events == []
 
 
-# ── 4. never-lose-data inside code (compress + Retrieve passthrough) ──────────
+# ── 4. bridged sub-results: RAW to the code, sealed in the LEDGER ─────────────
 
-def test_large_subresult_compresses_and_retrieve_roundtrips_verbatim(tmp_path):
+def test_large_subresult_is_raw_to_code_and_sealed_in_ledger(tmp_path):
+    # CORRECTED CONTRACT (wire dogfood): the value handed back INTO the kernel is the
+    # RAW tool result, so code computes on it directly — read_file(p)['content'].
+    # Compression is for the MODEL'S context, NOT intra-code data flow: handing code
+    # a {_ref, view} stub made read_file(p)['content'] raise KeyError and CodeAct was
+    # unusable. The LEDGER still seals the large result as a content-ref (lean,
+    # verifiable journal), and the chain verifies — never-lose-data holds at the
+    # ledger, not by crippling the code.
     big = "Z" * 6000
     (tmp_path / "big.txt").write_text(big)
     jpath = tmp_path / "journal.jsonl"
@@ -254,12 +261,8 @@ def test_large_subresult_compresses_and_retrieve_roundtrips_verbatim(tmp_path):
     target = str(tmp_path / "big.txt")
     code = (
         f"f = read_file({target!r})\n"
-        "print('COMPRESSED', f.get('_compressed'))\n"
-        "ref = f.get('_ref')\n"
-        "full = Retrieve(ref)\n"
-        "print('VERIFIED', full.get('verified'))\n"
-        "print('LEN', len(full.get('content', '')))\n"
-        "print('RECOMPRESSED', full.get('_compressed'))"
+        "print('COMPRESSED', f.get('_compressed'))\n"   # None — a raw dict, not a stub
+        "print('LEN', len(f.get('content', '')))"        # the FULL content is in code
     )
     agent = _ScriptedAgent(
         [_openai_python_call("c1", code), _openai_text("done")],
@@ -268,22 +271,22 @@ def test_large_subresult_compresses_and_retrieve_roundtrips_verbatim(tmp_path):
     _drive(agent)
 
     raw = L.load_journal_raw(str(jpath))
-    # A context.compress fact was recorded for the large Read result, under code_seq.
+    py = [e for e in raw if e["tool_name"] == "python"][0]
+    out = py["result"]["stdout"]
+    assert "COMPRESSED None" in out      # code saw a RAW result (no _compressed stub)
+    assert "LEN 6000" in out             # ...with the full content available
+
+    # Compression is NOT applied to bridged sub-results (model-context only).
+    assert not [e for e in raw if e["tool_name"] == "context.compress"]
+
+    # The Read sub-call is chained under the [python action] anchor (nested DAG)...
     anchor = [e for e in raw if e["tool_name"] == "user_prompt"
               and str(e["args"].get("prompt", "")).startswith("[python action]")][0]
-    comps = [e for e in raw if e["tool_name"] == "context.compress"]
-    assert comps, "a large sub-result was not compressed"
-    assert all(e.get("triggered_by") == anchor["seq_id"] for e in comps)
-
-    # The kernel SAW the compact view, called Retrieve(ref) from inside the code,
-    # and that bridged Retrieve result was passthrough (NOT re-wrapped as a nested
-    # {_compressed:true} — re-compressing it would loop the model).
-    retr = [e for e in raw if e["tool_name"] == "Retrieve"]
-    assert retr, "Retrieve was not called from inside the code"
-    rr = retr[0]["result"]
-    if isinstance(rr, dict):  # the ledger may content-ref a >1KB result — that's fine
-        assert rr.get("_compressed") is not True
-    # The DAG + chain still verify on disk.
+    rd = [e for e in raw if e["tool_name"] == "Read"]
+    assert rd and rd[0].get("triggered_by") == anchor["seq_id"]
+    # ...and the LEDGER sealed the large result (not stored raw → lean journal).
+    assert len(json.dumps(rd[0]["result"], default=str)) < 6000
+    # The DAG + chain verify on disk.
     assert L.verify_journal_file(str(jpath)) == []
 
 
