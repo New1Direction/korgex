@@ -46,3 +46,30 @@ def test_sanitize_strips_nested_hidden_block_in_full():
         '<div hidden><div>inner</div>SECRET-INSTRUCTION</div><p>after</p>')
     assert "SECRET-INSTRUCTION" not in out
     assert "after" in out                              # content after survives
+
+
+def test_crawl_events_chain_under_the_inference_seq():
+    # #2: crawl_page facts were recorded with triggered_by=None (DAG orphans).
+    start = "http://x.test/"
+
+    def fetch(u, **kw):
+        return ({"links": ["http://x.test/a"]}
+                if u == B.unique_key(start) else {"links": []})
+
+    captured = []
+
+    class _Cap:
+        def record_tool_call(self, name, args, result, success, ms, triggered_by=None):
+            captured.append(triggered_by)
+
+    B.crawl(start, max_pages=5, triggered_by=42, _fetch=fetch, _ledger=_Cap())
+    assert captured                                    # pages were recorded
+    assert all(tb == 42 for tb in captured)            # all chained under the inference
+
+
+def test_browser_evaluate_gated_off_by_default(monkeypatch):
+    # #9: arbitrary JS must not run unguarded; default-OFF, explicit opt-in.
+    monkeypatch.delenv("KORGEX_BROWSER_EVAL", raising=False)
+    from src.tools_impl import tool_browser_evaluate
+    res = tool_browser_evaluate("alert(document.cookie)")
+    assert res["ok"] is False and "disabled by default" in res["error"]

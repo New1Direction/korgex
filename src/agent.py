@@ -1524,7 +1524,8 @@ class KorgexAgent:
         if name == "Orchestrate":
             return self._run_orchestration(call["args"], parent_seq)
         return route_tool_call(name, call["args"],
-                               repo_root=self.workspace_root or self.repo_root)
+                               repo_root=self.workspace_root or self.repo_root,
+                               seq=parent_seq)
 
     def _task_tool(self, call: dict) -> dict:
         """Drive the live task ledger. TaskCreate(tasks=[…]) sets the checklist;

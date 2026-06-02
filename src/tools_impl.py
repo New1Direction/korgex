@@ -1269,7 +1269,17 @@ def tool_browser_screenshot(_session=None, context=None):
     ToolParam("expression", "STRING", "JavaScript expression to evaluate.", required=True),
 ])
 def tool_browser_evaluate(expression: str, _session=None, context=None):
+    import os
+
     from src import browser as B
+    # Arbitrary JS on an UNTRUSTED page is the highest-risk browser primitive
+    # (prompt-injected page content could supply the script). Gate it default-OFF
+    # with explicit opt-in, rather than running it unconditionally.
+    if not os.environ.get("KORGEX_BROWSER_EVAL"):
+        return {"ok": False, "action": "evaluate", "expression": expression,
+                "error": "browser_evaluate runs arbitrary JavaScript and is disabled "
+                         "by default — set KORGEX_BROWSER_EVAL=1 to enable it. Page "
+                         "content is untrusted; only enable for pages you trust."}
     try:
         sess = _browser_session(_session)
         out = _act_trace(sess, "evaluate", lambda s: s.evaluate(expression))
@@ -1395,7 +1405,8 @@ def tool_browser_crawl(start_url: str, max_pages: int = 20, same_host: bool = Tr
         return {"error": f"browser_crawl only supports http/https URLs, got: {start_url!r}"}
     try:
         out = B.crawl(start_url, max_pages=max_pages, same_host=same_host,
-                      same_domain=same_domain, _fetch=_fetch, _ledger=_ledger)
+                      same_domain=same_domain, _fetch=_fetch, _ledger=_ledger,
+                      triggered_by=(context or {}).get("seq"))
         out["ok"] = True
         return out
     except B.BrowserUnavailable:
@@ -1422,7 +1433,7 @@ def tool_browser_audit(url: str, _session=None, context=None):
     try:
         sess = _browser_session(_session)
         sess.navigate(url)
-        sess.snapshot()  # the perceive step (also populates selector_map)
+        snap = sess.snapshot()  # the perceive step (also populates selector_map)
         # prefer real page HTML; fall back to the serialized snapshot text
         page_html = ""
         page = getattr(sess, "page", None)
@@ -1432,10 +1443,12 @@ def tool_browser_audit(url: str, _session=None, context=None):
             except Exception:
                 page_html = ""
         if not page_html:
-            page_html = B.serialize_snapshot(sess.snapshot())
+            page_html = B.serialize_snapshot(snap)
         report = B.build_audit(page_html, headers={}, links=[])
         return {
             "ok": True, "report": report, "report_hash": B.audit_hash(report),
+            # hash-link the sealed report to the page state it was derived from
+            "snapshot_hash": B.snapshot_hash(snap),
             "url": sess._page_url() if hasattr(sess, "_page_url") else url,
             "driver": sess.driver,
         }
