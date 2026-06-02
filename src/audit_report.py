@@ -187,17 +187,23 @@ $('evCount').textContent = (META.event_count ?? EVENTS.length).toLocaleString();
 
 function stats(evts) {
   const tools = {};
-  let writes = 0, cmds = 0, asks = 0;
+  let writes = 0, cmds = 0, asks = 0, rounds = 0, tokens = 0;
   for (const e of evts) {
     tools[e.tool_name] = (tools[e.tool_name] || 0) + 1;
     const t = e.tool_name || '';
     if (/^(Write|Edit|MultiEdit|NotebookEdit)$/.test(t)) writes++;
     else if (t === 'Bash') cmds++;
     else if (t === 'user_prompt' || t === 'user_message') asks++;
+    else if (t === 'llm_inference') {
+      rounds++;
+      tokens += ((e.args && e.args.prompt_tokens) || 0) + ((e.result && e.result.completion_tokens) || 0);
+    }
   }
   const distinct = Object.keys(tools).length;
   const cells = [
     [evts.length.toLocaleString(), 'events'],
+    [rounds.toLocaleString(), 'thinking rounds'],
+    [tokens.toLocaleString(), 'tokens'],
     [writes.toLocaleString(), 'file edits'],
     [cmds.toLocaleString(), 'commands'],
     [distinct.toLocaleString(), 'distinct tools'],

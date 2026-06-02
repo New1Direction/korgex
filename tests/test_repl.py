@@ -113,6 +113,12 @@ def test_slash_trace_parses():
     assert R.parse_repl_input("/trace all").arg == "all"
 
 
+def test_slash_explain_parses():
+    assert R.parse_repl_input("/explain").kind == "explain"
+    assert R.parse_repl_input("/explain on").arg == "on"
+    assert R.parse_repl_input("/explain off").arg == "off"
+
+
 def test_slash_loop_parses_with_and_without_task():
     cmd = R.parse_repl_input("/loop build the parser")
     assert cmd.kind == "loop"
