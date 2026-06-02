@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-06-02
+
+### Added
+- **Immutable spec-seed for Orchestrate runs.** Pass `seed` (goal + constraints + acceptance criteria) to the `Orchestrate` tool and it's recorded as a hash-chained `spec.seed` event that the whole run anchors under. `korgex why`/`trace` then walk any result back to the spec it was meant to satisfy, and `korgex verify` proves the spec wasn't altered after the fact. Absent → behavior unchanged.
+
 ## [0.14.0] — 2026-06-02
 
 The **multi-agent + browser** batch — korgex grows its own verifiable orchestration and a verifiable browser.
