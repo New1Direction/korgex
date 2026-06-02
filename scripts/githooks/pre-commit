@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# OPSEC pre-commit guard.
+#
+# Reverse-engineering notes and vendor-internal material stay on the private side —
+# they must NEVER land in this public repo. This hook blocks a commit when a staged
+# file name or added line looks like RE / vendor-internal content. It exists because
+# an RE doc + an internal assessment once got committed and had to be purged from
+# public history (an expensive, incomplete-by-nature cleanup).
+#
+# Bypass a genuine false positive with:  OPSEC_GUARD_OK=1 git commit ...
+set -u
+
+[ "${OPSEC_GUARD_OK:-}" = "1" ] && exit 0
+
+# Case-insensitive content patterns. \bMITM\b (word-bounded) deliberately avoids the
+# "comMITMent" false positive; the trailing grep -v strips other benign substrings.
+PATTERN='mitmproxy|manual mitm|\bmitm\b|reverse[- ]?engineer|captured from (claude|the api|api\.)|claude max|mahoraga|\bhermes\b|\bjules\b|nousresearch|hermes_tools|kikkaskills|kabukiskills|intercepted from'
+
+# 1) Sensitive file NAMES being added.
+bad_files=$(git diff --cached --name-only --diff-filter=A \
+  | grep -iE 'RE[_-]?FINDINGS|reverse.?eng|[-_]assessment[-_].*\.html$|_mitm' || true)
+
+# 2) Sensitive ADDED lines (only new content, not context). The guard's own files
+# legitimately contain these patterns (the definition + its docs), so exclude them.
+hits=$(git diff --cached --unified=0 -- . ':(exclude)scripts/githooks' ':(exclude).gitignore' ':(exclude)CONTRIBUTING.md' \
+  | grep -E '^\+' | grep -vE '^\+\+\+' \
+  | grep -inE "$PATTERN" \
+  | grep -viE 'commitment|environment|experiment|reverse the' || true)
+
+if [ -n "$bad_files" ] || [ -n "$hits" ]; then
+  echo "──────────────────────────────────────────────────────────────"
+  echo " OPSEC GUARD: commit blocked — looks like reverse-engineering /"
+  echo " vendor-internal content, which must not enter this public repo."
+  echo "──────────────────────────────────────────────────────────────"
+  [ -n "$bad_files" ] && { echo " suspect new files:"; echo "$bad_files" | sed 's/^/   • /'; }
+  [ -n "$hits" ] && { echo " suspect added lines:"; echo "$hits" | head -10 | sed 's/^/   • /'; }
+  echo
+  echo " Keep RE / vendor-internal material on the private side."
+  echo " False positive?  OPSEC_GUARD_OK=1 git commit ..."
+  exit 1
+fi
+exit 0

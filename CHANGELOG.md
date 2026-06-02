@@ -205,7 +205,7 @@ back to the tamper-evident ledger (the moat).
 
 ### Changed
 - Hardening pass + full docs overhaul.
-- RAG injection format + live SSE stream format (internal notes) for parity testing.
+- Support for the RAG context-injection format + live SSE streaming event shapes.
 
 ## [0.2.1] — 2026-05-24
 

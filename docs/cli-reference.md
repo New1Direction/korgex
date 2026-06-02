@@ -36,6 +36,7 @@ korgex --quiet "list all functions exported from src/utils.py"
 | `--mode {plan,execute,explore,review,debug,research}` | Mode-based model selection. `plan` → Opus, `execute` → Sonnet, `debug` → Haiku. |
 | `--mcp` | Load MCP servers from `mcp.json` at startup and expose their tools to the agent. |
 | `--quiet` / `-q` | Disable the streaming TUI. Only the final result prints. Use in pipes, scripts, and CI. |
+| `--version` / `-V` | Print the korgex version and exit. |
 | `--resume` | Not yet implemented. Exits with code 2 rather than silently starting fresh, so scripts fail loudly. |
 
 ---
@@ -44,9 +45,11 @@ korgex --quiet "list all functions exported from src/utils.py"
 
 | Subcommand | Description |
 |------------|-------------|
+| `korgex setup` | Connect a model provider (OpenRouter / Anthropic / OpenAI / Ollama) — saves the key + default model to `~/.korgex/config.json`. |
+| `korgex skills` | List every available skill (built-in, project, and learned) with its description. |
+| `korgex init` | Scaffold a starter `AGENTS.md` for the current repo (detects stack + test/build commands; never clobbers an existing one). |
 | `korgex serve` | Start the FastAPI dashboard on `:8090` and open VS Code with the sidecar extension. |
 | `korgex dashboard` | Start the dashboard only (no editor). |
-| `korgex init` | One-shot setup: pip-install deps and compile the VS Code extension. |
 | `korgex status` | Report whether the background backend is running and its PID. |
 | `korgex stop` | Send SIGTERM (then SIGKILL) to the background backend. |
 | `korgex install-extension` | Install the compiled `.vsix` into your local VS Code. |
@@ -63,7 +66,7 @@ korgex --quiet "list all functions exported from src/utils.py"
 | `OPENAI_API_KEY` | — | Used for any non-Anthropic model. |
 | `KORGEX_API_KEY` | — | Generic fallback if a provider-specific key isn't set. Useful for OpenRouter. |
 | `KORGEX_API_URL` | `https://api.openai.com/v1` | Base URL for OpenAI-compatible endpoints (OpenRouter, Ollama, DeepSeek, etc.). |
-| `KORGEX_MODEL` | `claude-sonnet-4-6` | Default model when neither `--model` nor `--mode` is given. |
+| `KORGEX_MODEL` | `claude-sonnet-4-6` | Fallback model. Full precedence: `--model` → `--mode` → the configured default (`korgex setup`) → `KORGEX_MODEL` → builtin. |
 | `KORGEX_MAX_ITERATIONS` | `30` | Maximum agent loop iterations before the agent gives up. |
 | `KORGEX_MCP` | unset | Set to `1` to auto-load MCP servers from `mcp.json` (same effect as `--mcp`). |
 | `KORGEX_SANDBOX` | `auto` | Bash sandbox isolation: `modal`, `docker`, `direct`, or `auto`. |

@@ -10,7 +10,17 @@ cd Korgex
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+# Enable the opsec pre-commit guard (one-time, per clone):
+git config core.hooksPath scripts/githooks
 ```
+
+### Opsec guard
+
+`scripts/githooks/pre-commit` blocks commits that look like reverse-engineering or
+vendor-internal material (this is a public repo — keep that on the private side). Run
+the `git config core.hooksPath scripts/githooks` line above once after cloning so it's
+active. A genuine false positive can bypass with `OPSEC_GUARD_OK=1 git commit ...`.
 
 ## Code Style
 

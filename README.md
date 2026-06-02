@@ -46,15 +46,18 @@ $ korgex "add a /healthz endpoint that returns 200 with uptime"
 ### From PyPI (recommended)
 
 ```bash
-pip install korgex
+pip install korgex          # or, for an isolated global CLI:
+uv tool install korgex
 ```
 
 Requires Python ≥ 3.10.
 
-### From GitHub Release
+### From a GitHub Release
+
+Download a wheel from the [latest release](https://github.com/New1Direction/korgex/releases/latest), then:
 
 ```bash
-pip install https://github.com/New1Direction/korgex/releases/download/v0.9.0/korgex-0.9.0-py3-none-any.whl
+pip install ./korgex-*-py3-none-any.whl
 ```
 
 ### From source
@@ -70,10 +73,6 @@ pip install -e .
 ```bash
 pip install git+https://github.com/New1Direction/korgex.git
 ```
-
-### From PyPI
-
-Planned. Until then use one of the above.
 
 ---
 
@@ -116,6 +115,7 @@ Run bare `korgex` for a streaming, multi-turn session. It connects your MCP serv
 | `/tasks` · `/jobs` | The live task checklist; background shell jobs. |
 | `/plan [on\|off]` | Plan mode — read-only until you approve the agent's plan. |
 | `/model [id]` | Show a priced model menu, or switch the live model mid-session. |
+| `/version` | Show the running korgex version. |
 | `/clear` · `/help` · `/exit` | Reset the conversation · help · quit. |
 
 **Inline shortcuts**
@@ -251,15 +251,18 @@ korgex --quiet "list all functions called from main()"
 | `--mode {plan,execute,explore,review,debug,research}` | Mode-based model selection (see [Multi-model routing](#multi-model-routing)). |
 | `--mcp` | Load MCP servers from `mcp.json` at startup. |
 | `--quiet` / `-q` | Disable the streaming TUI. Only the final result text prints. Use this in pipes, scripts, CI. |
+| `--version` / `-V` | Print the korgex version and exit. |
 | `--resume` | Not yet implemented — exits with code 2 so scripts don't silently lose state. |
 
 ### Subcommands
 
 | Subcommand | Behavior |
 |---|---|
+| `korgex setup` | Connect a model provider (OpenRouter / Anthropic / OpenAI / Ollama) — saves the key + default model to `~/.korgex/config.json`. |
+| `korgex skills` | List every available skill (built-in, project, and learned) with its description. |
+| `korgex init` | Scaffold a starter `AGENTS.md` for the current repo (detects stack + test/build commands; never clobbers an existing one). |
 | `korgex serve` | Starts the FastAPI dashboard on `localhost:8090` and opens VS Code with the sidecar. |
 | `korgex dashboard` | Starts the dashboard only (no editor). |
-| `korgex init` | Scaffold a starter `AGENTS.md` for the current repo (detects stack + test/build commands; never clobbers an existing one). |
 | `korgex status` | Reports whether the background backend is running. |
 | `korgex stop` | Terminates the background backend (SIGTERM, then SIGKILL if needed). |
 | `korgex install-extension` | Installs the compiled `.vsix` into your local VS Code. |

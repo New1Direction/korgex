@@ -1,3 +1,10 @@
+# opsec: never commit reverse-engineering / vendor-internal artifacts to this
+# public repo (a pre-commit guard in scripts/githooks/ also scans content).
+RE_FINDINGS*.md
+*-assessment-*.html
+*reverse-engineering*
+*-RE-*.md
+
 # Python
 __pycache__/
 *.py[cod]
