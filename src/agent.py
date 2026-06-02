@@ -2052,6 +2052,7 @@ class KorgexAgent:
 
         return {
             "root_seq": root_seq,
+            "seed_seq": out.get("seed_seq"),   # the immutable spec-seed the run anchors under
             "completed": out["completed"],
             "failed": out["failed"],
             "skipped": out["skipped"],

@@ -361,6 +361,41 @@ def test_orchestrate_dag_verified_is_none_when_events_unreadable():
     assert out["dag_verified"] is None                 # not False
 
 
+def test_orchestration_seed_anchors_run_under_immutable_spec():
+    # The spec-seed moat: an immutable 'what we agreed to build' recorded as a
+    # hash-chained ledger root; the whole run chains UNDER it, so korgex why/verify
+    # can trace + prove any edit against the spec.
+    from src.orchestrate import run_orchestration
+
+    inner = _MemLedger()
+    runner, _ = _stub_runner(inner)
+    spec = {"seed": {"goal": "Build a login form",
+                     "acceptance_criteria": ["email + password", "validates input"]},
+            "nodes": [{"id": "a", "prompt": "do a", "subagent_type": "code", "deps": []}]}
+    out = run_orchestration(spec, runner, inner, parent_seq=None)
+
+    seed_ev = [e for e in inner.events if e.get("tool_name") == "spec.seed"]
+    assert len(seed_ev) == 1                                  # one immutable seed
+    assert seed_ev[0]["args"]["goal"] == "Build a login form"
+    assert seed_ev[0]["args"]["acceptance_criteria"] == ["email + password", "validates input"]
+    assert out["seed_seq"] == seed_ev[0]["seq_id"]
+    root_ev = [e for e in inner.events if e["seq_id"] == out["root_seq"]][0]
+    assert root_ev["triggered_by"] == seed_ev[0]["seq_id"]    # run chains under the spec
+    assert verify_dag(inner.events) == []
+
+
+def test_orchestration_without_seed_is_unchanged():
+    from src.orchestrate import run_orchestration
+
+    inner = _MemLedger()
+    runner, _ = _stub_runner(inner)
+    out = run_orchestration(
+        {"nodes": [{"id": "a", "prompt": "x", "subagent_type": "code", "deps": []}]},
+        runner, inner, parent_seq=None)
+    assert out.get("seed_seq") is None
+    assert not [e for e in inner.events if e.get("tool_name") == "spec.seed"]
+
+
 def test_dispatch_hard_blocks_delegation_for_restricted_subagent():
     """One-level nesting is HARD-enforced at dispatch, not merely by omission from
     the advertised tool list: a subagent (tools_filter excluding Agent/Orchestrate)

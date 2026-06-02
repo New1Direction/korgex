@@ -227,7 +227,23 @@ Use Orchestrate when:
 - You want fan-out with fault isolation and a provable execution record
 
 Use the simpler Agent tool when sub-tasks are fully independent and flat.
+
+Optionally pass `seed` — an immutable spec-seed (goal + acceptance criteria) the
+whole run is recorded UNDER, so `korgex why`/`verify` can trace and prove every
+result against what you agreed to build. Use it for non-trivial runs where intent
+should be locked before work starts.
 """.strip(), [
+    {"name": "seed", "type": "object",
+     "description": "Optional immutable spec-seed the run anchors under: the agreed "
+                    "goal + constraints + acceptance criteria. Makes the whole run "
+                    "traceable and provable against intent.",
+     "properties": {
+         "goal": {"type": "string", "description": "What this run is meant to achieve"},
+         "constraints": {"type": "array", "items": {"type": "string"},
+                         "description": "Hard limits the result must respect"},
+         "acceptance_criteria": {"type": "array", "items": {"type": "string"},
+                                 "description": "Checks the result must satisfy"},
+     }},
     {"name": "nodes", "type": "array", "description": "The DAG nodes to run", "required": True,
      "items": {
          "type": "object",

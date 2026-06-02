@@ -36,6 +36,29 @@ from src.korg_ledger import ThreadSafeLedger
 logger = logging.getLogger(__name__)
 
 
+def record_seed(ledger, seed, triggered_by=None) -> int:
+    """Record an immutable spec-seed — the agreed 'what we're building' — as a
+    hash-chained ledger event, and return its seq.
+
+    `seed` is a goal string or a dict {goal, constraints, acceptance_criteria}.
+    A run chains UNDER the returned seq, so `korgex why`/`trace` walk any later
+    edit back to the spec it was meant to satisfy and `korgex verify` proves the
+    spec wasn't altered after the fact (immutable by construction: it's a normal
+    hash-chained event — tampering breaks verify_chain). This is the one borrowed
+    idea (from spec-first tools) that strengthens korgex's verifiable thesis."""
+    spec = seed if isinstance(seed, dict) else {"goal": str(seed)}
+    norm = {
+        "goal": str(spec.get("goal", "")),
+        "constraints": list(spec.get("constraints") or []),
+        "acceptance_criteria": list(spec.get("acceptance_criteria")
+                                    or spec.get("acceptance") or []),
+    }
+    return ledger.record_tool_call(
+        tool_name="spec.seed", args=norm, result={"sealed": True},
+        success=True, duration_ms=0, triggered_by=triggered_by,
+    )
+
+
 def run_orchestration(spec, runner, ledger, parent_seq) -> dict:
     """Run a user-defined DAG of subagents as one verifiable causal subtree.
 
@@ -54,11 +77,16 @@ def run_orchestration(spec, runner, ledger, parent_seq) -> dict:
     # so a single root exists even if the wrap is a no-op (already thread-safe).
     base = ledger
     safe = base if isinstance(base, ThreadSafeLedger) else ThreadSafeLedger(base)
-    # Chain the orchestrate root under the spawning turn so the whole subtree is
-    # CONNECTED to the parent conversation's DAG (not a disconnected island).
+    # Optional spec-seed: an immutable 'what we agreed to build' the whole run
+    # anchors under (goal + constraints + acceptance criteria). When present, the
+    # orchestrate root chains under the seed; otherwise under the spawning turn.
+    seed = (spec or {}).get("seed")
+    seed_seq = record_seed(safe, seed, triggered_by=parent_seq) if seed is not None else None
+    # Chain the orchestrate root under the spawning turn (or the seed) so the whole
+    # subtree is CONNECTED to the parent conversation's DAG (not a disconnected island).
     root_seq = safe.record_user_prompt(
         "[orchestrate] " + ", ".join(str(n.get("id")) for n in nodes_spec),
-        triggered_by=parent_seq)
+        triggered_by=(seed_seq if seed_seq is not None else parent_seq))
 
     graph = ExecGraph([
         Node(n["id"], task=n, deps=list(n.get("deps") or []))
@@ -132,5 +160,5 @@ def run_orchestration(spec, runner, ledger, parent_seq) -> dict:
         except Exception:
             logger.warning("[orchestrate] node_skipped write failed", exc_info=True)
 
-    return {"root_seq": root_seq, "completed": completed, "failed": failed,
-            "skipped": skipped, "results": results}
+    return {"root_seq": root_seq, "seed_seq": seed_seq, "completed": completed,
+            "failed": failed, "skipped": skipped, "results": results}
