@@ -117,11 +117,16 @@ def tool_write_file(filepath: str, content: str, context: dict = None):
     if status == "stale":
         return {"error": reason, "verdict": "stale_file"}
     os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
+    from src.text_safety import strip_control_chars
+    content, _stripped = strip_control_chars(content)  # never write control-byte garbage
     try:
         with open(full_path, "w") as f:
             f.write(content)
         edit_freshness.record_read(full_path)  # our write is the new baseline
-        return {"result": "File written successfully", "filepath": filepath, "size": len(content)}
+        out = {"result": "File written successfully", "filepath": filepath, "size": len(content)}
+        if _stripped:
+            out["sanitized"] = f"removed {_stripped} stray control char(s)"
+        return out
     except Exception as e:
         return {"error": str(e)}
 
@@ -178,6 +183,8 @@ def tool_replace_with_git_merge_diff(filepath: str, merge_diff: str, context: di
     if changes == 0:
         return {"error": "No changes applied. Check SEARCH/REPLACE format."}
 
+    from src.text_safety import strip_control_chars
+    modified, _stripped = strip_control_chars(modified)  # never write control-byte garbage
     with open(full_path, "w") as f:
         f.write(modified)
     edit_freshness.record_read(full_path)  # our edit is the new baseline
@@ -185,6 +192,8 @@ def tool_replace_with_git_merge_diff(filepath: str, merge_diff: str, context: di
     result = {"result": f"Applied {changes} change(s)", "filepath": filepath}
     if fuzzy_notes:
         result["note"] = "whitespace-tolerant match used: " + "; ".join(fuzzy_notes)
+    if _stripped:
+        result["sanitized"] = f"removed {_stripped} stray control char(s)"
     return result
 
 
