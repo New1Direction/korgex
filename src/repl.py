@@ -29,6 +29,7 @@ korgex — commands
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
   /version        show korgex's running version
   /diff [n]       show colored diffs of what changed in the last turn (or turn n)
+  /trace [all]    show the verifiable cognition trace — what it did + what caused it
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -82,6 +83,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("loop", rest or None)
         if head == "/diff":
             return Command("diff", rest or None)
+        if head == "/trace":
+            return Command("trace", rest or None)
         if head == "/version":
             return Command("version")
         return Command("unknown", head.lstrip("/"))
@@ -90,7 +93,7 @@ def parse_repl_input(line: str) -> Command:
 
 # The real command vocabulary — used to suggest a fix for a mistyped command.
 KNOWN_COMMANDS = [
-    "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "loop",
+    "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "trace", "loop",
     "version", "clear", "help", "exit", "quit",
 ]
 
@@ -420,6 +423,9 @@ class Repl:
         if cmd.kind == "diff":
             self._show_diff(cmd.arg)
             return True
+        if cmd.kind == "trace":
+            self._show_trace(cmd.arg)
+            return True
         if cmd.kind == "version":
             self._show_version()
             return True
@@ -532,6 +538,30 @@ class Repl:
         """/version — show the current running version of korgex."""
         from src.cli import _get_version
         self._print(f"korgex version {_get_version()}")
+
+    def _show_trace(self, arg=None):
+        """/trace [all] — the causal cognition trace from the verifiable ledger:
+        what the agent did and what caused it. Bare /trace shows the most recent
+        request; `/trace all` shows the whole journal. It's tamper-evident — prove
+        it with `korgex verify`."""
+        import os
+        path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+            self.repo_root, ".korg", "journal.jsonl")
+        if not os.path.isfile(path):
+            self._print("no cognition recorded yet — run a task first")
+            return
+        try:
+            from src import recall as R
+            from src.ledger_trace import build_forest, render_roots
+            forest = build_forest(R.load_events(path))
+            if not forest:
+                self._print("no cognition recorded yet")
+                return
+            roots = forest if (arg or "").strip() == "all" else forest[-1:]
+            self._print(render_roots(roots, color=True))
+            self._print("  · tamper-evident — prove it:  korgex verify")
+        except Exception:
+            self._print("couldn't read the cognition ledger")
 
     def _show_diff(self, arg=None):
         """/diff [n] — show colored diffs for the files changed in the last turn

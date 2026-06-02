@@ -261,6 +261,35 @@ def cmd_verify():
     return 1
 
 
+def cmd_trace():
+    """Show the causal cognition trace (what the agent did + what caused it)."""
+    from src import recall as R
+    from src.ledger_trace import render_trace
+
+    argv = sys.argv[1:]
+    path = None
+    if "trace" in argv:
+        rest = [a for a in argv[argv.index("trace") + 1:] if not a.startswith("-")]
+        if rest:
+            path = rest[0]
+    path = path or os.environ.get(
+        "KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+
+    if not Path(path).exists():
+        print(f"  No ledger journal at {path}")
+        print("  (set KORG_JOURNAL_PATH or pass: korgex trace <path>)")
+        return 1
+
+    events = R.load_events(path)
+    out = render_trace(events, color=sys.stdout.isatty())
+    if not out:
+        print("  (no cognition recorded yet)")
+        return 0
+    print(out)
+    print(f"\n  {len(events)} events · prove it wasn't edited:  korgex verify {path}")
+    return 0
+
+
 def cmd_drift():
     """Scan persistent memories for drift against their recorded source baselines."""
     from src import memory as M
@@ -688,6 +717,7 @@ SUBCOMMANDS = {
     "stop":              cmd_stop,
     "install-extension": cmd_install_extension,
     "verify":            cmd_verify,
+    "trace":             cmd_trace,
     "drift":             cmd_drift,
     "import":            cmd_import,
     "audit":             cmd_audit,
@@ -790,6 +820,10 @@ def _build_subcommand_parser():
         if name == "verify":
             sp.add_argument("path", nargs="?",
                             help="Journal JSONL to verify "
+                                 "(default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+        elif name == "trace":
+            sp.add_argument("path", nargs="?",
+                            help="Journal JSONL to trace "
                                  "(default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
         elif name == "import":
             sp.add_argument("vendor", nargs="?", help="claude-code")

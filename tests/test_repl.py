@@ -108,6 +108,11 @@ def test_slash_diff_parses():
     assert R.parse_repl_input("/diff 3").arg == "3"
 
 
+def test_slash_trace_parses():
+    assert R.parse_repl_input("/trace").kind == "trace"
+    assert R.parse_repl_input("/trace all").arg == "all"
+
+
 def test_slash_loop_parses_with_and_without_task():
     cmd = R.parse_repl_input("/loop build the parser")
     assert cmd.kind == "loop"
