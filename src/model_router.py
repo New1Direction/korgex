@@ -56,7 +56,7 @@ class ModelConfig:
 # Default model configs — approximate public list pricing
 DEFAULT_MODELS: dict[str, ModelConfig] = {
     "opus47": ModelConfig(
-        provider="anthropic",
+        provider="claude",
         model_id="claude-opus-4-7",
         display_name="Opus 4.7",
         max_tokens=64000,
@@ -66,7 +66,7 @@ DEFAULT_MODELS: dict[str, ModelConfig] = {
         supports_thinking=True,
     ),
     "sonnet46": ModelConfig(
-        provider="anthropic",
+        provider="claude",
         model_id="claude-sonnet-4-6",
         display_name="Sonnet 4.6",
         max_tokens=64000,
@@ -76,13 +76,43 @@ DEFAULT_MODELS: dict[str, ModelConfig] = {
         supports_thinking=False,
     ),
     "haiku45": ModelConfig(
-        provider="anthropic",
+        provider="claude",
         model_id="claude-haiku-4-5",
         display_name="Haiku 4.5",
         max_tokens=32000,
         thinking_budget=None,
         cost_per_mtok_input=0.8,
         cost_per_mtok_output=4.0,
+        supports_thinking=False,
+    ),
+    # ── Opus 4.8 (latest, via OAuth) ──
+    "opus48": ModelConfig(
+        provider="claude",
+        model_id="claude-opus-4-8",
+        display_name="Opus 4.8",
+        max_tokens=64000,
+        thinking_budget=20000,
+        cost_per_mtok_input=15.0,
+        cost_per_mtok_output=75.0,
+        supports_thinking=True,
+    ),
+    # ── Gemini (Google) models — uses Google OAuth2, no API key needed ──
+    "gemini-flash": ModelConfig(
+        provider="gemini",
+        model_id="gemini-2.5-flash",
+        display_name="Gemini 2.5 Flash",
+        max_tokens=64000,
+        cost_per_mtok_input=0.15,
+        cost_per_mtok_output=0.60,
+        supports_thinking=False,
+    ),
+    "gemini-pro": ModelConfig(
+        provider="gemini",
+        model_id="gemini-3.1-pro",
+        display_name="Gemini 3.1 Pro",
+        max_tokens=64000,
+        cost_per_mtok_input=1.25,
+        cost_per_mtok_output=10.0,
         supports_thinking=False,
     ),
     # ── Grok (xAI) models — uses grok-build OAuth, no API key needed ──
@@ -446,6 +476,397 @@ class GrokClient:
         )
 
 
+class GeminiClient:
+    """Google Gemini API client — bring-your-own Google OAuth2 credential.
+
+    Reads the user's own token from ~/.gemini/antigravity-cli/antigravity-oauth-token
+    (Antigravity IDE) or the Google VS Code extension ADC credentials, and
+    auto-refreshes via oauth2.googleapis.com when expired. The OAuth client_id /
+    client_secret are read from GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET,
+    falling back to the local ADC json (which already carries both) — never
+    hardcoded. Uses the public Gemini API (generativelanguage.googleapis.com).
+    """
+
+    BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    TOKEN_URL = "https://oauth2.googleapis.com/token"
+    AUTH_JSON = os.path.expanduser(
+        "~/.gemini/antigravity-cli/antigravity-oauth-token"
+    )
+    # Fallback: Google VS Code extension ADC (carries client_id + secret + refresh)
+    ADC_JSON = os.path.expanduser(
+        "~/Library/Application Support/"
+        "google-vscode-extension/auth/application_default_credentials.json"
+    )
+
+    def __init__(self, api_key: str = None):
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._expires_at: float = 0.0
+        # BYO OAuth client creds: env first, else filled from the local ADC file.
+        self._client_id: str = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+        self._client_secret: str = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+        self._load_token()
+
+    # ── token management ──────────────────────────────────────────────
+
+    def _load_token(self):
+        """Try Antigravity token first, then fall back to ADC."""
+        for path in [self.AUTH_JSON, self.ADC_JSON]:
+            try:
+                with open(path) as f:
+                    data = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                continue
+            tok = data.get("token", data)
+            self._access_token = tok.get("access_token", "")
+            self._refresh_token = tok.get("refresh_token", "")
+            # client creds may live in the same file (ADC) — env still wins
+            if not self._client_id:
+                self._client_id = tok.get("client_id", data.get("client_id", ""))
+            if not self._client_secret:
+                self._client_secret = tok.get("client_secret", data.get("client_secret", ""))
+            # Antigravity stores ms-precision ISO, ADC doesn't store
+            if "expiry" in tok:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(tok["expiry"])
+                    self._expires_at = dt.timestamp()
+                except (ValueError, OSError):
+                    self._expires_at = 0
+            if self._refresh_token:
+                break
+
+    def _is_expired(self) -> bool:
+        return not self._access_token or (time.time() > self._expires_at)
+
+    def _refresh(self) -> bool:
+        """Refresh the access token via Google OAuth2."""
+        if not self._refresh_token:
+            return False
+        import httpx
+
+        try:
+            r = httpx.post(
+                self.TOKEN_URL,
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "refresh_token": self._refresh_token,
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+            self._access_token = data["access_token"]
+            self._refresh_token = data.get("refresh_token", self._refresh_token)
+            self._expires_at = time.time() + data.get("expires_in", 3600) - 300
+            return True
+        except Exception:
+            return False
+
+    def _ensure_token(self) -> str:
+        if self._is_expired():
+            self._refresh()
+        if not self._access_token:
+            raise RuntimeError(
+                "No Google AI OAuth token. Run Antigravity IDE to authenticate, "
+                "or set GOOGLE_API_KEY env var for API-key auth."
+            )
+        return self._access_token
+
+    # ── API call ──────────────────────────────────────────────────────
+
+    def send(self, messages: list[dict], system: list[dict],
+             tools: list[dict], params: dict) -> APIResponse:
+        """Send messages to Gemini API."""
+        import httpx
+
+        token = self._ensure_token()
+
+        # Build Gemini contents from messages
+        contents = []
+        # System instructions
+        sys_text = " ".join(
+            b.get("text", "") for b in system if b.get("type") == "text"
+        )
+        system_instruction = {"parts": [{"text": sys_text}]} if sys_text else None
+
+        # Messages
+        for msg in messages:
+            role = "model" if msg.get("role") == "assistant" else "user"
+            text = ""
+            if isinstance(msg.get("content"), str):
+                text = msg["content"]
+            elif isinstance(msg.get("content"), list):
+                text = " ".join(
+                    b.get("text", "") for b in msg["content"]
+                    if b.get("type") == "text"
+                )
+            contents.append({"role": role, "parts": [{"text": text}]})
+
+        # Tool declarations (Gemini format)
+        gemini_tools = []
+        if tools:
+            function_declarations = []
+            for tool in tools:
+                function_declarations.append({
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {}),
+                })
+            gemini_tools.append({"functionDeclarations": function_declarations})
+
+        model_id = params.get("model", "gemini-2.5-flash")
+
+        body = {
+            "contents": contents,
+            "generationConfig": {
+                "maxOutputTokens": params.get("max_tokens", 64000),
+                "temperature": params.get("temperature", 0.3),
+            },
+        }
+        if system_instruction:
+            body["systemInstruction"] = system_instruction
+        if gemini_tools:
+            body["tools"] = gemini_tools
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        try:
+            response = httpx.post(
+                f"{self.BASE_URL}/models/{model_id}:generateContent",
+                headers=headers,
+                json=body,
+                timeout=300,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else str(e)
+            raise RuntimeError(
+                f"Gemini API error ({e.response.status_code}): {error_body}"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Gemini API request failed: {e}")
+
+        usage = data.get("usageMetadata", {})
+        candidates = data.get("candidates", [{}])
+        candidate = candidates[0] if candidates else {}
+        gemini_content = candidate.get("content", {})
+
+        # Convert Gemini response → Anthropic content format
+        content = []
+        for part in gemini_content.get("parts", []):
+            if "text" in part:
+                content.append({"type": "text", "text": part["text"]})
+            elif "functionCall" in part:
+                fc = part["functionCall"]
+                content.append({
+                    "type": "tool_use",
+                    "name": fc.get("name", ""),
+                    "input": fc.get("args", {}),
+                    "id": fc.get("id", ""),
+                })
+
+        return APIResponse(
+            content=content,
+            model=data.get("modelVersion", model_id),
+            usage={
+                "input_tokens": usage.get("promptTokenCount", 0),
+                "output_tokens": usage.get("candidatesTokenCount", 0),
+            },
+            stop_reason=(
+                "tool_use"
+                if any(b.get("type") == "tool_use" for b in content)
+                else "end_turn"
+            ),
+        )
+
+
+class ClaudeClient:
+    """Anthropic Messages API via Claude Code OAuth — no API key needed.
+
+    Reads the OAuth access token from the macOS keychain (same credential
+    Claude Code CLI uses). Auto-refreshes via platform.claude.com if expired.
+    Uses the native Anthropic Messages API directly (not OpenAI compat layer).
+    """
+
+    BASE_URL = "https://api.anthropic.com/v1/messages"
+    TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
+    CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    KEYCHAIN_SVC = "Claude Code-credentials"
+    API_VERSION = "2023-06-01"
+
+    def __init__(self, api_key: str = None):
+        self._access_token: str | None = None
+        self._refresh_token: str | None = None
+        self._expires_at: float = 0.0
+        self._load_keychain()
+
+    # ── keychain token management ──────────────────────────────────────
+
+    def _load_keychain(self):
+        """Read the OAuth credential from macOS keychain."""
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                [
+                    "security", "find-generic-password",
+                    "-s", self.KEYCHAIN_SVC,
+                    "-a", os.environ.get("USER", ""), "-w",
+                ],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return
+            data = json.loads(result.stdout)
+            oauth = data.get("claudeAiOauth", {})
+            self._access_token = oauth.get("accessToken", "")
+            self._refresh_token = oauth.get("refreshToken", "")
+            self._expires_at = oauth.get("expiresAt", 0) / 1000.0  # ms → s
+        except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError):
+            return
+
+    def _save_keychain(self):
+        """Write refreshed tokens back to the keychain."""
+        import subprocess
+
+        try:
+            # Read existing, update, write back
+            result = subprocess.run(
+                [
+                    "security", "find-generic-password",
+                    "-s", self.KEYCHAIN_SVC,
+                    "-a", os.environ.get("USER", ""), "-w",
+                ],
+                capture_output=True, text=True, timeout=5,
+            )
+            data = json.loads(result.stdout) if result.returncode == 0 else {}
+            data.setdefault("claudeAiOauth", {})
+            data["claudeAiOauth"]["accessToken"] = self._access_token
+            data["claudeAiOauth"]["refreshToken"] = self._refresh_token
+            data["claudeAiOauth"]["expiresAt"] = int(self._expires_at * 1000)
+
+            # Delete + re-add (macOS keychain update pattern)
+            subprocess.run(
+                ["security", "delete-generic-password",
+                 "-s", self.KEYCHAIN_SVC, "-a", os.environ.get("USER", "")],
+                capture_output=True, timeout=5,
+            )
+            subprocess.run(
+                ["security", "add-generic-password",
+                 "-s", self.KEYCHAIN_SVC,
+                 "-a", os.environ.get("USER", ""),
+                 "-w", json.dumps(data)],
+                capture_output=True, timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    def _is_expired(self) -> bool:
+        return not self._access_token or (time.time() > self._expires_at)
+
+    def _refresh(self) -> bool:
+        """Refresh the access token via OAuth2 refresh grant."""
+        if not self._refresh_token:
+            return False
+        import httpx
+
+        try:
+            r = httpx.post(
+                self.TOKEN_URL,
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": self.CLIENT_ID,
+                    "refresh_token": self._refresh_token,
+                },
+                timeout=15,
+            )
+            r.raise_for_status()
+            data = r.json()
+            self._access_token = data["access_token"]
+            self._refresh_token = data.get("refresh_token", self._refresh_token)
+            self._expires_at = time.time() + data.get("expires_in", 3600) - 300
+            self._save_keychain()
+            return True
+        except Exception:
+            return False
+
+    def _ensure_token(self) -> str:
+        """Return a valid access token, refreshing if needed."""
+        if self._is_expired():
+            self._refresh()
+        if not self._access_token:
+            raise RuntimeError(
+                "No Claude Code OAuth token. Run 'claude' to authenticate first, "
+                "or set ANTHROPIC_API_KEY env var for API-key auth."
+            )
+        return self._access_token
+
+    # ── API call ───────────────────────────────────────────────────────
+
+    def send(self, messages: list[dict], system: list[dict],
+             tools: list[dict], params: dict) -> APIResponse:
+        """Send messages to Anthropic API via OAuth Bearer token."""
+        import httpx
+
+        token = self._ensure_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "anthropic-version": self.API_VERSION,
+            "content-type": "application/json",
+        }
+
+        body = {
+            "model": params["model"],
+            "max_tokens": params.get("max_tokens", 64000),
+            "messages": messages,
+            "system": system,
+            "tools": tools,
+        }
+
+        if params.get("thinking"):
+            body["thinking"] = params["thinking"]
+
+        if params.get("temperature") is not None:
+            body["temperature"] = params["temperature"]
+
+        try:
+            response = httpx.post(
+                self.BASE_URL,
+                headers=headers,
+                json=body,
+                timeout=300,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            usage = data.get("usage", {})
+            content = data.get("content", [])
+
+            return APIResponse(
+                content=content,
+                model=data.get("model", params["model"]),
+                usage={
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                    "cache_read_input_tokens": usage.get("cache_read_input_tokens", 0),
+                    "cache_creation_input_tokens": usage.get("cache_creation_input_tokens", 0),
+                },
+                stop_reason=data.get("stop_reason", "end_turn"),
+            )
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:500] if e.response else str(e)
+            raise RuntimeError(f"Claude API error ({e.response.status_code}): {error_body}")
+        except Exception as e:
+            raise RuntimeError(f"Claude API request failed: {e}")
+
+
 class OpenRouterClient:
     """OpenRouter API client — for multi-provider flexibility."""
     
@@ -593,6 +1014,10 @@ class ModelRouter:
         if config.provider not in self._clients:
             if config.provider == "anthropic":
                 self._clients["anthropic"] = AnthropicClient()
+            elif config.provider == "claude":
+                self._clients["claude"] = ClaudeClient()
+            elif config.provider == "gemini":
+                self._clients["gemini"] = GeminiClient()
             elif config.provider == "openrouter":
                 self._clients["openrouter"] = OpenRouterClient()
             elif config.provider == "grok":

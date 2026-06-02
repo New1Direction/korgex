@@ -22,8 +22,15 @@ _PRICES = [
     ("claude-opus", 15.0, 75.0),
     ("claude-sonnet", 3.0, 15.0),
     ("claude-haiku", 0.80, 4.0),
+    # Gemini — most specific first (substring matching)
+    ("gemini-3.1-pro", 1.25, 10.0),
+    ("gemini-3.1-flash", 0.15, 0.60),
     ("gemini-2.5-pro", 1.25, 10.0),
-    ("gemini", 0.30, 2.50),
+    ("gemini-2.5-flash", 0.15, 0.60),
+    ("gemini-2.0-flash", 0.10, 0.40),
+    ("gemini-pro", 1.25, 10.0),
+    ("gemini-flash", 0.15, 0.60),
+    ("gemini", 0.30, 2.50),           # catch-all, last
     ("deepseek", 0.27, 1.10),
     ("grok-reasoning", 2.0, 80.0),
     ("grok", 2.0, 10.0),
