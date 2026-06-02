@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-06-02
+
+The **multi-agent + browser** batch — korgex grows its own verifiable orchestration and a verifiable browser.
+
+### Added
+- **Parallel subagents** — multiple `Agent` calls in one turn now fan out concurrently (`KORGEX_PARALLEL_AGENTS`, default 4) on a thread-safe ledger; results stay in call order and a crashed sibling is isolated. One-level nesting is hard-enforced at dispatch.
+- **`Orchestrate` workflow primitive** — run a user-defined DAG of subagents (nodes + deps) via the in-process exec graph. The whole run — including the failure topology (node-failed / node-skipped) — is ONE connected, replayable, tamper-evident causal DAG that `korgex trace`/`verify` prove. No mainstream agent framework emits that artifact.
+- **Verifiable browser suite** (`pip install korgex[browser]`) — a CDP snapshot→act loop the model drives BY INDEX: `browser_navigate`/`snapshot`/`click`/`type`/`extract`/`screenshot`/`evaluate`/`wait`/`scroll`, plus tiered `browser_fetch` (fast HTTP → browser render → opt-in stealth) with AI-hardened extraction, scoped `browser_crawl` (normalized-URL dedup, same-host rail, rate-limit, session-scoring), and a deterministic sealable `browser_audit`. Every perceive/act records a verifiable trace (pre/post snapshot hash, index, driver) to the ledger, so a whole browser session is replayable and auditable. The stealth driver is opt-in and **recorded** on every trace, never hidden. Optional deps are imported lazily — the core install and the test suite never require a browser.
+
+### Changed
+- `browser_evaluate` (arbitrary JavaScript on an untrusted page) is gated default-off behind `KORGEX_BROWSER_EVAL` — explicit opt-in.
+
 ## [0.13.1] — 2026-06-02
 
 Routing fix — the BYO-OAuth providers from 0.13.0 weren't actually reaching their own endpoints when a gateway key was configured.
