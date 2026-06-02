@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.2] — 2026-06-02
+
+The **context-efficiency + portable-skills** batch — korgex keeps its context window lean without losing data, and its skill loader gets more portable.
+
 ### Added
 - **Verifiable context compression.** Large tool results no longer flood the model's context. The full result is sealed once as a hash-chained content-ref (sha256) and the model instead sees a compact, structure-aware view (JSON / Python / text aware) plus a `Retrieve(ref)` tool that returns the exact original bytes, sha256-verified — nothing is lost, only deferred. Credentials are redacted *before* sealing, so a secret in tool output never reaches the (shareable) blob store or the model view. Each compression is a `context.compress` ledger fact chained to the call that produced it, so `korgex trace`/`verify` prove what was folded away and that the original is recoverable.
 - **Cache-aware compaction.** Compaction and provider prompt-caching used to work against each other: rewriting the cached prefix busts the cache for zero benefit. Compaction now (a) never rewrites the provider-cached leading turns (the "frozen prefix") and (b) only forces a rebuild when the tokens it reclaims actually beat the one-time cost of busting the cache — absolute token economics with a per-provider cache-read discount, not a dimensionally-wrong fraction test that effectively disabled compaction on warm Anthropic sessions. The decision (fire or skip, and why) is recorded on the compaction ledger event (`cache_read_before`, `frozen_prefix_turns`, `savings_fraction`, `decision_reason`).
+- **Flat-file skill loading.** The skill loader previously scanned only the `<name>/SKILL.md` directory layout; it now also loads flat `<name>.SKILL.md` files in a skills root, so a single-file or cross-runtime skill library drops into `~/.korgex/skills` and just works — the name comes from frontmatter, both layouts coexist.
+- **Two built-in skills** teaching korgex's own newest differentiators (built-in tier, 34 total): **browser-automation** — the verifiable `browser_*` loop (navigate → snapshot → act *by index* → re-snapshot → extract), the untrusted-content rule, opt-in stealth, `browser_evaluate` gating, and when to prefer `browser_fetch`/`audit`/`crawl`; and **verifiable-orchestration** — when to use parallel `Agent` calls vs the `Orchestrate` DAG, the immutable spec-seed for pinning intent, and the one-level-nesting rule.
 
 ## [0.14.1] — 2026-06-02
 
