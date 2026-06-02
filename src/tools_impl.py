@@ -807,6 +807,78 @@ def tool_analyze_image(filepath: str, question: str = None, context: dict = None
         return {"error": f"Image analysis failed: {e}"}
 
 
+# ─── Grok Imagine (xAI Image Generation) ─────────────────────────────
+
+@register_tool("grok_imagine", "Generate an image using Grok Imagine (xAI). Uses your grok-build OAuth token.", [
+    ToolParam("prompt", "STRING", "Text prompt describing the image to generate.", required=True),
+    ToolParam("aspect_ratio", "STRING", "Aspect ratio: '1:1', '3:2', '2:3', '16:9', '9:16'"),
+    ToolParam("resolution", "STRING", "Resolution: '1k' or '2k'"),
+    ToolParam("n", "INT", "Number of images to generate (1-4)"),
+])
+def tool_grok_imagine(prompt: str, aspect_ratio: str = "1:1", resolution: str = "1k",
+                       n: int = 1, context: dict = None):
+    """Generate images via xAI Grok Imagine API using grok-build OAuth."""
+    import base64, json as _json
+    import httpx
+
+    from src.model_router import GrokClient
+
+    client = GrokClient()
+    token = client._ensure_token()
+
+    # Map aspect ratio to width,height arrays
+    ar_map = {
+        "1:1": [1, 1], "3:2": [3, 2], "2:3": [2, 3],
+        "16:9": [16, 9], "9:16": [9, 16],
+    }
+    ar = ar_map.get(aspect_ratio, [1, 1])
+
+    body = {
+        "model": "grok-imagine-image",
+        "prompt": prompt,
+        "n": min(max(n, 1), 4),
+        "size": "{}x{}".format(*{1: (1024, 1024), 2: (2048, 2048)}.get(
+            int(resolution.replace("k", "")), (1024, 1024)
+        )),
+        "response_format": "b64_json",
+    }
+
+    try:
+        r = httpx.post(
+            "https://api.x.ai/v1/images/generations",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=120,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except httpx.HTTPStatusError as e:
+        return {"error": f"Grok Imagine API error ({e.response.status_code}): {e.response.text[:300]}"}
+    except Exception as e:
+        return {"error": f"Grok Imagine request failed: {e}"}
+
+    images = []
+    for item in data.get("data", []):
+        b64 = item.get("b64_json", "")
+        url = item.get("url", "")
+        revised = item.get("revised_prompt", "")
+        if b64:
+            try:
+                path = f"/tmp/korgex_imagine_{abs(hash(prompt)) % 100000}.png"
+                with open(path, "wb") as f:
+                    f.write(base64.b64decode(b64))
+                images.append({"file": path, "revised_prompt": revised})
+            except Exception as e:
+                images.append({"error": str(e), "revised_prompt": revised})
+        elif url:
+            images.append({"url": url, "revised_prompt": revised})
+
+    return {"images": images, "model": data.get("model", "grok-imagine-image")}
+
+
 # ─── Sandbox Control ──────────────────────────────────────────────────
 
 @register_tool("sandbox_status", "Returns the current sandbox mode and status.", [])

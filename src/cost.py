@@ -25,6 +25,7 @@ _PRICES = [
     ("gemini-2.5-pro", 1.25, 10.0),
     ("gemini", 0.30, 2.50),
     ("deepseek", 0.27, 1.10),
+    ("grok-reasoning", 2.0, 80.0),
     ("grok", 2.0, 10.0),
     ("qwen", 0.40, 1.20),
     ("llama", 0.10, 0.40),
