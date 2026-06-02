@@ -26,6 +26,7 @@ from src import cache_compaction as _cc
 from src.korg_ledger import get_default_client as _korg
 from src.sanitize import redact as _redact
 from src import edit_policy as _EP
+from src import command_guard as _cmd_guard
 from src.plugins import PluginRegistry, default_plugin_dirs, load_plugins
 from src.hooks import load_hooks, run_event
 from src.workspace import path_within
@@ -1246,6 +1247,10 @@ class KorgexAgent:
                                 triggered_by=llm_seq)
                             blocks[call["id"]] = gr_block
                             continue
+                        cg_block = self._command_guard_block(call, korg, llm_seq)
+                        if cg_block is not None:
+                            blocks[call["id"]] = cg_block
+                            continue
                         pm_block = self._plan_mode_block(call, korg, llm_seq)
                         if pm_block is not None:
                             blocks[call["id"]] = pm_block
@@ -1349,6 +1354,14 @@ class KorgexAgent:
                         )
                         messages.append(self._tool_result_turn(call["id"], gr_block))
                         continue  # the agent can't edit its own guardrails
+
+                    # ── Destructive-command floor (Bash) ─────────────────────
+                    # Path gates never inspect command strings; this blocks a
+                    # clearly-catastrophic shell command (rm -rf /, dd, curl|sh…).
+                    cg_block = self._command_guard_block(call, korg, llm_seq)
+                    if cg_block is not None:
+                        messages.append(self._tool_result_turn(call["id"], cg_block))
+                        continue
 
                     # ── Plan mode (read-only until approved) ─────────────────
                     # While planning, only reads/searches + writing the plan file
@@ -1798,6 +1811,11 @@ class KorgexAgent:
                 result=gr_block, success=False, duration_ms=0,
                 triggered_by=code_action_seq)
             return gr_block
+        # Destructive-command floor — a Bash run from inside a python action is gated
+        # for catastrophic commands identically to a top-level Bash call.
+        cg_block = self._command_guard_block(call, korg, code_action_seq)
+        if cg_block is not None:
+            return cg_block
         # Plan mode (read-only until approved) — records its own block event.
         pm_block = self._plan_mode_block(call, korg, code_action_seq)
         if pm_block is not None:
@@ -2097,6 +2115,44 @@ class KorgexAgent:
             return int(os.environ.get("KORGEX_MIN_CACHED_TOKENS", "1024"))
         except (TypeError, ValueError):
             return 1024
+
+    def _command_guard_block(self, call: dict, korg, llm_seq):
+        """Semantic destructive-command FLOOR for Bash (the path-based gates never
+        inspect command strings). Returns a block dict — and records a tamper-evident
+        ledger verdict — for a clearly-catastrophic command (rm -rf /, dd of=/dev/…,
+        fork bomb, curl|sh, git push --force, …), else None.
+
+        On by default; OFF under BYPASS and via KORGEX_COMMAND_GUARD=off. A floor
+        against ACCIDENTS, not a sandbox (obfuscation evades it). Fails OPEN."""
+        if call.get("name") != "Bash" or self.edit_policy == _EP.BYPASS:
+            return None
+        if os.environ.get("KORGEX_COMMAND_GUARD", "on").strip().lower() in (
+                "0", "false", "no", "off"):
+            return None
+        command = (call.get("args") or {}).get("command", "") or ""
+        try:
+            verdict = _cmd_guard.assess_command(command)
+        except Exception:
+            return None  # fail-open — the guard must never break the loop
+        if not verdict:
+            return None
+        block = {
+            "error": f"blocked: {verdict['category']} — {verdict['reason']}",
+            "verdict": "DESTRUCTIVE_BLOCKED",
+            "category": verdict["category"],
+            "reason": verdict["reason"],
+            "hint": "safety floor against accidental destruction — scope the path, "
+                    "rephrase, or run it yourself if intended "
+                    "(KORGEX_COMMAND_GUARD=off, or BYPASS policy, disables this).",
+        }
+        korg.record_tool_call(
+            tool_name="command_guard.block",
+            args={"tool": "Bash", "command": command[:200], "category": verdict["category"]},
+            result={"verdict": "DESTRUCTIVE_BLOCKED", "category": verdict["category"],
+                    "reason": verdict["reason"], "matched": verdict["matched"],
+                    "severity": verdict["severity"]},
+            success=False, duration_ms=0, triggered_by=llm_seq)
+        return block
 
     def _edit_policy_block(self, call: dict, korg, llm_seq):
         """Edit-approval gate. For a file-mutating tool: consult the policy, record
