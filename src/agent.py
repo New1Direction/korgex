@@ -1746,6 +1746,11 @@ class KorgexAgent:
         #    governed bridge.
         result = self._kernel.exec(code, fuel, _on_tool_call)
 
+        # Stamp whether this action ran under OS isolation BEFORE any reset, so the
+        # ledger/trace can PROVE a code action was sandboxed (opt-in; default False).
+        if isinstance(result, dict):
+            result.setdefault("isolated", bool(getattr(self._kernel, "_isolated", False)))
+
         # 6. On a kernel timeout/crash, KernelHandle already killed + reset the child
         #    inside .exec; defensively drop our handle so the next action respawns.
         if isinstance(result, dict) and "error" in result and not self._kernel.alive:

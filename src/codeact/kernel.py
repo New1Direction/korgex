@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import protocol as P
+from . import sandbox as _sandbox
 
 
 def _env_int(name: str, default: int) -> int:
@@ -77,6 +78,8 @@ class KernelHandle:
         # raw fd-1 writes are routed here by the kernel's fd isolation).
         self._stderr_buf: Optional["collections.deque[str]"] = None
         self._stderr_thread: Optional[threading.Thread] = None
+        # True after a spawn that wrapped the kernel in an OS sandbox (opt-in).
+        self._isolated = False
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     @property
@@ -97,8 +100,19 @@ class KernelHandle:
         existing = env.get("PYTHONPATH", "")
         env["PYTHONPATH"] = (
             install_root + os.pathsep + existing if existing else install_root)
+        cmd = [self._python, "-u", "-m", "src.codeact.kernel_main"]
+        # OPT-IN OS isolation. FAIL CLOSED: if isolation was requested but isn't
+        # available (non-Linux, or no bwrap), refuse to start rather than run model
+        # code unconfined — the caller turns this into a clear error dict.
+        self._isolated = False
+        if _sandbox.isolation_requested():
+            ok, why = _sandbox.available()
+            if not ok:
+                raise RuntimeError(f"CodeAct isolation requested but unavailable: {why}")
+            cmd = _sandbox.wrap_command(cmd, self.repo_root)
+            self._isolated = True
         self._proc = subprocess.Popen(
-            [self._python, "-u", "-m", "src.codeact.kernel_main"],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
