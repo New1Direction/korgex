@@ -196,6 +196,25 @@ def test_view_is_redacted(tmp_path, monkeypatch):
     assert blob == kl._canonical_bytes(redact(original))
 
 
+def test_retrieve_result_is_never_recompressed(tmp_path, monkeypatch):
+    # REGRESSION (found dogfooding korgex on the wire): the model calls Retrieve to
+    # pull the full deferred bytes back; if THAT result is fed through
+    # _compress_tool_result it gets re-sealed into another compact view, so the
+    # model never actually receives the content — it loops Retrieve -> view ->
+    # Retrieve until it stalls. Retrieve's whole job is to UNDO compression, so its
+    # output must be exempt and reach the model verbatim.
+    monkeypatch.setenv("KORG_BLOB_DIR", str(tmp_path / "blobs"))
+    monkeypatch.delenv("KORGEX_COMPRESS_THRESHOLD", raising=False)
+    agent = _agent(tmp_path)
+    korg = CountingLedger()
+    retrieved = {"verified": True, "sha256": "ab" * 32, "size_bytes": 60000,
+                 "content": {"output": "X" * 60000}}  # big, well over threshold
+    out = agent._compress_tool_result(retrieved, korg, llm_seq=1, tool_name="Retrieve")
+    assert out is retrieved          # full bytes reach the model, verbatim
+    assert "_compressed" not in out  # not wrapped into another view
+    assert korg.events == []         # nothing re-sealed
+
+
 def test_context_compress_ledger_fact_fields_and_chain(tmp_path, monkeypatch):
     monkeypatch.setenv("KORG_BLOB_DIR", str(tmp_path / "blobs"))
     monkeypatch.delenv("KORGEX_COMPRESS_THRESHOLD", raising=False)

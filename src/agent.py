@@ -965,6 +965,14 @@ class KorgexAgent:
             return tool_result
         if not isinstance(tool_result, dict):
             return tool_result
+        # Retrieve EXISTS to undo compression — its job is to hand the model the
+        # exact deferred bytes it asked for. Re-compressing that result would loop
+        # the model (Retrieve -> compact view -> Retrieve ...) so it never sees the
+        # content. Always pass a Retrieve result through verbatim. (Found dogfooding
+        # on the wire: the unit tests exercised tool_retrieve_blob directly, never
+        # the agent-loop path where the result re-enters compression.)
+        if tool_name == "Retrieve":
+            return tool_result
         # Errors + control dicts must reach the model verbatim; already-compressed
         # results must not be re-wrapped (RISK 3/5).
         if "error" in tool_result or tool_result.get("_compressed"):
