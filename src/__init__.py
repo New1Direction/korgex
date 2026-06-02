@@ -14,6 +14,10 @@ Environment:
     KORGEX_MODEL        Model name (set via `korgex setup`)
     KORGEX_PROVIDER     Provider name (set via `korgex setup`)
     KORGEX_MAX_ITERATIONS  Max tool calls per task (default: 50)
+    KORGEX_CODEACT_ENABLE   Register the `python` code-action (default on; 0/false/no/off disables)
+    KORGEX_CODEACT_FUEL_MS  Per-python-action wall-time fuel, ms (default: 30000; parent-enforced)
+    KORGEX_CODEACT_MEM_MB   Kernel RLIMIT_AS cap, MB (default: 1024; POSIX-only, guarded no-op elsewhere)
+    KORGEX_CODEACT_MAX_OUTPUT  Combined stdout/stderr/result byte cap (default: 65536)
 """
 
 import sys

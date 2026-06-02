@@ -580,6 +580,46 @@ register_user_tool("Retrieve",
 ], handler_name="retrieve_blob", exposure="direct")
 
 
+# ── CodeAct: code IS the action space ────────────────────────────────────────
+# The "python" action runs source in a persistent, fuel-metered kernel where the
+# governed tools are PRE-DEFINED functions. It is intercepted in Agent._dispatch_call
+# (it runs the kernel + bridges each sub-call back through route_tool_call), so it
+# deliberately has NO _TOOL_ROUTING row — a routing row would be dead code and could
+# double-dispatch. A kill-switch ($KORGEX_CODEACT_ENABLE=0/false/no/off) skips
+# registration entirely (mirrors the KORGEX_BROWSER_EVAL opt-in-feature precedent).
+_CODEACT_ENABLED = (
+    os.environ.get("KORGEX_CODEACT_ENABLE", "on").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+
+_PYTHON_ACTION_DESC = """
+python is your PRIMARY action. Instead of calling tools one at a time, WRITE PYTHON CODE that composes them. The following functions are PRE-DEFINED in the kernel and execute through korgex's governed, ledger-recorded tool layer — call them like normal functions:
+  read_file(file_path) -> {content, size, ...}
+  write_file(file_path, content); edit(file_path, old_string, new_string)
+  bash(command) -> {stdout, stderr, exit_code}
+  glob(path); grep(pattern, path); web_search(query); web_fetch(url)
+  Retrieve(ref) -> exact sealed bytes for a 'sha256:..' handle returned by a compressed result
+  call_tool(name, **kwargs) -> any other korgex/MCP tool by its exact name
+
+State PERSISTS across python actions in this session: variables, imports, and function definitions you create stay defined for your next python action. Use control flow, loops, and variables to do multi-step work in ONE action — e.g. read several files, transform them, and write the result without a round-trip per step.
+
+Each governed function returns exactly the dict the tool would return; the same gates apply (a write to .git or outside the workspace is refused identically to a direct Write, and the refusal comes back as the function's return value so your code can react). A failed sub-call raises a normal Python exception you can try/except.
+
+Large tool results come back as a compact view plus a 'sha256:..' _ref — call Retrieve(_ref) for the exact bytes. Anything you print() and the value of the last bare expression are returned to you (large output is itself compacted with a retrievable handle).
+
+A timeout, crash, or uncaught error is recoverable: the kernel resets and tells you what happened (a reset WIPES in-session state, so re-establish any variables you relied on) — read the error, fix it, and retry. You cannot call python/Agent/Orchestrate from inside a python action (no nested kernels or subagent swarms).
+""".strip()
+
+if _CODEACT_ENABLED:
+    register_user_tool("python", _PYTHON_ACTION_DESC, [
+        {"name": "code", "type": "string",
+         "description": "Python source to execute in the persistent CodeAct kernel. "
+                        "Call the tool-functions (read_file/write_file/edit/bash/glob/"
+                        "grep/web_search/web_fetch/Retrieve/call_tool) directly.",
+         "required": True},
+    ], exposure="direct")
+
+
 _TOOL_ROUTING = {
     "Read":  {"handler": "tool_read_file",                 "module": "src.tools_impl",
               "param_map": {"file_path": "filepath"}},
