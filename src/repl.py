@@ -26,6 +26,7 @@ korgex — commands
   /tasks          show the agent's live task checklist for this conversation
   /jobs           list background shell tasks (Bash background=true) + their status
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
+  /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
   /exit  /quit    leave (also Ctrl-D)
@@ -69,6 +70,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("jobs")
         if head == "/rewind":
             return Command("rewind", rest or None)
+        if head == "/loop":
+            return Command("loop", rest or None)
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
 
@@ -378,6 +381,9 @@ class Repl:
         if cmd.kind == "rewind":
             self._do_rewind(cmd.arg)
             return True
+        if cmd.kind == "loop":
+            self._run_loop(cmd.arg)
+            return True
         if cmd.kind == "unknown":
             self._print(f"unknown command: /{cmd.arg} — try /help")
             return True
@@ -422,6 +428,44 @@ class Repl:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session
             self._print(f"[error] {e}")
+
+    def _open_task_count(self) -> int:
+        led = getattr(self._agent, "_task_ledger", None)
+        try:
+            return len(led.open_tasks()) if led is not None else 0
+        except Exception:
+            return 0
+
+    def _run_loop(self, arg):
+        """/loop <task> — grind a task list unattended: seed the work, then
+        auto-continue while open tasks remain, up to a hard cap (the runaway guard).
+        `/loop` with no arg resumes grinding the current open task list. Ctrl-C
+        stops and hands control back."""
+        from src import loop_control as _LC
+
+        if arg:
+            self._run_turn(_LC.seed_prompt(arg))      # seed: nudges a TaskCreate plan
+        elif self._open_task_count() == 0:
+            self._print("usage: /loop <task> — runs it and auto-continues until the "
+                        "task list is done (Ctrl-C to stop)")
+            return
+
+        max_iter = _LC.default_max_iterations()
+        iterations = 0
+        try:
+            while True:
+                go, reason = _LC.should_continue(
+                    enabled=True, open_tasks=self._open_task_count(),
+                    iterations=iterations, max_iterations=max_iter)
+                if not go:
+                    self._print(f"↻ loop done — {reason}")
+                    return
+                iterations += 1
+                self._print(f"↻ loop {iterations}/{max_iter} — "
+                            f"{self._open_task_count()} task(s) left")
+                self._run_turn(_LC.CONTINUE_PROMPT)
+        except KeyboardInterrupt:
+            self._print("\n↻ loop stopped (interrupted)")
 
     def _banner(self, animated_portal: bool = False):
         """Paint the startup banner. With `animated_portal`, the wordmark still
