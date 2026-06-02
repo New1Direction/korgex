@@ -31,9 +31,12 @@ def test_oauth_provider_for_grok():
     assert A._oauth_provider_for("grok-420-reasoning") == "grok"
 
 
-def test_oauth_provider_for_gemini():
-    assert A._oauth_provider_for("gemini-flash") == "gemini"
-    assert A._oauth_provider_for("gemini-2.5-flash") == "gemini"
+def test_oauth_provider_for_gemini_is_none():
+    # Gemini is NOT a BYO-OAuth provider: the local Google (Antigravity/ADC) token
+    # is 401'd by the generativelanguage endpoint (scope/project mismatch). Gemini
+    # models fall back to the configured key (e.g. OpenRouter), which serves them.
+    assert A._oauth_provider_for("gemini-flash") is None
+    assert A._oauth_provider_for("gemini-2.5-flash") is None
 
 
 def test_oauth_provider_for_claude_is_none():
@@ -98,35 +101,51 @@ def test_get_client_uses_grok_oauth_when_no_api_key(monkeypatch):
     assert c.base_url == "https://api.x.ai/v1"
 
 
-def test_get_client_uses_gemini_oauth_when_no_api_key(monkeypatch):
-    monkeypatch.setattr(C, "load_config", lambda: object())
-    monkeypatch.setattr(C, "resolve_client_config", lambda *a, **k: (None, None))
-    monkeypatch.setattr(
-        A, "_oauth_token_and_base",
-        lambda p: ("gem-tok", "https://generativelanguage.googleapis.com/v1beta/openai/"))
-    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
-    c = _agent("gemini-flash")._get_client()
-    assert isinstance(c, _FakeOpenAI)
-    assert c.api_key == "gem-tok"
-    assert c.base_url.endswith("/v1beta/openai/")
-
-
-def test_get_client_prefers_configured_api_key_over_oauth(monkeypatch):
-    # Regression: a configured api-key must win — OAuth never hijacks it.
+def test_get_client_gemini_uses_configured_key_not_oauth(monkeypatch):
+    # Gemini routes through the configured key (OpenRouter) — never the rejected
+    # Google OAuth endpoint. OAuth must not be consulted for a gemini model.
     monkeypatch.setattr(C, "load_config", lambda: object())
     monkeypatch.setattr(C, "resolve_client_config",
-                        lambda *a, **k: ("real-key", "https://api.openai.com/v1"))
+                        lambda *a, **k: ("or-key", "https://openrouter.ai/api/v1"))
     monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
     consulted = {"oauth": False}
 
     def _spy(p):
         consulted["oauth"] = True
-        return ("x", "https://api.x.ai/v1")
+        return ("x", "y")
 
     monkeypatch.setattr(A, "_oauth_token_and_base", _spy)
-    c = _agent("grok4")._get_client()       # grok IS a BYO-OAuth provider…
-    assert c.api_key == "real-key"          # …but the configured key still wins
+    c = _agent("gemini-flash")._get_client()
+    assert c.api_key == "or-key"
     assert consulted["oauth"] is False
+
+
+def test_get_client_grok_oauth_beats_generic_configured_key(monkeypatch):
+    # A grok model routes to its dedicated xAI OAuth endpoint even when a generic
+    # gateway key (e.g. OpenRouter) is configured — that gateway often lacks the
+    # exact model id. THE REAL BUG: grok-reasoning 400'd because `if not key`
+    # skipped OAuth and sent it to OpenRouter, which doesn't serve grok-4.20-*.
+    monkeypatch.setattr(C, "load_config", lambda: object())
+    monkeypatch.setattr(C, "resolve_client_config",
+                        lambda *a, **k: ("openrouter-key", "https://openrouter.ai/api/v1"))
+    monkeypatch.setattr(A, "_oauth_token_and_base",
+                        lambda p: ("grok-tok", "https://api.x.ai/v1"))
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    c = _agent("grok4")._get_client()
+    assert c.api_key == "grok-tok"
+    assert c.base_url == "https://api.x.ai/v1"
+
+
+def test_get_client_falls_back_to_configured_key_when_no_oauth_token(monkeypatch):
+    # No local OAuth credential → fall back to the configured key (e.g. OpenRouter).
+    monkeypatch.setattr(C, "load_config", lambda: object())
+    monkeypatch.setattr(C, "resolve_client_config",
+                        lambda *a, **k: ("openrouter-key", "https://openrouter.ai/api/v1"))
+    monkeypatch.setattr(A, "_oauth_token_and_base", lambda p: (None, "https://api.x.ai/v1"))
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    c = _agent("grok4")._get_client()
+    assert c.api_key == "openrouter-key"
+    assert c.base_url == "https://openrouter.ai/api/v1"
 
 
 def test_nous_prefix_strips_and_forces_openai_transport(monkeypatch):
