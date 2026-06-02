@@ -262,17 +262,17 @@ class KorgexAgent:
         """
         parts = [SYSTEM_PROMPT]
 
-        # Project instructions: AGENTS.md (preferred) or CLAUDE.md.
-        for fname in ("AGENTS.md", "CLAUDE.md"):
-            path = os.path.join(self.repo_root, fname)
-            if os.path.isfile(path):
-                try:
-                    content = open(path).read().strip()
-                except OSError:
-                    content = ""
-                if content:
-                    parts.append(f"# Project instructions ({fname})\n\n{content}")
-                break
+        # Project instructions: the full rules hierarchy — user-global, the
+        # git-bounded directory chain (monorepo root → package), and
+        # .korgex/rules/*.md — merged least-specific first. Degrades to a single
+        # root AGENTS.md/CLAUDE.md when that's all there is.
+        try:
+            from src import project_rules as _PR
+            rules = _PR.load_project_rules(self.repo_root)
+            if rules:
+                parts.append(rules)
+        except Exception:
+            pass  # rules are an enhancement; never break prompt assembly
 
         # Persistent memory index, if one already exists.
         for mem_root in (os.path.join(self.repo_root, ".korgex", "memory"),
