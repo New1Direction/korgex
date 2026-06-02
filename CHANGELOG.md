@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-06-02
+
+The **multi-provider** batch — bring your own login. korgex now reaches Grok, Gemini, the Nous gateway, and Venice using the same credential their own CLI/app already stores, plus dollar-cost accounting straight from the verifiable ledger.
+
+### Added
+- **Bring-your-own-OAuth providers, wired into the live agent loop.** When no api-key is configured, korgex mints a bearer token from the credential the provider's own CLI/app already holds and routes through its OpenAI-compatible endpoint — no separate key to manage:
+  - **Grok** — `--model grok4` (→ `grok-4.3`), via the local grok login.
+  - **Gemini** — `--model gemini-flash` / `gemini-pro`, via the local Google login.
+  - **Nous gateway** — `--model nous/<vendor/model>` (e.g. `nous/anthropic/claude-opus-4.8`): one subscription, many models (Claude Opus 4.8, Gemini, Grok, Qwen, …).
+  - **Venice** — `--model venice/<model>`, via `VENICE_API_KEY`.
+  - A configured api-key always takes precedence; short aliases resolve to concrete model ids.
+- **Dollar-cost from the ledger** — `korgex cost [journal]`, a one-line cost footer on `korgex trace`, and `/cost` in the REPL. Token counts come from the verifiable ledger; the dollar figure is an honest estimate against public list prices (and says so).
+
+### Fixed
+- **Secret-scrubber over-redaction** destroyed token counts — `prompt_tokens` / `completion_tokens` matched the "token" rule and were written as `[REDACTED]`, breaking cost + audit data. Added an allowlist of count/config keys.
+- **OAuth token-expiry coercion** — a stored `expires_at` is now coerced (float / numeric string / ISO-8601; ms for the keychain) before comparison, fixing a `float > str` crash that killed token loads.
+- **Nous client key-refresh** referenced `datetime`/`timezone` without importing them in scope (NameError when saving a refreshed key).
+
+### Changed
+- **Opsec pre-commit guard tightened** to flag only genuine RE artifacts — legitimate provider names/domains (a paid gateway's endpoint + OAuth client) no longer false-positive, while the real leak signals stay blocked. Added a hook-invocation test.
+
 ## [0.12.2] — 2026-06-02
 
 The **verifiable cognition** batch — korgex's tamper-evident audit ledger, made legible. The thing the closed agents can't offer: cognition you can both *read* and *prove*.

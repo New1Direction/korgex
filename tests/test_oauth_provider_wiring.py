@@ -161,6 +161,31 @@ def test_get_client_nous_prefix_uses_oauth_even_with_api_key(monkeypatch):
     assert c.base_url == "https://inference-api.nousresearch.com/v1"
 
 
+def test_venice_prefix_strips_and_forces_openai_transport(monkeypatch):
+    a = _agent("venice/venice-uncensored")
+    assert a.model == "venice-uncensored"
+    assert a.provider == "openai"
+    assert a._oauth_force == "venice"
+
+
+def test_oauth_token_and_base_venice_reads_env(monkeypatch):
+    monkeypatch.setenv("VENICE_API_KEY", "vk-123")
+    tok, base = A._oauth_token_and_base("venice")
+    assert tok == "vk-123"
+    assert base == "https://api.venice.ai/api/v1"
+
+
+def test_get_client_venice_prefix_uses_venice_key(monkeypatch):
+    monkeypatch.setattr(C, "load_config", lambda: object())
+    monkeypatch.setattr(C, "resolve_client_config", lambda *a, **k: (None, None))
+    monkeypatch.setattr(
+        A, "_oauth_token_and_base", lambda p: ("vk-123", "https://api.venice.ai/api/v1"))
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    c = _agent("venice/llama-3.3-70b")._get_client()
+    assert c.api_key == "vk-123"
+    assert c.base_url == "https://api.venice.ai/api/v1"
+
+
 def test_get_client_openai_path_unchanged_for_plain_model(monkeypatch):
     # Regression: a non-OAuth model is unaffected by the new branch.
     monkeypatch.setattr(C, "load_config", lambda: object())
