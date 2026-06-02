@@ -64,6 +64,23 @@ def test_wrap_command_confines_workspace_and_kills_network(tmp_path):
     assert out[i + 1] == ws and out[i + 2] == ws
 
 
+def test_wrap_command_rebinds_install_root_after_tmpfs(tmp_path):
+    # REGRESSION (Linux dogfood): --tmpfs /tmp hides a korgex install located under
+    # /tmp (e.g. a CI clone), so the kernel couldn't import the package inside the
+    # sandbox. The install_root must be re-bound read-only AFTER the tmpfs.
+    install = tmp_path / "install"
+    ws = tmp_path / "ws"
+    out = S.wrap_command(["python3"], str(ws), str(install), bwrap="/usr/bin/bwrap")
+    # the install_root re-bind appears, and AFTER the /tmp tmpfs (so it wins if under /tmp)
+    ir = str(install)
+    assert ir in out
+    tmpfs_i = out.index("--tmpfs")
+    ir_i = out.index(ir)
+    assert ir_i > tmpfs_i                  # re-bound AFTER the /tmp tmpfs
+    assert out[ir_i - 1] == "--ro-bind"    # as a `--ro-bind <ir> <ir>` pair
+    assert out[ir_i + 1] == ir
+
+
 def test_kernel_spawn_fails_closed_when_isolation_unavailable(tmp_path, monkeypatch):
     # Requesting isolation on a box without it (e.g. macOS) must FAIL CLOSED: the
     # kernel refuses to start rather than run model code unconfined.
