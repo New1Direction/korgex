@@ -588,8 +588,13 @@ _TOOL_ROUTING = {
 }
 
 
-def route_tool_call(tool_name: str, params: dict, repo_root: str = None) -> dict:
+def route_tool_call(tool_name: str, params: dict, repo_root: str = None, seq: int = None) -> dict:
     """Route a user-facing tool call to the appropriate handler.
+
+    `seq` is the triggering inference's ledger seq, passed to handlers (via
+    `context["seq"]`) that emit their OWN ledger events mid-execution (e.g.
+    browser_crawl's per-page facts) so those events chain under the inference
+    instead of orphaning in the causal DAG.
 
     Dispatch order:
       1. If the tool was registered from an MCP server → call that server.
@@ -654,7 +659,7 @@ def route_tool_call(tool_name: str, params: dict, repo_root: str = None) -> dict
     accepted = set(sig.parameters.keys())
     filtered = {k: v for k, v in mapped.items() if k in accepted}
     if "context" in accepted:
-        filtered.setdefault("context", {"repo_root": repo_root or os.getcwd()})
+        filtered.setdefault("context", {"repo_root": repo_root or os.getcwd(), "seq": seq})
 
     try:
         return handler(**filtered)

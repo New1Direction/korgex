@@ -187,11 +187,13 @@ def test_browser_tools_degrade_without_browser(monkeypatch):
     assert "playwright install chromium" in out["error"]
 
 
-def test_tool_browser_scroll_and_evaluate_and_wait():
+def test_tool_browser_scroll_and_evaluate_and_wait(monkeypatch):
     sess = B.BrowserSession(client=_act_cdp(
         {"Runtime.evaluate": {"result": {"value": 7}}}), page=FakePage())
     s = T.tool_browser_scroll(dy=200, _session=sess)
     assert s["ok"] is True and s["action"] == "scroll"
+    # browser_evaluate is gated default-OFF (arbitrary JS); opt in to exercise it.
+    monkeypatch.setenv("KORGEX_BROWSER_EVAL", "1")
     e = T.tool_browser_evaluate(expression="1+6", _session=sess)
     assert e["ok"] is True and e["value"] == 7
     w = T.tool_browser_wait(ms=5, _session=sess)

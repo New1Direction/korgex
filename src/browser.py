@@ -798,7 +798,7 @@ def extract_links(html: str, base: str = "") -> list[str]:
 
 def crawl(start_url: str, max_pages: int = 20, same_host: bool = True,  # noqa: A002
           same_domain: bool = False, min_interval: float = 0.0,
-          _fetch=None, _ledger=None) -> dict:
+          triggered_by=None, _fetch=None, _ledger=None) -> dict:
     """Thin BFS crawl with the standard safety rails, ledger-emitting.
 
     • Dedup: the frontier is keyed by unique_key(url) (normalized), so fragment
@@ -850,7 +850,7 @@ def crawl(start_url: str, max_pages: int = 20, same_host: bool = True,  # noqa: 
                 "browser.crawl_page",
                 {"url": url, "depth": depth, "unique_key": url},
                 {"links_found": len(links)},
-                True, 0,
+                True, 0, triggered_by=triggered_by,
             )
         except Exception:
             pass  # a ledger hiccup must never abort a crawl
@@ -954,8 +954,17 @@ def build_audit(page, headers: dict | None = None, links: list | None = None) ->
     hl = {str(k).lower(): v for k, v in headers.items()}
     security = {flag: (hdr in hl) for flag, hdr in _SECURITY_HEADERS.items()}
 
-    broken = [link for link in links
-              if (link.get("status") is None or int(link.get("status") or 0) >= 400)]
+    broken = []
+    for link in links:
+        s = link.get("status")
+        if s is None:
+            broken.append(link)
+            continue
+        try:
+            if int(s) >= 400:
+                broken.append(link)
+        except (TypeError, ValueError):
+            broken.append(link)        # unparseable status → treat as broken (never raise)
 
     from src.web_tools import extract_title
     return {
@@ -1045,7 +1054,7 @@ def relocate(fp: dict, snapshot: dict, threshold: float = 0.6) -> dict | None:
 
 
 def heal_and_record(fp: dict, snapshot: dict, threshold: float = 0.6,
-                    _ledger=None) -> dict | None:
+                    triggered_by=None, _ledger=None) -> dict | None:
     """Relocate a drifted element and, ON SUCCESS, record a SIGNED 'selector-drift'
     ledger fact {old_fingerprint, new_index, new_backend_node_id, similarity}.
     Records NOTHING when relocation fails. The drift thus becomes a first-class,
@@ -1065,7 +1074,7 @@ def heal_and_record(fp: dict, snapshot: dict, threshold: float = 0.6,
                 "similarity": hit["similarity"],
             },
             {"relocated": True},
-            True, 0,
+            True, 0, triggered_by=triggered_by,
         )
     except Exception:
         pass
