@@ -435,6 +435,7 @@ class Repl:
         try:
             result = agent.run_task(prompt)
             print()  # newline so the next turn's prompt starts clean
+            self._print_change_summary(_turn)
             summary = (result or {}).get("result", "") if isinstance(result, dict) else ""
             self._learn_from_turn(text, summary)  # background; never blocks
         except KeyboardInterrupt:
@@ -465,6 +466,27 @@ class Repl:
             self._print("(timed out after 120s)")
         except Exception as e:
             self._print(f"(shell error: {e})")
+
+    def _print_change_summary(self, turn: int):
+        """Show what the agent changed this turn — '✎ changed N file(s): …' —
+        computed from the rewind snapshots vs the files on disk. Best-effort."""
+        if self._rewind is None:
+            return
+        try:
+            from src.rewind import render_change_summary, summarize_changes
+
+            def _read(p):
+                try:
+                    return open(p).read()
+                except OSError:
+                    return None
+
+            line = render_change_summary(
+                summarize_changes(self._rewind.records_for_turn(turn), _read))
+            if line:
+                self._print(line)
+        except Exception:
+            pass
 
     def _open_task_count(self) -> int:
         led = getattr(self._agent, "_task_ledger", None)
