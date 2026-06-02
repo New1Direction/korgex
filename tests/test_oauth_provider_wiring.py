@@ -129,6 +129,38 @@ def test_get_client_prefers_configured_api_key_over_oauth(monkeypatch):
     assert consulted["oauth"] is False
 
 
+def test_nous_prefix_strips_and_forces_openai_transport(monkeypatch):
+    # `nous/<vendor/model>` routes through the Nous subscription: prefix stripped
+    # for the API, OpenAI-compatible transport, OAuth forced.
+    a = _agent("nous/anthropic/claude-opus-4.8")
+    assert a.model == "anthropic/claude-opus-4.8"
+    assert a.provider == "openai"
+    assert a._oauth_force == "nous"
+
+
+def test_oauth_token_and_base_nous(monkeypatch):
+    import src.model_router as MR
+    monkeypatch.setattr(MR.NousClient, "_load_auth", lambda self: None)
+    monkeypatch.setattr(MR.NousClient, "_ensure_key", lambda self: "sk-nous-x")
+    tok, base = A._oauth_token_and_base("nous")
+    assert tok == "sk-nous-x"
+    assert base == "https://inference-api.nousresearch.com/v1"
+
+
+def test_get_client_nous_prefix_uses_oauth_even_with_api_key(monkeypatch):
+    # The explicit nous/ prefix always routes to Nous, even if a key is configured.
+    monkeypatch.setattr(C, "load_config", lambda: object())
+    monkeypatch.setattr(C, "resolve_client_config", lambda *a, **k: ("some-key", None))
+    monkeypatch.setattr(
+        A, "_oauth_token_and_base",
+        lambda p: ("sk-nous-x", "https://inference-api.nousresearch.com/v1"))
+    monkeypatch.setattr(openai, "OpenAI", _FakeOpenAI)
+    c = _agent("nous/qwen/qwen3.7-max")._get_client()
+    assert isinstance(c, _FakeOpenAI)
+    assert c.api_key == "sk-nous-x"
+    assert c.base_url == "https://inference-api.nousresearch.com/v1"
+
+
 def test_get_client_openai_path_unchanged_for_plain_model(monkeypatch):
     # Regression: a non-OAuth model is unaffected by the new branch.
     monkeypatch.setattr(C, "load_config", lambda: object())

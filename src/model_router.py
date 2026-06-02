@@ -769,18 +769,14 @@ class NousClient:
         self._access_token = nous.get("access_token", "")
         self._refresh_token = nous.get("refresh_token", "")
 
-        # Parse expiry
-        expires_str = nous.get("expires_at", nous.get("agent_key_expires_at", ""))
-        if expires_str:
-            try:
-                from datetime import datetime
-                dt = datetime.fromisoformat(expires_str.replace("Z", "+00:00"))
-                self._expires_at = dt.timestamp()
-            except (ValueError, OSError):
-                self._expires_at = 0
+        # Expiry: ISO string or numeric — coerce safely (shared _to_epoch).
+        self._expires_at = _to_epoch(
+            nous.get("expires_at", nous.get("agent_key_expires_at", 0))
+        )
 
     def _save_auth(self):
         """Write refreshed tokens back to ~/.hermes/auth.json."""
+        from datetime import datetime, timezone
         try:
             with open(self.AUTH_JSON) as f:
                 data = json.load(f)
@@ -867,7 +863,6 @@ class NousClient:
              tools: list[dict], params: dict) -> APIResponse:
         """Send messages to Nous Inference API (OpenAI-compatible)."""
         import httpx
-        from datetime import datetime, timezone
 
         key = self._ensure_key()
 

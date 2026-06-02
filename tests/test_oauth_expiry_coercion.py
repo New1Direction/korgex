@@ -33,6 +33,22 @@ def test_to_epoch_garbage_and_none():
     assert MR._to_epoch("") == 0.0
 
 
+def test_nous_save_auth_does_not_crash_on_datetime(tmp_path, monkeypatch):
+    # Regression: NousClient._save_auth used datetime/timezone without importing
+    # them in scope (the import sat unused in send()), so _mint_agent_key →
+    # _save_auth would NameError. Must write the expiry back as an ISO string.
+    authf = tmp_path / "auth.json"
+    authf.write_text(json.dumps({"providers": {"nous": {}}}))
+    monkeypatch.setattr(MR.NousClient, "AUTH_JSON", str(authf))
+    c = MR.NousClient()
+    c._agent_key, c._access_token, c._refresh_token = "ak", "at", "rt"
+    c._expires_at = 1700000000.0
+    c._save_auth()                       # must not raise NameError
+    saved = json.loads(authf.read_text())
+    assert saved["providers"]["nous"]["agent_key"] == "ak"
+    assert "T" in saved["providers"]["nous"]["expires_at"]   # ISO written back
+
+
 def test_grok_load_token_survives_string_expiry(tmp_path, monkeypatch):
     # Regression: a STRING expires_at must not crash _is_expired.
     auth = tmp_path / "auth.json"

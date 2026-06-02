@@ -77,6 +77,7 @@ def _looks_anthropic(model_id: str) -> bool:
 _OAUTH_BASE_URLS = {
     "grok": "https://api.x.ai/v1",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "nous": "https://inference-api.nousresearch.com/v1",
 }
 
 
@@ -114,7 +115,9 @@ def _oauth_token_and_base(provider: str):
     """
     base = _OAUTH_BASE_URLS.get(provider)
     try:
-        from src.model_router import GeminiClient, GrokClient
+        from src.model_router import GeminiClient, GrokClient, NousClient
+        if provider == "nous":
+            return (NousClient()._ensure_key() or None), base   # mints the agent-key
         loader = {"grok": GrokClient, "gemini": GeminiClient}[provider]
         return (loader()._ensure_token() or None), base
     except Exception:
@@ -203,11 +206,20 @@ class KorgexAgent:
         self.mode = mode
         self.model = _resolve_model(model, mode)
         self.repo_root = repo_root or os.getcwd()
+        # Nous gateway: `nous/<vendor/model>` routes through the user's Nous
+        # subscription (OpenAI-compatible). Strip the prefix for the API and force
+        # OAuth + OpenAI transport; the actual model id is the suffix.
+        self._oauth_force = None
+        if self.model.lower().startswith("nous/"):
+            self._oauth_force = "nous"
+            self.model = self.model[5:]
         # KORGEX_PROVIDER forces the transport (overriding model-id autodetect),
         # so a Claude/Gemini model can be driven through an OpenAI-compatible
         # gateway like OpenRouter. Garbage values fall back to autodetect.
         _forced = os.environ.get("KORGEX_PROVIDER", "").strip().lower()
-        if _forced in ("openai", "anthropic"):
+        if self._oauth_force:
+            self.provider = "openai"
+        elif _forced in ("openai", "anthropic"):
             self.provider = _forced
         else:
             self.provider = "anthropic" if _looks_anthropic(self.model) else "openai"
@@ -552,6 +564,15 @@ class KorgexAgent:
         # Remembered for the prompt-cache layer: whether we're on OpenRouter (and
         # thus can use its cache_control breakpoints) is a base_url question.
         self._base_url = base_url
+
+        # Explicit Nous gateway prefix (`nous/…`) always routes through the Nous
+        # subscription, regardless of any configured api-key — the prefix is intent.
+        if getattr(self, "_oauth_force", None):
+            token, oauth_base = _oauth_token_and_base(self._oauth_force)
+            if token:
+                self._base_url = oauth_base
+                from openai import OpenAI
+                return OpenAI(api_key=token, base_url=oauth_base)
 
         # BYO-OAuth fallback: when no api-key is configured and this model belongs
         # to a bring-your-own-OAuth provider (grok/gemini, both OpenAI-compatible),
