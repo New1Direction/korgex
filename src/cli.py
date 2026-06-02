@@ -133,38 +133,25 @@ def cmd_default():
 
 
 def cmd_init():
-    """One-shot setup: install Python deps, compile the extension."""
-    _log("Korgex init — setting up...")
+    """Scaffold an AGENTS.md for this project (the guide korgex reads each session)."""
+    import os
 
-    # Python deps
-    _log("Installing Python dependencies (fastapi, uvicorn)...")
-    _run_or_die(
-        [sys.executable, "-m", "pip", "install", "-e", str(REPO_ROOT)],
-        step="pip install -e .",
-    )
-    _run_or_die(
-        [sys.executable, "-m", "pip", "install", "fastapi", "uvicorn"],
-        step="pip install fastapi uvicorn",
-    )
+    from src import project_init as PI
 
-    # VS Code extension
-    ext_path = _resolve("korgex-vscode")
-    _log("Installing Node dependencies...")
-    _run_or_die(["npm", "install"], step="npm install", cwd=str(ext_path))
-
-    _log("Compiling TypeScript → JavaScript...")
-    result = subprocess.run(
-        ["npm", "run", "compile"],
-        cwd=str(ext_path),
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print(f"    TypeScript compilation failed:\n{result.stderr}")
-        sys.exit(1)
-
-    print()
-    _log("Ready. Run `korgex` to launch.")
+    root = os.getcwd()
+    res = PI.scaffold(root)
+    if not res["written"]:
+        _log(f"AGENTS.md already exists at {res['path']} — leaving it untouched.")
+        return
+    facts = res.get("facts", {})
+    langs = ", ".join(facts.get("languages") or []) or "none detected"
+    _log(f"Created {res['path']}")
+    line = f"Detected: {langs}"
+    if facts.get("test_cmd"):
+        line += f"  ·  test: {facts['test_cmd']}"
+    _log(line)
+    _log("Fill in the TODO sections (overview, conventions). korgex reads this — "
+         "and any nested AGENTS.md / .korgex/rules — automatically each session.")
 
 
 def cmd_dashboard():
@@ -770,7 +757,7 @@ _EPILOG = ("Examples:\n"
            "  korgex \"fix the auth bug\"     # run the agent on a task\n"
            "  korgex serve                    # start dashboard + open VS Code\n"
            "  korgex dashboard                # start dashboard only\n"
-           "  korgex init                     # install deps + compile extension\n"
+           "  korgex init                     # scaffold an AGENTS.md for this project\n"
            "  korgex status                   # show backend status\n"
            "  korgex stop                     # stop background backend\n")
 
