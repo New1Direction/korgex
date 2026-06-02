@@ -31,6 +31,7 @@ korgex — commands
   /diff [n]       show colored diffs of what changed in the last turn (or turn n)
   /trace [all]    show the verifiable cognition trace — what it did + what caused it
   /explain [on|off]  open a self-verifying HTML cognition audit (on = after every run)
+  /why <file>     trace WHY a file was changed — back to the prompt that caused it
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -88,6 +89,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("trace", rest or None)
         if head == "/explain":
             return Command("explain", rest or None)
+        if head == "/why":
+            return Command("why", rest or None)
         if head == "/version":
             return Command("version")
         return Command("unknown", head.lstrip("/"))
@@ -97,7 +100,7 @@ def parse_repl_input(line: str) -> Command:
 # The real command vocabulary — used to suggest a fix for a mistyped command.
 KNOWN_COMMANDS = [
     "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "trace", "explain",
-    "loop", "version", "clear", "help", "exit", "quit",
+    "why", "loop", "version", "clear", "help", "exit", "quit",
 ]
 
 
@@ -435,6 +438,9 @@ class Repl:
         if cmd.kind == "explain":
             self._toggle_explain(cmd.arg)
             return True
+        if cmd.kind == "why":
+            self._show_why(cmd.arg)
+            return True
         if cmd.kind == "version":
             self._show_version()
             return True
@@ -621,6 +627,26 @@ class Repl:
             self._print("explainer OFF")
         else:
             self._open_explainer()
+
+    def _show_why(self, arg=None):
+        """/why <file> — trace why a file was touched, back through the causal chain
+        to the prompt that caused it (from the verifiable ledger)."""
+        target = (arg or "").strip()
+        if not target:
+            self._print("usage: /why <file>   — e.g. /why src/auth.py")
+            return
+        import os
+        path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+            self.repo_root, ".korg", "journal.jsonl")
+        if not os.path.isfile(path):
+            self._print("no cognition recorded yet")
+            return
+        try:
+            from src import recall as R
+            from src.ledger_trace import explain_why
+            self._print(explain_why(R.load_events(path), target, color=True))
+        except Exception:
+            self._print("couldn't read the cognition ledger")
 
     def _show_diff(self, arg=None):
         """/diff [n] — show colored diffs for the files changed in the last turn

@@ -119,6 +119,11 @@ def test_slash_explain_parses():
     assert R.parse_repl_input("/explain off").arg == "off"
 
 
+def test_slash_why_parses():
+    cmd = R.parse_repl_input("/why src/auth.py")
+    assert cmd.kind == "why" and cmd.arg == "src/auth.py"
+
+
 def test_slash_loop_parses_with_and_without_task():
     cmd = R.parse_repl_input("/loop build the parser")
     assert cmd.kind == "loop"

@@ -103,3 +103,48 @@ def render_roots(roots, *, color: bool = True) -> str:
 def render_trace(events, *, color: bool = True) -> str:
     """Render the whole causal forest as an indented cognition tree. "" when empty."""
     return render_roots(build_forest(events), color=color)
+
+
+# ── Targeted "why": trace a file change back to its cause ────────────────────
+
+def causal_path(by_seq: dict, seq) -> list:
+    """Walk ``triggered_by`` from `seq` back to the root, returned root→seq (forward
+    order). `by_seq` maps seq_id → event. Cycle-safe."""
+    path, cur, seen = [], seq, set()
+    while cur is not None and cur in by_seq and cur not in seen:
+        seen.add(cur)
+        e = by_seq[cur]
+        path.append(e)
+        cur = e.get("triggered_by")
+    path.reverse()
+    return path
+
+
+def _touches(e, target: str) -> bool:
+    args = e.get("args") or {}
+    hay = " ".join(str(args.get(k, "")) for k in ("file_path", "path", "notebook_path", "command"))
+    return bool(target) and target in hay
+
+
+def explain_why(events, target: str, *, color: bool = True) -> str:
+    """Explain why `target` (a file path or substring) was touched: find every event
+    that acted on it and render the causal chain from the originating user_prompt
+    down to each touch. Trustworthy because the chain is verifiable (`korgex verify`)."""
+    by_seq = {_seq(e): e for e in (events or []) if _seq(e) is not None}
+    touches = [e for e in (events or [])
+               if _kind(e) not in ("user_prompt", "llm_inference") and _touches(e, target)]
+    if not touches:
+        return f"no recorded action touched {target}"
+
+    out = [f"why {target}? — touched {len(touches)}×, each traced to the prompt that caused it:", ""]
+    for t in touches:
+        path = causal_path(by_seq, _seq(t))
+        root = path[0] if path else t
+        rargs = root.get("args") or {}
+        prompt = (rargs.get("prompt") or root.get("prompt") or _kind(root)).strip().replace("\n", " ")
+        if len(prompt) > 56:
+            prompt = prompt[:55] + "…"
+        cause = f'← "{prompt}"  (#{_seq(root)})'
+        cause = f"{_DIM}{cause}{_RESET}" if color else cause
+        out.append(f"  {_label(t, color)}   {cause}")
+    return "\n".join(out)

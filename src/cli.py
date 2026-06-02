@@ -290,6 +290,27 @@ def cmd_trace():
     return 0
 
 
+def cmd_why():
+    """Trace why a file was changed — back through the causal chain to its prompt."""
+    from src import recall as R
+    from src.ledger_trace import explain_why
+
+    argv = sys.argv[1:]
+    rest = ([a for a in argv[argv.index("why") + 1:] if not a.startswith("-")]
+            if "why" in argv else [])
+    if not rest:
+        print("  usage: korgex why <file> [journal]")
+        return 2
+    target = rest[0]
+    path = rest[1] if len(rest) > 1 else os.environ.get(
+        "KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+    if not Path(path).exists():
+        print(f"  No ledger journal at {path}")
+        return 1
+    print(explain_why(R.load_events(path), target, color=sys.stdout.isatty()))
+    return 0
+
+
 def cmd_drift():
     """Scan persistent memories for drift against their recorded source baselines."""
     from src import memory as M
@@ -718,6 +739,7 @@ SUBCOMMANDS = {
     "install-extension": cmd_install_extension,
     "verify":            cmd_verify,
     "trace":             cmd_trace,
+    "why":               cmd_why,
     "drift":             cmd_drift,
     "import":            cmd_import,
     "audit":             cmd_audit,
@@ -825,6 +847,10 @@ def _build_subcommand_parser():
             sp.add_argument("path", nargs="?",
                             help="Journal JSONL to trace "
                                  "(default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+        elif name == "why":
+            sp.add_argument("file", help="the file/path to explain")
+            sp.add_argument("journal", nargs="?",
+                            help="journal JSONL (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
         elif name == "import":
             sp.add_argument("vendor", nargs="?", help="claude-code")
             sp.add_argument("transcript", nargs="?", help="path to the vendor session transcript")

@@ -75,3 +75,24 @@ class TestRenderTrace:
     def test_empty_is_friendly(self):
         out = LT.render_trace([], color=False)
         assert out == "" or "no" in out.lower()
+
+
+class TestExplainWhy:
+    def test_traces_a_touched_file_back_to_the_prompt(self):
+        out = LT.explain_why(_evts(), "src/auth.py", color=False)
+        assert "fix the auth bug" in out           # the originating prompt
+        assert "Edit" in out and "src/auth.py" in out
+
+    def test_substring_match_on_a_partial_path(self):
+        out = LT.explain_why(_evts(), "auth.py", color=False)   # partial
+        assert "src/auth.py" in out
+
+    def test_untouched_target_is_reported_clearly(self):
+        out = LT.explain_why(_evts(), "nope.py", color=False)
+        assert "nope.py" in out and "no" in out.lower()
+
+    def test_causal_path_runs_root_to_touch(self):
+        # the path is the originating prompt → the thinking → the touch, in order
+        by_seq = {e["seq_id"]: e for e in _evts()}
+        path = LT.causal_path(by_seq, 4)           # the Edit
+        assert [e["seq_id"] for e in path] == [1, 2, 4]
