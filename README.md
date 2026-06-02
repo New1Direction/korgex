@@ -18,6 +18,7 @@ $ korgex "add a /healthz endpoint that returns 200 with uptime"
 
 - [Install](#install)
 - [Quickstart](#quickstart)
+- [The REPL — live in it](#the-repl--live-in-it)
 - [How it works](#how-it-works)
 - [Verifiable cognition](#verifiable-cognition)
 - [CLI reference](#cli-reference)
@@ -95,6 +96,36 @@ korgex --mode plan "design a rate limiter for the API"
 korgex --quiet "list the python files in src/"
 ```
 
+Or just run `korgex` with no prompt to drop into the interactive REPL (below).
+
+---
+
+## The REPL — live in it
+
+Run bare `korgex` for a streaming, multi-turn session. It connects your MCP servers, reads your project rules, and keeps a per-session rewind log.
+
+**Slash commands**
+
+| Command | What it does |
+|---|---|
+| `/loop <task>` | Grind a task list unattended — auto-continues turn after turn until done, with a hard cap (Ctrl-C stops). |
+| `/diff [n]` | Colored diffs of what changed in the last turn (or turn `n`). |
+| `/rewind [n]` | List undo points, or restore files to BEFORE prompt `n`. |
+| `/skills` · `/skills curate` | List skills korgex learned (✦); curate merges near-duplicates. |
+| `/tasks` · `/jobs` | The live task checklist; background shell jobs. |
+| `/plan [on\|off]` | Plan mode — read-only until you approve the agent's plan. |
+| `/model [id]` | Show a priced model menu, or switch the live model mid-session. |
+| `/clear` · `/help` · `/exit` | Reset the conversation · help · quit. |
+
+**Inline shortcuts**
+
+- **`@path/to/file`** — mention a file and its contents are pulled into the turn: `refactor @src/auth.py to use @src/db.py`.
+- **`!command`** — run a shell command right there: `!git status`, `!pytest -q`.
+
+**Project rules.** `korgex init` scaffolds an `AGENTS.md`; korgex auto-reads it — plus any nested `AGENTS.md` up the tree and `.korgex/rules/*.md` — every session, so it follows your house style.
+
+**Prompt caching** keeps the system prompt + tools warm across turns (automatic on OpenAI/Gemini/Grok/DeepSeek; `cache_control` breakpoints on Claude/Qwen). Set `KORGEX_CACHE_STATS=1` to see per-turn cache hits.
+
 ---
 
 ## How it works
@@ -131,8 +162,8 @@ korgex --quiet "list the python files in src/"
 │     ▼                                                            │
 │  ┌─────────────────────────────────────────┐                     │
 │  │  Tool routing (src/tool_abstraction.py) │                     │
-│  │  - 12 model-facing user tools      │                     │
-│  │  - Adapter layer → internal handlers │                     │
+│  │  - 12 stable model-facing tools         │                     │
+│  │  - Adapter layer → internal handlers    │                     │
 │  │  - MCP-sourced tools → MCP manager       │                     │
 │  └─────────────────────────────────────────┘                     │
 └──────────────────────────────────────────────────────────────────┘
@@ -227,7 +258,7 @@ korgex --quiet "list all functions called from main()"
 |---|---|
 | `korgex serve` | Starts the FastAPI dashboard on `localhost:8090` and opens VS Code with the sidecar. |
 | `korgex dashboard` | Starts the dashboard only (no editor). |
-| `korgex init` | One-shot setup: pip-installs deps, npm-installs + compiles the VS Code extension. |
+| `korgex init` | Scaffold a starter `AGENTS.md` for the current repo (detects stack + test/build commands; never clobbers an existing one). |
 | `korgex status` | Reports whether the background backend is running. |
 | `korgex stop` | Terminates the background backend (SIGTERM, then SIGKILL if needed). |
 | `korgex install-extension` | Installs the compiled `.vsix` into your local VS Code. |
@@ -384,9 +415,11 @@ OpenAI/OpenRouter streaming works just like Anthropic: text deltas pipe through 
 To install:
 
 ```bash
-korgex init                # compiles the .vsix
-korgex install-extension   # installs it into your local VS Code
+cd korgex-vscode && npm install && npm run compile   # build the .vsix
+korgex install-extension                              # install it into your local VS Code
 ```
+
+> The VS Code sidecar is a legacy companion to the dashboard; korgex's primary interface is the terminal REPL above.
 
 The extension connects to `http://localhost:8090` by default, which matches the dashboard port. Adjust via the VS Code setting `korgex.backendUrl` if you change the port.
 
@@ -415,7 +448,7 @@ All swarm endpoints are synchronous (FastAPI thread-pools them) and return JSON:
 
 ## Architecture
 
-### Tool routing — model-facing → internal
+### Tool routing — stable model-facing names → internal handlers
 
 ```
 User tool call (LLM-visible):     Internal handler (in src/tools_impl.py):
@@ -488,7 +521,7 @@ korgex/
 │   └── ...
 ├── korgex-vscode/            # VS Code sidecar extension (TypeScript)
 │   ├── src/extension.ts      # 4 registered commands
-│   ├── korgex-sidecar.vsix   # Compiled artifact (after `korgex init`)
+│   ├── korgex-sidecar.vsix   # Compiled artifact (after `npm run compile`)
 │   └── package.json
 ├── tests/
 │   └── test_bridge.py        # 27 tests covering router, providers, MCP, streaming, dashboard
@@ -556,14 +589,17 @@ pytest tests/test_bridge.py::test_write_routes_to_disk -v
 pytest tests/ --cov=src --cov-report=term-missing
 ```
 
-### What the tests cover (27 cases)
+### What the tests cover
 
-- **Router** (5): Read/Write/Edit route to handlers and produce filesystem effects; unknown tools return errors gracefully; the Edit adapter constructs valid SEARCH/REPLACE blocks; unsupported kwargs (Read.offset/limit) are filtered, not crashed.
-- **Provider schemas** (4): Anthropic and OpenAI tool-schema shapes are correct; OpenRouter `anthropic/...` IDs are detected; missing API keys raise `RuntimeError` cleanly.
-- **Mode routing** (5): `--mode plan` picks Opus, `--mode execute` picks Sonnet, `--mode debug` picks Haiku, explicit `--model` overrides, default falls back to Sonnet.
-- **MCP** (3): MCP tools register into `USER_TOOLS` correctly; the router dispatches them to the MCP manager; full connect→discover→call→disconnect round-trip against a real stub subprocess.
-- **Streaming** (5): Interactive mode auto-detects TTY; sessions are lazily constructed; OpenAI streaming accumulates text + multi-chunk tool calls into the right shape; text-only responses pass through.
-- **Dashboard** (5): `/health` returns ok; swarm endpoints reject missing args with 400; swarm endpoints return clean JSON errors when no API key is set.
+The suite is **~885 tests across ~90 modules**, run on every change (TDD throughout). Major areas:
+
+- **Agent loop** — tool routing + filesystem effects, provider schemas, mode/model resolution, loop guards (repeat/intent rails), the stall classifier, compaction.
+- **Tools** — fuzzy Edit matching, edit-freshness (refuse stale writes), background Bash jobs, web search/fetch.
+- **Verifiable ledger** — hash-chain integrity, conformance, redaction, the Ed25519 signed bus + provenance.
+- **MCP** — namespaced multi-server router, graceful degradation, OAuth token store/refresh, full connect→discover→call round-trip against a stub subprocess.
+- **Prompt caching** — per-provider shaping, the cached-prefix-stability invariant, agent wiring.
+- **Skills** — loading + trust tiers, self-learning review, the curator (provenance-guarded merges).
+- **REPL** — input parsing for every command, `/loop` drive logic, rewind + inline diffs, `@`-mentions, humanized errors, project-rules hierarchy.
 
 No live LLM calls in the test suite — everything is unit-tested.
 
