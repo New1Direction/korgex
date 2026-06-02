@@ -27,6 +27,8 @@ _RULES = [
      "Run /clear to start fresh, or switch to a larger-context model with /model."),
     (("model not found", "does not exist", "no such model", "unknown model", "404", "model_not_found"),
      "That model wasn't found at this provider. Check the model id with /model."),
+    (("503", "service unavailable", "overloaded"),
+     "The provider is temporarily unavailable — retry shortly, or switch with /model."),
     (("connection", "timed out", "timeout", "network", "getaddrinfo", "failed to establish",
       "name or service not known", "connection refused", "max retries"),
      "Can't reach the provider — check your internet connection "
