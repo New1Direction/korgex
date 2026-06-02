@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-06-01
+
+The **working-machine** batch — speed, autonomy, and daily-driver ergonomics synthesized from the best of the frontier coding agents, plus a critical fix that revived self-learning.
+
+### Added
+- **Cross-vendor prompt caching** (`src/prompt_cache.py`): keeps the stable system prompt + tool definitions warm in the provider's cache so repeated turns skip reprocessing them — faster first token, cheaper calls. One source of truth for each provider's contract: OpenAI/Gemini/Grok/DeepSeek auto-cache (≥1024 tok, no marker), while Claude/Qwen get manual `cache_control` breakpoints (on OpenRouter, a top-level breakpoint also caches the growing history). The native Anthropic SDK path caches the system blocks + tool array. `KORGEX_CACHE_STATS=1` prints a per-turn cache-hit line.
+- **`/loop <task>`** (`src/loop_control.py`): grind a task list unattended — seed the work, then auto-continue turn after turn while open tasks remain, with a hard iteration cap (the runaway guard; `KORGEX_LOOP_MAX`) and Ctrl-C to stop.
+- **`@file` mentions** (`src/mentions.py`): `@path` in a prompt inlines that file's contents (email/word-guarded, size-capped, dirs skipped) — the original instruction is preserved and bodies are appended in a fenced section.
+- **`!command` shell passthrough**: run a shell command (`!git status`, `!pytest -q`) straight from the REPL, in the project root.
+- **Post-turn change summary**: after a turn, `✎ changed N file(s): path (+a -b)` computed from the rewind snapshots vs disk — tied to `/rewind`.
+- **Project-rules hierarchy** (`src/project_rules.py`): merges `~/.korgex/AGENTS.md` + the git-bounded directory chain (monorepo root → package, never above the repo) + `.korgex/rules/*.md`, least-specific first — so korgex respects house style across real repos, not just the root file.
+- **Self-learning skill curator** (`src/skill_curator.py`): an LLM groups the agent-learned skills by intent and consolidates near-duplicates into one, deleting the redundant ones. Touches only `trust: agent` skills (user/built-in are never merged or deleted). `/skills curate` runs it on demand; a throttled background pass runs as the library grows.
+- **`korgex init`** (`src/project_init.py`): scaffold a starter `AGENTS.md` for the current repo — detects the stack and test/build commands; never clobbers an existing one.
+- **Typed `subagent.result` ledger node**: each delegation records a first-class, queryable outcome naming the child's root seq, so multi-agent runs are coherent and rewindable per child.
+
+### Changed
+- **System prompt sharpened** to frontier-agent posture: output economy on both ends (no preamble *and* no postamble), match-the-codebase discipline (mimic style, verify deps exist, comment only the "why", no unrequested refactors), a direct non-sycophantic tone that pushes back, and decisive autonomy with a scope guard.
+- **Live token streaming + parallel MCP connect**: replies stream as generated; configured MCP servers connect concurrently at startup (5 servers + 31 tools in ~0.9s, was the sum).
+
+### Fixed
+- **Self-learning was silently dead in production**: `Repl.self.repo_root` was never assigned, so `/skills`, `@`-mentions, and skill learning hit an `AttributeError` that their `try/except` swallowed — skills never actually learned. Now set to the launch dir.
+- **The live task list never reached OpenAI-compatible models**: the anti-drift task steering drove the UI and the Anthropic path but was dropped on the OpenAI path. Now delivered as a trailing message (cache-safe).
+
 ## [0.11.0] — 2026-06-01
 
 The **terminal-native conversational agent** batch — korgex becomes a cross-vendor Claude Code competitor you live inside, plus a fleet of frontier-agent capabilities.
