@@ -20,7 +20,11 @@ from typing import Optional
 from src.tool_abstraction import USER_TOOLS, route_tool_call
 # tools_impl must be imported so its @register_tool decorators populate the registry
 import src.tools_impl  # noqa: F401
+from src import korg_ledger as _kl
+from src import tool_compression as _tcomp
+from src import cache_compaction as _cc
 from src.korg_ledger import get_default_client as _korg
+from src.sanitize import redact as _redact
 from src import edit_policy as _EP
 from src.plugins import PluginRegistry, default_plugin_dirs, load_plugins
 from src.hooks import load_hooks, run_event
@@ -276,6 +280,12 @@ class KorgexAgent:
         # before each file mutation so a REPL can snapshot start-of-turn state and
         # offer undo-to-prompt. None = no rewind tracking (the default).
         self._rewind_sink = None
+        # Provider prompt-cache state from the last model response (normalized by
+        # cache_compaction.extract_cache_tokens). Drives cache-aware compaction: we
+        # never rewrite the cached prefix, and only force compaction when the savings
+        # beat the cache-read discount. All-zero until the first call — when it stays
+        # zero (no cache seen), compaction degrades to its size-only behavior.
+        self._last_cache = {"cache_read": 0, "cache_creation": 0, "prompt_tokens": 0}
         # Live task ledger — the agent's self-updating checklist. TaskCreate/TaskUpdate
         # drive it; its open items are fed back into the prompt each turn so the model
         # works through them instead of drifting or claiming done early.
@@ -687,13 +697,17 @@ class KorgexAgent:
             max_tokens = gen.get("max_tokens", 4096)
             if self.provider == "anthropic":
                 from src import prompt_cache as PC
-                return client.messages.create(
+                resp = client.messages.create(
                     model=self.model, system=PC.anthropic_system(sp, system_volatile),
                     messages=messages, max_tokens=max_tokens, **extra,
                 )
-            return client.chat.completions.create(
+                self._capture_cache(getattr(resp, "usage", None))
+                return resp
+            resp = client.chat.completions.create(
                 **self._openai_cache_kwargs(messages, None), max_tokens=max_tokens, **extra,
             )
+            self._capture_cache(getattr(resp, "usage", None))
+            return resp
 
         # Interactive streaming paths. A "thinking…" spinner covers the silent
         # gap between submit and the first token (model latency + network), then
@@ -709,13 +723,17 @@ class KorgexAgent:
 
         # Non-streaming
         if self.provider == "anthropic":
-            return client.messages.create(
+            resp = client.messages.create(
                 model=self.model, messages=messages, **gen,
                 **self._anthropic_cache_kwargs(sp, tools, system_volatile),
             )
-        return client.chat.completions.create(
+            self._capture_cache(getattr(resp, "usage", None))
+            return resp
+        resp = client.chat.completions.create(
             **self._openai_cache_kwargs(messages, tools, volatile=system_volatile), **gen,
         )
+        self._capture_cache(getattr(resp, "usage", None))
+        return resp
 
     def _call_anthropic_streaming(self, client, messages: list, tools: list,
                                   system_prompt: str = None, on_first=None, volatile: str = None):
@@ -746,7 +764,9 @@ class KorgexAgent:
                     break  # user interrupted
 
             # get_final_message gives us the same shape as messages.create()
-            return stream.get_final_message()
+            final = stream.get_final_message()
+            self._capture_cache(getattr(final, "usage", None))
+            return final
 
     def _call_openai_streaming(self, client, messages: list, tools: list, on_first=None,
                                volatile: str = None):
@@ -815,8 +835,18 @@ class KorgexAgent:
             pass
 
         self._maybe_report_cache(usage)
+        self._capture_cache(usage)
         # Build a fake response object shaped like a non-streamed ChatCompletion
         return _StubOpenAIResponse(full_text, partials)
+
+    def _capture_cache(self, usage) -> None:
+        """Stash the provider's normalized cache usage from the latest response onto
+        self._last_cache so cache-aware compaction can price the prefix. Telemetry
+        must never break a turn: on any error keep the previous _last_cache."""
+        try:
+            self._last_cache = _cc.extract_cache_tokens(usage)
+        except Exception:
+            pass  # preserve prior state; never propagate a telemetry hiccup
 
     def _maybe_report_cache(self, usage) -> None:
         """When KORGEX_CACHE_STATS is set, print a dim one-line cache summary so a
@@ -906,6 +936,80 @@ class KorgexAgent:
         if tool_calls:
             turn["tool_calls"] = tool_calls
         return turn
+
+    def _compress_tool_result(self, tool_result, korg, llm_seq, tool_name="tool_result"):
+        """Verifiable context compression at the tool-result boundary.
+
+        When a tool result exceeds KORGEX_COMPRESS_THRESHOLD bytes, replace the
+        MODEL-FACING content with a COMPACT VIEW + a content-ref handle to the
+        sealed original. The full original is sealed in the ledger's
+        content-addressed blob store (the SAME store, via _write_blob) on the
+        exact canonical bytes, so Retrieve(ref) returns it byte-for-byte,
+        sha256-verified — the HARD INVARIANT (never lose data).
+
+        Records a `context.compress` ledger fact (chained triggered_by=llm_seq)
+        so korgex trace/verify show + prove the compression.
+
+        Safe by default: never compresses small results (correctness > savings),
+        never compresses error/control dicts (failures must reach the model
+        intact), env=0 disables, and ANY exception fails safe to the untouched
+        original — a seal hiccup must never drop data or crash the loop. This
+        runs AFTER record_tool_call already sealed the full result, so the
+        ledger holds the original regardless.
+        """
+        try:
+            threshold = int(os.environ.get("KORGEX_COMPRESS_THRESHOLD", "2048"))
+        except (TypeError, ValueError):
+            threshold = 2048
+        if threshold <= 0:
+            return tool_result
+        if not isinstance(tool_result, dict):
+            return tool_result
+        # Errors + control dicts must reach the model verbatim; already-compressed
+        # results must not be re-wrapped (RISK 3/5).
+        if "error" in tool_result or tool_result.get("_compressed"):
+            return tool_result
+
+        try:
+            # Seal the REDACTED result, never the raw bytes: a credential in tool
+            # output must NOT reach the (shareable) blob store, and the sealed
+            # original must be consistent with the redacted view the model + ledger
+            # see. The model never had the secret; everything else is byte-identical,
+            # so Retrieve still returns the faithful (redacted) original.
+            redacted = _redact(tool_result)
+            data = _kl._canonical_bytes(redacted)
+            if len(data) <= threshold:
+                return tool_result
+            sha, size = _kl._write_blob(data)
+            view = _redact(_tcomp.compact_view(redacted))
+            compact = {
+                "_compressed": True,
+                "_ref": f"sha256:{sha}",
+                "size_bytes": size,
+                "original_sha256": sha,
+                "view": view,
+                "hint": ("full original sealed + verifiable in the ledger; "
+                         "call Retrieve(ref) to pull the exact bytes"),
+            }
+            compressed_size = len(json.dumps(compact, default=str))
+            korg.record_tool_call(
+                tool_name="context.compress",
+                args={"tool": tool_name, "compressor": _tcomp.detect_kind(tool_result)},
+                result={
+                    "original_sha256": sha,
+                    "original_size": size,
+                    "compressed_size": compressed_size,
+                    "ratio": round(compressed_size / max(1, size), 4),
+                },
+                success=True,
+                duration_ms=0,
+                triggered_by=llm_seq,
+            )
+            return compact
+        except Exception:
+            # Fail safe: a compaction/seal hiccup must never drop data or crash
+            # the loop. The full original is already sealed by record_tool_call.
+            return tool_result
 
     def _tool_result_turn(self, tool_id: str, result: dict) -> dict:
         content = json.dumps(result, default=str)
@@ -1185,6 +1289,12 @@ class KorgexAgent:
                                     result={"verdict": "OBSERVED",
                                             "policy_hash": post["policy_hash"]},
                                     success=True, duration_ms=0, triggered_by=llm_seq)
+                        # Verifiable context compression: swap the model's view of
+                        # a large result for a compact view + retrievable handle.
+                        # AFTER record_tool_call above, so the sealed original is
+                        # intact and Retrieve round-trips it byte-for-byte.
+                        tool_result = self._compress_tool_result(
+                            tool_result, korg, llm_seq, tool_name=call["name"])
                         messages.append(self._tool_result_turn(call["id"], tool_result))
 
                 for call in serial_calls:
@@ -1362,6 +1472,12 @@ class KorgexAgent:
                                 success=True, duration_ms=0, triggered_by=llm_seq,
                             )
 
+                    # Verifiable context compression: swap the model's view of a
+                    # large result for a compact view + retrievable handle. Runs
+                    # AFTER record_tool_call + the LSP veto, so the sealed original
+                    # is intact and Retrieve round-trips it byte-for-byte.
+                    tool_result = self._compress_tool_result(
+                        tool_result, korg, llm_seq, tool_name=call["name"])
                     messages.append(self._tool_result_turn(call["id"], tool_result))
 
                 # If a ToolSearch this round staged deferred tools, refresh the
@@ -1647,7 +1763,13 @@ class KorgexAgent:
         """If the transcript is nearing the model's context window, compact it: the
         model writes a handoff summary and history becomes [head + recent raw turns
         + summary]. Returns the (possibly) compacted list; a no-op or any failure
-        returns the original. Records a `compaction` ledger event when it fires."""
+        returns the original. Records a `compaction` ledger event when it fires.
+
+        Cache-aware: the provider-cached leading prefix is never rewritten (rewriting
+        it busts the cache), and when a cache is present we only force compaction if
+        the projected savings beat the cache-read discount. With NO cache state
+        (self._last_cache all-zero — the default) this degrades to the size-only
+        behavior, so existing runs are unaffected."""
         from src import compaction as _CP
         limit = _CP.context_window_for(self.model)
         if not _CP.should_compact(messages, limit):
@@ -1655,8 +1777,46 @@ class KorgexAgent:
         # OpenAI-shaped history leads with a system message to preserve as head;
         # Anthropic carries system out-of-band, so head is empty.
         head = messages[:1] if (messages and messages[0].get("role") == "system") else []
-        history = messages[len(head):]
+
+        # FROZEN PREFIX: how many leading turns the provider has cached. Extend the
+        # head to cover them so compaction never rewrites the cached prefix.
+        cache_read = self._last_cache.get("cache_read", 0)
+        cache_creation = self._last_cache.get("cache_creation", 0)
+        frozen = _cc.update_frozen_prefix(
+            messages, cache_read, lambda m: _CP.estimate_tokens(m))
+        head_len = max(len(head), frozen)
+        head = messages[:head_len]
+        history = messages[head_len:]
         before = _CP.estimate_tokens(messages)
+        recent_budget = int(limit * 0.25)  # keep ~a quarter of the window as raw recent turns
+
+        # COST-MODEL GATE (only when a cache exists): estimate the savings from a dry
+        # rebuild (a tiny placeholder summary stands in for the real one — the recent
+        # budget dominates the size) and skip if busting the cache costs more than it
+        # saves. Computed BEFORE the expensive summary call so we never pay for a
+        # summary we'd discard.
+        recent = _CP._recent_within_budget(history, recent_budget)
+        projected = _CP.estimate_tokens(list(head) + recent) + 50  # +~summary
+        reclaimed = max(0, before - projected)  # tokens compaction would reclaim
+        savings_fraction = reclaimed / before if before else 0.0  # recorded on the event
+        if cache_read > 0:
+            min_cached = self._min_cached_tokens()
+            if not _cc.should_force_compaction(
+                    reclaimed, cache_read,
+                    _cc.discount_for(self.provider), min_cached):
+                korg.record_tool_call(
+                    tool_name="compaction",
+                    args={"model": self.model, "trigger_tokens": before, "limit": limit},
+                    result={"tokens_before": before, "tokens_after": before,
+                            "turns_before": len(messages), "turns_after": len(messages),
+                            "cache_read_before": cache_read,
+                            "cache_creation_before": cache_creation,
+                            "frozen_prefix_turns": frozen,
+                            "savings_fraction": round(savings_fraction, 4),
+                            "decision_reason": "cache_cheaper"},
+                    success=True, duration_ms=0, triggered_by=prompt_seq,
+                )
+                return messages
 
         def _summarize(hist):
             prompt = _CP.SUMMARY_PROMPT + "\n\n--- conversation ---\n" + "\n".join(
@@ -1666,7 +1826,6 @@ class KorgexAgent:
                               system_prompt="You write terse, faithful handoff summaries.")
             return self._extract_final_text(resp)
 
-        recent_budget = int(limit * 0.25)  # keep ~a quarter of the window as raw recent turns
         out = _CP.compact_messages(head, history, summarize=_summarize,
                                    recent_budget_tokens=recent_budget)
         if out is not messages and _CP.estimate_tokens(out) < before:
@@ -1674,11 +1833,25 @@ class KorgexAgent:
                 tool_name="compaction",
                 args={"model": self.model, "trigger_tokens": before, "limit": limit},
                 result={"tokens_before": before, "tokens_after": _CP.estimate_tokens(out),
-                        "turns_before": len(messages), "turns_after": len(out)},
+                        "turns_before": len(messages), "turns_after": len(out),
+                        "cache_read_before": cache_read,
+                        "cache_creation_before": cache_creation,
+                        "frozen_prefix_turns": frozen,
+                        "savings_fraction": round(savings_fraction, 4),
+                        "decision_reason": "compacted"},
                 success=True, duration_ms=0, triggered_by=prompt_seq,
             )
             return out
         return messages
+
+    def _min_cached_tokens(self) -> int:
+        """Floor of cached tokens below which compaction never bothers busting the
+        cache (the saving is too small to matter). $KORGEX_MIN_CACHED_TOKENS overrides
+        the default (~one cache block)."""
+        try:
+            return int(os.environ.get("KORGEX_MIN_CACHED_TOKENS", "1024"))
+        except (TypeError, ValueError):
+            return 1024
 
     def _edit_policy_block(self, call: dict, korg, llm_seq):
         """Edit-approval gate. For a file-mutating tool: consult the policy, record

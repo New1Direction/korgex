@@ -566,6 +566,19 @@ register_user_tool("browser_audit",
     {"name": "url", "type": "string", "description": "The http(s) URL to audit", "required": True},
 ], exposure="deferred")
 
+register_user_tool("Retrieve",
+    "Pull the FULL, exact original of a tool result you compressed away. When a "
+    "tool result comes back marked {\"_compressed\": true, ...} it carries a "
+    "\"_ref\" handle like \"sha256:abc123…\" — the full output was sealed in the "
+    "tamper-evident ledger blob store and replaced in your view with a short "
+    "summary. Pass that ref here to get the EXACT bytes back, sha256-verified. "
+    "Use it the moment you need a detail the compact view dropped (a specific "
+    "line, value, or section). Returns {verified, sha256, size_bytes, content}.", [
+    {"name": "ref", "type": "string",
+     "description": "The sha256:.. handle from a compressed tool result (the \"_ref\" field).",
+     "required": True},
+], handler_name="retrieve_blob", exposure="direct")
+
 
 _TOOL_ROUTING = {
     "Read":  {"handler": "tool_read_file",                 "module": "src.tools_impl",
@@ -582,6 +595,7 @@ _TOOL_ROUTING = {
     "Glob":  {"handler": "tool_list_files",                "module": "src.tools_impl",
               "param_map": {"path": "path"}},
     "Recall": {"handler": "tool_recall",                   "module": "src.recall"},
+    "Retrieve": {"handler": "tool_retrieve_blob",          "module": "src.tools_impl"},
     "WebFetch": {"handler": "tool_web_fetch",              "module": "src.web_tools"},
     "WebSearch": {"handler": "tool_web_search",            "module": "src.web_tools"},
     "BusSend": {"handler": "tool_bus_send",                "module": "src.tools_impl",

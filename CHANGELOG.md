@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Verifiable context compression.** Large tool results no longer flood the model's context. The full result is sealed once as a hash-chained content-ref (sha256) and the model instead sees a compact, structure-aware view (JSON / Python / text aware) plus a `Retrieve(ref)` tool that returns the exact original bytes, sha256-verified — nothing is lost, only deferred. Credentials are redacted *before* sealing, so a secret in tool output never reaches the (shareable) blob store or the model view. Each compression is a `context.compress` ledger fact chained to the call that produced it, so `korgex trace`/`verify` prove what was folded away and that the original is recoverable.
+- **Cache-aware compaction.** Compaction and provider prompt-caching used to work against each other: rewriting the cached prefix busts the cache for zero benefit. Compaction now (a) never rewrites the provider-cached leading turns (the "frozen prefix") and (b) only forces a rebuild when the tokens it reclaims actually beat the one-time cost of busting the cache — absolute token economics with a per-provider cache-read discount, not a dimensionally-wrong fraction test that effectively disabled compaction on warm Anthropic sessions. The decision (fire or skip, and why) is recorded on the compaction ledger event (`cache_read_before`, `frozen_prefix_turns`, `savings_fraction`, `decision_reason`).
+
 ## [0.14.1] — 2026-06-02
 
 ### Added
