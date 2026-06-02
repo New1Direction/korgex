@@ -30,6 +30,7 @@ korgex — commands
   /help  /?       this help
   /exit  /quit    leave (also Ctrl-D)
 anything else is a message to the agent.
+tip: mention files inline with @path — e.g. "refactor @src/auth.py" inlines it.
 """
 
 
@@ -392,6 +393,18 @@ class Repl:
         streamed reply prints directly to the terminal and stays put. (No
         patch_stdout — nothing useful mid-turn, and it would mangle the \\r spinner.)"""
         agent = self._ensure_agent()
+        # @-file mentions: inline any @path the user referenced so "refactor
+        # @src/a.py to use @src/b.py" just works. The model gets the file bodies;
+        # the rewind label and skill-learning keep the ORIGINAL typed text.
+        prompt = text
+        try:
+            from src import mentions as _MEN
+            exp = _MEN.expand_mentions(text, cwd=self.repo_root)
+            if exp["attached"]:
+                self._print("· included " + ", ".join("@" + p for p in exp["attached"]))
+                prompt = exp["text"]
+        except Exception:
+            pass
         # Track this prompt as a rewind point and snapshot start-of-turn file state.
         self._turn += 1
         if self._rewind is None:
@@ -401,7 +414,7 @@ class Repl:
         _turn = self._turn
         agent._rewind_sink = lambda path, pre: self._rewind.record_pre(_turn, path, pre)
         try:
-            result = agent.run_task(text)
+            result = agent.run_task(prompt)
             print()  # newline so the next turn's prompt starts clean
             summary = (result or {}).get("result", "") if isinstance(result, dict) else ""
             self._learn_from_turn(text, summary)  # background; never blocks
