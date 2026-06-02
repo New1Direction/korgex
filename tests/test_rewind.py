@@ -5,7 +5,59 @@ Each turn, the first time a file is touched we record its START-of-turn content
 state it had when turn N began — restoring content, or deleting files that were
 created at/after N. The restore computation is pure; the writer is injected.
 """
-from src.rewind import RewindLog, compute_restore
+from src.rewind import (
+    RewindLog,
+    compute_restore,
+    line_delta,
+    render_change_summary,
+    summarize_changes,
+)
+
+
+# ── post-turn change summary (built on the same per-turn snapshots) ──────────
+
+class TestLineDelta:
+    def test_replace_counts_both_sides(self):
+        assert line_delta("a\nb\nc", "a\nX\nc") == (1, 1)
+
+    def test_pure_insert(self):
+        assert line_delta("a\nb", "a\nb\nc") == (1, 0)
+
+    def test_pure_delete(self):
+        assert line_delta("a\nb\nc", "a\nc") == (0, 1)
+
+    def test_created_file_is_all_additions(self):
+        assert line_delta(None, "a\nb") == (2, 0)
+
+    def test_deleted_file_is_all_removals(self):
+        assert line_delta("a\nb", None) == (0, 2)
+
+
+class TestSummarizeChanges:
+    def test_classifies_and_counts_each_file(self):
+        records = [("new.py", None), ("edit.py", "a\nb\nc"), ("gone.py", "x\ny")]
+        post = {"new.py": "a\nb", "edit.py": "a\nB\nc", "gone.py": None}
+        items = summarize_changes(records, read_fn=lambda p: post[p])
+        by = {it["path"]: it for it in items}
+        assert by["new.py"]["kind"] == "created" and by["new.py"]["added"] == 2
+        assert by["edit.py"] == {
+            "path": "edit.py", "kind": "modified", "added": 1, "removed": 1}
+        assert by["gone.py"]["kind"] == "deleted" and by["gone.py"]["removed"] == 2
+
+    def test_unchanged_files_are_dropped(self):
+        records = [("same.py", "a\nb")]
+        items = summarize_changes(records, read_fn=lambda p: "a\nb")
+        assert items == []   # no net change → not reported
+
+
+class TestRenderChangeSummary:
+    def test_empty_is_blank(self):
+        assert render_change_summary([]) == ""
+
+    def test_renders_counts_per_file(self):
+        out = render_change_summary([
+            {"path": "a.py", "kind": "modified", "added": 3, "removed": 1}])
+        assert "a.py" in out and "+3" in out and "-1" in out
 
 
 def test_record_pre_keeps_only_the_first_state_per_turn():

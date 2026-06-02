@@ -11,6 +11,7 @@ injected ``writer`` so it's testable without a real filesystem.
 """
 from __future__ import annotations
 
+import difflib
 import os
 from dataclasses import dataclass
 
@@ -31,6 +32,48 @@ def compute_restore(records, target_turn: int) -> dict:
         if turn >= target_turn and (path not in by_path or turn < by_path[path][0]):
             by_path[path] = (turn, pre)
     return {path: pre for path, (_t, pre) in by_path.items()}
+
+
+def line_delta(pre, post) -> tuple:
+    """(added, removed) line counts between two file states. ``None`` means the file
+    didn't exist (so created → all additions, deleted → all removals)."""
+    a = (pre or "").splitlines()
+    b = (post or "").splitlines()
+    added = removed = 0
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b).get_opcodes():
+        if tag == "replace":
+            removed += i2 - i1
+            added += j2 - j1
+        elif tag == "delete":
+            removed += i2 - i1
+        elif tag == "insert":
+            added += j2 - j1
+    return added, removed
+
+
+def summarize_changes(records, read_fn) -> list:
+    """Turn ``[(path, pre_content)]`` + a ``read_fn(path)->current_or_None`` into a
+    per-file change list: ``[{path, kind, added, removed}]``. ``kind`` is
+    created/deleted/modified; files with no net change are dropped."""
+    out = []
+    for path, pre in records:
+        post = read_fn(path)
+        added, removed = line_delta(pre, post)
+        if added == 0 and removed == 0:
+            continue
+        kind = "created" if pre is None else ("deleted" if post is None else "modified")
+        out.append({"path": path, "kind": kind, "added": added, "removed": removed})
+    return out
+
+
+def render_change_summary(items) -> str:
+    """A one-line ``✎ changed N file(s): path (+a -b), …`` summary. Empty when
+    nothing changed, so the caller can skip printing."""
+    if not items:
+        return ""
+    parts = [f"{it['path']} (+{it['added']} -{it['removed']})" for it in items]
+    n = len(items)
+    return f"✎ changed {n} file{'s' if n != 1 else ''}: " + ", ".join(parts)
 
 
 def _default_writer(path: str, pre_content):
@@ -65,6 +108,11 @@ class RewindLog:
             return
         self._seen.add(key)
         self._records.append((turn, path, pre_content))
+
+    def records_for_turn(self, turn: int) -> list:
+        """The ``(path, pre_content)`` snapshots captured during `turn`, in order —
+        the basis for that turn's change summary."""
+        return [(p, c) for (t, p, c) in self._records if t == turn]
 
     def points(self) -> list:
         """Turns that have snapshots, in order, with their prompts."""
