@@ -27,6 +27,7 @@ korgex — commands
   /tasks          show the agent's live task checklist for this conversation
   /jobs           list background shell tasks (Bash background=true) + their status
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
+  /version        show korgex's running version
   /diff [n]       show colored diffs of what changed in the last turn (or turn n)
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
@@ -81,6 +82,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("loop", rest or None)
         if head == "/diff":
             return Command("diff", rest or None)
+        if head == "/version":
+            return Command("version")
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
 
@@ -88,7 +91,7 @@ def parse_repl_input(line: str) -> Command:
 # The real command vocabulary — used to suggest a fix for a mistyped command.
 KNOWN_COMMANDS = [
     "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "loop",
-    "clear", "help", "exit", "quit",
+    "version", "clear", "help", "exit", "quit",
 ]
 
 
@@ -417,6 +420,9 @@ class Repl:
         if cmd.kind == "diff":
             self._show_diff(cmd.arg)
             return True
+        if cmd.kind == "version":
+            self._show_version()
+            return True
         if cmd.kind == "rewind":
             self._do_rewind(cmd.arg)
             return True
@@ -521,6 +527,11 @@ class Repl:
                 self._print(line + "   → /diff to view")
         except Exception:
             pass
+
+    def _show_version(self):
+        """/version — show the current running version of korgex."""
+        from src.cli import _get_version
+        self._print(f"korgex version {_get_version()}")
 
     def _show_diff(self, arg=None):
         """/diff [n] — show colored diffs for the files changed in the last turn
