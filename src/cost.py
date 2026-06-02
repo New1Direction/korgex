@@ -30,7 +30,9 @@ _PRICES = [
     ("gemini-2.0-flash", 0.10, 0.40),
     ("gemini-pro", 1.25, 10.0),
     ("gemini-flash", 0.15, 0.60),
-    ("gemini", 0.30, 2.50),           # catch-all, last
+    ("gemini", 0.30, 2.50),
+    ("venice-uncensored", 0.50, 2.0),
+    ("venice", 0.50, 2.0),           # catch-all, last
     ("deepseek", 0.27, 1.10),
     ("grok-reasoning", 2.0, 80.0),
     ("grok", 2.0, 10.0),
