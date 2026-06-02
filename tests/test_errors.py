@@ -37,6 +37,17 @@ class TestHumanizeError:
         msg = E.humanize_error("You exceeded your current quota, please check your billing")
         assert "credit" in msg.lower() or "quota" in msg.lower() or "billing" in msg.lower()
 
+    def test_service_unavailable_suggests_retry_or_switch(self):
+        msg = E.humanize_error("Error 503: Service Unavailable")
+        assert "unavailable" in msg.lower()
+        assert "/model" in msg or "retry" in msg.lower()
+
+    def test_every_rule_message_is_clean_printable_text(self):
+        # Guard against corrupt/control bytes in a user-facing message — an em-dash
+        # once got mangled into \x1a\x14, and the substring assertions sailed past it.
+        for _needles, message in E._RULES:
+            assert message.isprintable(), f"non-printable chars in: {message!r}"
+
     def test_unknown_error_falls_through_to_original(self):
         msg = E.humanize_error("some totally novel failure xyz")
         assert "some totally novel failure xyz" in msg
