@@ -50,11 +50,23 @@ def _build_identity_block() -> dict:
     }
 
 
+# CodeAct framing — inserted into the prompt ONLY when the `python` action is
+# enabled (KORGEX_CODEACT_ENABLE, opt-in / default off), so we never advertise a
+# tool the model doesn't have. Kept here as a constant (braces would break an
+# f-string) and spliced in by _build_core_instructions_block.
+_CODEACT_FRAMING = "- Code is an action space. The `python` tool runs code in a persistent kernel where the governed tools are ALREADY-DEFINED functions — do NOT import them, just call them. They return the same result dicts the tools return; compute on those directly. Signatures: `read_file(path)`→`{content, filepath, size}`; `write_file(path, content)`; `edit(path, old, new)`; `bash(cmd)`→`{stdout, stderr, exit_code}`; `glob(directory)` lists a DIRECTORY's files (pass a directory path, NOT a `*`/`**` pattern); `grep(pattern, path)`→`{matches, total}` (use this to search file contents); `web_search(q)`, `web_fetch(url)`, `Retrieve(ref)`, and `call_tool(name, **kwargs)` for any other tool. For multi-step work, prefer ONE `python` action that composes these with loops and variables over many separate tool round-trips; variables, imports, and defs persist across your python actions."
+
+
+def _codeact_enabled() -> bool:
+    return os.environ.get("KORGEX_CODEACT_ENABLE", "off").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def _build_core_instructions_block() -> dict:
-    """Block 2: Core instructions — always present, cacheable (~7K chars)."""
-    return {
-        "type": "text",
-        "text": """
+    """Block 2: Core instructions — always present, cacheable (~7K chars).
+
+    The CodeAct `python` framing is spliced in only when CodeAct is enabled."""
+    _text = """
 You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 # System
@@ -92,8 +104,12 @@ Carefully consider reversibility and blast radius:
 - Use Agent for broad codebase exploration or multi-step tasks.
 - For simple lookups, use Glob or Grep directly.
 - If you discover unexpected state, investigate before deleting or overwriting.
-""".strip(),
-    }
+""".strip()
+    if _codeact_enabled():
+        _text = _text.replace(
+            "# Using your tools\n",
+            "# Using your tools\n" + _CODEACT_FRAMING + "\n", 1)
+    return {"type": "text", "text": _text}
 
 
 def _build_session_block(memory_text: str, workdir: str = None,

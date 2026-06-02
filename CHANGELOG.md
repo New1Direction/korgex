@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **CodeAct — code as the action space (opt-in, experimental).** Set `KORGEX_CODEACT_ENABLE=1` and the model gets a `python` action whose code calls every other tool as a pre-defined function (`read_file`, `bash`, `edit`, `glob`, `grep`, `web_search`, `Retrieve`, `call_tool(name, **kwargs)`). Code runs in a **persistent, fuel-metered subprocess kernel** — variables/imports/defs survive across actions, so the model composes multi-step work (loops, intermediate values) in one action instead of many round-trips. Each bridged sub-call routes through the **same governed `route_tool_call` path** (edit-policy, hard-block floor, ledger) and records its own event **chained under the code-action seq** — a nested, replayable, tamper-evident causal DAG that `korgex trace`/`why`/`verify` prove. Fuel: per-exec wall-time (kernel compute only — parent tool time doesn't count), `RLIMIT_AS` memory (POSIX), output caps; a timeout/crash resets the kernel without hanging the loop. **Off by default** — it executes arbitrary model-authored code (same trust as Bash), so it ships available-but-off to bake in real use first.
+
 ## [0.14.3] — 2026-06-02
 
 A patch over three bugs found dogfooding 0.14.2 on the wire — all green in the unit suite, broken when driving the real CLI.
