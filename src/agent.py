@@ -1698,10 +1698,11 @@ class KorgexAgent:
         korg = self.ledger if self.ledger is not None else _korg()
         code = (args or {}).get("code", "") or ""
 
-        # Honor the kill-switch even if the tool slipped through registration.
-        if os.environ.get("KORGEX_CODEACT_ENABLE", "on").strip().lower() \
+        # Honor the opt-in switch even if a "python" call slipped through (default
+        # off — CodeAct is opt-in via KORGEX_CODEACT_ENABLE=1).
+        if os.environ.get("KORGEX_CODEACT_ENABLE", "off").strip().lower() \
                 not in ("1", "true", "yes", "on"):
-            return {"error": "CodeAct disabled (KORGEX_CODEACT_ENABLE is off)"}
+            return {"error": "CodeAct disabled (set KORGEX_CODEACT_ENABLE=1 to enable)"}
 
         # 1. Anchor the code action so children nest under it. record_user_prompt is
         #    synchronous on every client; guard the (shouldn't-happen) None so we

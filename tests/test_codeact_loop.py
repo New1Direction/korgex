@@ -118,6 +118,7 @@ def _force_local_ledger(monkeypatch):
     monkeypatch.setenv("KORGEX_LEDGER", "local")
     # Deterministic compression threshold for the large-result tests.
     monkeypatch.setenv("KORGEX_COMPRESS_THRESHOLD", "256")
+    monkeypatch.setenv("KORGEX_CODEACT_ENABLE", "1")  # CodeAct is opt-in (default off)
     yield
 
 
@@ -133,16 +134,42 @@ def _drive(agent, prompt="do it"):
 # ── 1. registration ──────────────────────────────────────────────────────────
 
 def test_python_registered_direct_with_code_param_and_no_routing_row():
-    assert "python" in USER_TOOLS
-    t = USER_TOOLS["python"]
-    assert t["exposure"] == "direct"
-    assert t["input_schema"]["required"] == ["code"]
-    assert "python" in visible_tool_names()
-    # Intercepted in _dispatch_call — a routing row would be dead code / double-dispatch.
-    assert "python" not in _TOOL_ROUTING
-    # Action-space framing is in the description.
-    assert "action" in t["description"].lower()
-    assert "read_file" in t["description"]
+    # CodeAct is OPT-IN (default off), and registration is import-time gated, so
+    # register on demand for this assertion and pop it after (register_user_tool only
+    # mutates USER_TOOLS) so the global registry isn't polluted for other tests.
+    from src.tool_abstraction import register_codeact_action
+    register_codeact_action()
+    try:
+        assert "python" in USER_TOOLS
+        t = USER_TOOLS["python"]
+        assert t["exposure"] == "direct"
+        assert t["input_schema"]["required"] == ["code"]
+        assert "python" in visible_tool_names()
+        # Intercepted in _dispatch_call — a routing row would be dead code / double-dispatch.
+        assert "python" not in _TOOL_ROUTING
+        # Action-space framing is in the description.
+        assert "action" in t["description"].lower()
+        assert "read_file" in t["description"]
+    finally:
+        USER_TOOLS.pop("python", None)
+
+
+def test_codeact_framing_is_conditional_on_enable(monkeypatch):
+    # The system prompt must advertise the `python` action ONLY when CodeAct is
+    # enabled — otherwise the model is told about a tool it doesn't have and wastes
+    # turns emitting refused python actions.
+    from src import system_prompt as SP
+
+    def prompt_text():
+        out = SP.build_system_prompt()
+        if isinstance(out, str):
+            return out
+        return " ".join(b.get("text", "") for b in out if isinstance(b, dict))
+
+    monkeypatch.setenv("KORGEX_CODEACT_ENABLE", "0")
+    assert "Code is an action space" not in prompt_text()
+    monkeypatch.setenv("KORGEX_CODEACT_ENABLE", "1")
+    assert "Code is an action space" in prompt_text()
 
 
 # ── 2. dispatch + nested DAG (real kernel, real bridge) ───────────────────────

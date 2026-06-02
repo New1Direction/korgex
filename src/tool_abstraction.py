@@ -585,10 +585,12 @@ register_user_tool("Retrieve",
 # governed tools are PRE-DEFINED functions. It is intercepted in Agent._dispatch_call
 # (it runs the kernel + bridges each sub-call back through route_tool_call), so it
 # deliberately has NO _TOOL_ROUTING row — a routing row would be dead code and could
-# double-dispatch. A kill-switch ($KORGEX_CODEACT_ENABLE=0/false/no/off) skips
-# registration entirely (mirrors the KORGEX_BROWSER_EVAL opt-in-feature precedent).
+# double-dispatch. OPT-IN: $KORGEX_CODEACT_ENABLE must be 1/true/yes/on to expose
+# the action (default off — CodeAct runs arbitrary model-authored code, so it ships
+# available-but-off and bakes in real use before any on-by-default flip; mirrors the
+# KORGEX_BROWSER_EVAL opt-in-feature precedent).
 _CODEACT_ENABLED = (
-    os.environ.get("KORGEX_CODEACT_ENABLE", "on").strip().lower()
+    os.environ.get("KORGEX_CODEACT_ENABLE", "off").strip().lower()
     in ("1", "true", "yes", "on")
 )
 
@@ -610,7 +612,12 @@ Large tool results come back as a compact view plus a 'sha256:..' _ref — call 
 A timeout, crash, or uncaught error is recoverable: the kernel resets and tells you what happened (a reset WIPES in-session state, so re-establish any variables you relied on) — read the error, fix it, and retry. You cannot call python/Agent/Orchestrate from inside a python action (no nested kernels or subagent swarms).
 """.strip()
 
-if _CODEACT_ENABLED:
+def register_codeact_action() -> None:
+    """Register the `python` CodeAct action (direct exposure, single `code` param).
+
+    Called at import when KORGEX_CODEACT_ENABLE is on. Exposed as a function so tests
+    — which can only set the opt-in flag at RUNTIME, after this module is imported —
+    can register it on demand (and pop "python" from USER_TOOLS to clean up)."""
     register_user_tool("python", _PYTHON_ACTION_DESC, [
         {"name": "code", "type": "string",
          "description": "Python source to execute in the persistent CodeAct kernel. "
@@ -618,6 +625,10 @@ if _CODEACT_ENABLED:
                         "grep/web_search/web_fetch/Retrieve/call_tool) directly.",
          "required": True},
     ], exposure="direct")
+
+
+if _CODEACT_ENABLED:
+    register_codeact_action()
 
 
 _TOOL_ROUTING = {

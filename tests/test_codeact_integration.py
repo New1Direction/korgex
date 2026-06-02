@@ -101,6 +101,7 @@ def _offline_local_ledger(monkeypatch):
     # compression threshold low so large-result behavior is deterministic.
     monkeypatch.setenv("KORGEX_LEDGER", "local")
     monkeypatch.setenv("KORGEX_COMPRESS_THRESHOLD", "256")
+    monkeypatch.setenv("KORGEX_CODEACT_ENABLE", "1")  # CodeAct is opt-in (default off)
     yield
 
 
