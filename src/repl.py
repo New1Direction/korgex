@@ -8,6 +8,7 @@ that's hard to unit-test (a live readline loop + a network stream) stays minimal
 """
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 
@@ -93,6 +94,10 @@ class Repl:
         self.cfg = cfg if cfg is not None else _config.load_config()
         self.out = out or sys.stdout
         self.model, self.api_key = _config.resolve_model_and_key(None, self.cfg)
+        # The project root = the launch dir (matches the lazily-built agent's
+        # default). Used by /skills, @-mentions, skill learning + the curator —
+        # all of which silently no-op'd while this was unset.
+        self.repo_root = os.getcwd()
         self._agent = None  # lazy: built on first turn
         self._session_obj = None  # lazy prompt_toolkit session (bottom-anchored input)
         self._turn = 0           # user-prompt counter, for rewind points

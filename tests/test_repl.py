@@ -87,6 +87,17 @@ def test_slash_loop_parses_with_and_without_task():
     assert R.parse_repl_input("/loop").arg is None
 
 
+def test_repl_has_repo_root_set_to_cwd():
+    # Regression: self.repo_root is referenced by /skills, @-mentions, skill
+    # learning and the curator. It was never assigned — so those paths hit an
+    # AttributeError (silently, where wrapped), and skills never actually learned.
+    import io
+    import os as _os
+
+    r = R.Repl(out=io.StringIO())
+    assert r.repo_root == _os.getcwd()
+
+
 def test_mcp_configured_reflects_config_file(tmp_path, monkeypatch):
     import io
     import json
