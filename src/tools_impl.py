@@ -6,19 +6,19 @@ The complete tool handler surface for korgex.
 import os
 import json
 import subprocess
-import shutil
+
 import shlex
 import tempfile
 import threading
-from pathlib import Path
+
 from src.tool_base import register_tool, ToolParam
 from src.sandbox import SandboxManager
 from src.github_api import (
     create_pr, list_prs, get_pr_comments, reply_to_pr_comment,
-    create_issue, label_issue, get_repo_info, init_from_cli
+    create_issue,   init_from_cli
 )
 from src.swarm import AgentSwarm, SubTask
-from src.diff_engine import DiffEngine
+
 from src.self_healing import TDDHealer, extract_traceback_info
 from src.dependency_graph import DependencyAnalyzer
 from src.profiler import PerformanceProfiler
@@ -79,7 +79,10 @@ def tool_list_files(path: str = None, context: dict = None):
     if not os.path.isdir(target):
         return {"error": f"Directory not found: {path or '(root)'}"}
     
-    result = _run_bash(f"ls -a -1F --group-directories-first {shlex.quote(target)}")
+    # `-a -1F` is portable across BSD (macOS) and GNU ls; the GNU-only
+    # `--group-directories-first` makes BSD ls error out and return nothing,
+    # which silently made every directory look empty on macOS.
+    result = _run_bash(f"ls -a -1F {shlex.quote(target)}")
     return {
         "files": result["stdout"].splitlines(),
         "path": path or "(root)",
@@ -117,11 +120,16 @@ def tool_write_file(filepath: str, content: str, context: dict = None):
     if status == "stale":
         return {"error": reason, "verdict": "stale_file"}
     os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
+    from src.text_safety import strip_control_chars
+    content, _stripped = strip_control_chars(content)  # never write control-byte garbage
     try:
         with open(full_path, "w") as f:
             f.write(content)
         edit_freshness.record_read(full_path)  # our write is the new baseline
-        return {"result": "File written successfully", "filepath": filepath, "size": len(content)}
+        out = {"result": "File written successfully", "filepath": filepath, "size": len(content)}
+        if _stripped:
+            out["sanitized"] = f"removed {_stripped} stray control char(s)"
+        return out
     except Exception as e:
         return {"error": str(e)}
 
@@ -178,6 +186,8 @@ def tool_replace_with_git_merge_diff(filepath: str, merge_diff: str, context: di
     if changes == 0:
         return {"error": "No changes applied. Check SEARCH/REPLACE format."}
 
+    from src.text_safety import strip_control_chars
+    modified, _stripped = strip_control_chars(modified)  # never write control-byte garbage
     with open(full_path, "w") as f:
         f.write(modified)
     edit_freshness.record_read(full_path)  # our edit is the new baseline
@@ -185,6 +195,8 @@ def tool_replace_with_git_merge_diff(filepath: str, merge_diff: str, context: di
     result = {"result": f"Applied {changes} change(s)", "filepath": filepath}
     if fuzzy_notes:
         result["note"] = "whitespace-tolerant match used: " + "; ".join(fuzzy_notes)
+    if _stripped:
+        result["sanitized"] = f"removed {_stripped} stray control char(s)"
     return result
 
 
@@ -316,7 +328,7 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
         tb = extract_traceback_info(result.get("output", ""))
         result["traceback"] = tb
     
-    return result
+    
 
 
 @register_tool("google_search", "Online Google search to retrieve up-to-date information.", [
@@ -497,7 +509,7 @@ def tool_view_image(url: str, context: dict = None):
         from src.vision import VisionEngine
         result = VisionEngine.analyze_image(tmp_path)
         result["source_url"] = url
-        return result
+        
     except Exception as e:
         return {"error": f"Failed to load image from {url}: {e}"}
 
@@ -629,8 +641,8 @@ def tool_overwrite_file_with_block(filepath: str, content: str, context: dict = 
 ])
 def tool_github_create_pr(owner: str, repo: str, title: str, body: str, head: str, base: str = "main", context: dict = None):
     _ensure_github()
-    result = create_pr(owner, repo, title, body, head, base)
-    return result
+    create_pr(owner, repo, title, body, head, base)
+    
 
 
 @register_tool("github_list_prs", "Lists pull requests for a repository.", [
@@ -676,7 +688,7 @@ def tool_github_reply_to_pr_comment(owner: str, repo: str, comment_id: str, repl
 ])
 def tool_github_create_issue(owner: str, repo: str, title: str, body: str = "", labels: str = "", context: dict = None):
     _ensure_github()
-    label_list = [l.strip() for l in labels.split(",") if l.strip()] if labels else None
+    label_list = [label.strip() for label in labels.split(",") if label.strip()] if labels else None
     result = create_issue(owner, repo, title, body, label_list)
     return result
 
@@ -848,10 +860,10 @@ def tool_memory_list(mem_type: str = None, context: dict = None):
     ToolParam("plan_file", "STRING", "Path to write the plan file to.", required=True),
 ])
 def tool_enter_plan_mode(plan_file: str, context: dict = None):
-    from src.mode_schemas import ModeStateMachine
+    
     from src.model_router import on_mode_change
-    machine = ModeStateMachine("execute")
-    result = machine.enter_mode("plan")
+    
+    
     on_mode_change("plan")
     return {
         "mode": "plan",
@@ -866,10 +878,10 @@ def tool_enter_plan_mode(plan_file: str, context: dict = None):
     ToolParam("plan_file", "STRING", "Path to the plan file you wrote.", required=True),
 ])
 def tool_exit_plan_mode(plan_file: str, context: dict = None):
-    from src.mode_schemas import ModeStateMachine
+    
     from src.model_router import on_mode_change
-    machine = ModeStateMachine("plan")
-    result = machine.exit_mode()
+    
+    
     on_mode_change("execute")
     return {
         "mode": "execute",

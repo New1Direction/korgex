@@ -22,7 +22,7 @@ from src.tool_abstraction import USER_TOOLS, route_tool_call
 import src.tools_impl  # noqa: F401
 from src.korg_ledger import get_default_client as _korg
 from src import edit_policy as _EP
-from src.plugins import PluginRegistry
+from src.plugins import PluginRegistry, default_plugin_dirs, load_plugins
 from src.hooks import load_hooks, run_event
 from src.workspace import path_within
 from src.guardrails import is_protected
@@ -110,8 +110,11 @@ def _resolve_params(mode: str) -> dict:
 def _resolve_model(model: str, mode: str) -> str:
     """Pick the active model.
 
-    Precedence: explicit --model wins, then --mode → MODE_MODEL_MAP,
-    then KORGEX_MODEL env, then default Sonnet 4.6.
+    Precedence: explicit --model → --mode → the configured default (`korgex setup`)
+    → KORGEX_MODEL env → built-in Sonnet 4.6. Consulting config.default_model here
+    is load-bearing: without it, `korgex "task"` ignored the model the user picked
+    in setup and crashed with a provider/key mismatch (e.g. an OpenRouter user's key
+    sent to Anthropic as x-api-key → 401).
     """
     if model:
         return model
@@ -122,8 +125,13 @@ def _resolve_model(model: str, mode: str) -> str:
             if key and key in DEFAULT_MODELS:
                 return DEFAULT_MODELS[key].model_id
         except Exception:
-            pass  # fall through to env/default
-    return os.environ.get("KORGEX_MODEL", "claude-sonnet-4-6")
+            pass  # fall through to config/env/default
+    try:
+        from src.config import load_config
+        cfg_default = load_config().default_model
+    except Exception:
+        cfg_default = None  # config missing/unreadable → fall through, never crash
+    return cfg_default or os.environ.get("KORGEX_MODEL") or "claude-sonnet-4-6"
 
 
 class KorgexAgent:
@@ -222,6 +230,13 @@ class KorgexAgent:
         # (on_user_prompt / pre_tool / post_tool / on_stop). Empty → zero overhead;
         # a plugin that raises is isolated and can never break the loop.
         self.plugins = PluginRegistry()
+        # Drop-in user plugins: any *.py in ~/.korgex/plugins or <repo>/.korgex/plugins
+        # that defines register(registry) wires its hooks here. Failures are isolated
+        # (recorded, never fatal), so a broken plugin can't stop the agent booting.
+        try:
+            self._loaded_plugins = load_plugins(self.plugins, default_plugin_dirs(self.repo_root))
+        except Exception:
+            self._loaded_plugins = []
 
         # Opt-in LSP auto-diagnostics: after a Write/Edit, a language server checks
         # the file and its findings are folded back into the edit's result, so the

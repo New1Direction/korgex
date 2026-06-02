@@ -27,6 +27,8 @@ korgex — commands
   /tasks          show the agent's live task checklist for this conversation
   /jobs           list background shell tasks (Bash background=true) + their status
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
+  /version        show korgex's running version
+  /diff [n]       show colored diffs of what changed in the last turn (or turn n)
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -78,8 +80,31 @@ def parse_repl_input(line: str) -> Command:
             return Command("rewind", rest or None)
         if head == "/loop":
             return Command("loop", rest or None)
+        if head == "/diff":
+            return Command("diff", rest or None)
+        if head == "/version":
+            return Command("version")
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
+
+
+# The real command vocabulary — used to suggest a fix for a mistyped command.
+KNOWN_COMMANDS = [
+    "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "loop",
+    "version", "clear", "help", "exit", "quit",
+]
+
+
+def suggest_command(typed: str, known=None) -> str | None:
+    """Closest real command to a mistyped one (``/skils`` → ``skills``), or None
+    when nothing is close enough."""
+    import difflib
+
+    typed = (typed or "").strip().lstrip("/")
+    if not typed:
+        return None
+    matches = difflib.get_close_matches(typed, known or KNOWN_COMMANDS, n=1, cutoff=0.6)
+    return matches[0] if matches else None
 
 
 # Suggested models per provider — suggestions, NOT an allowlist (we're not locked
@@ -128,7 +153,8 @@ class Repl:
         try:
             answer = input("model> ")
         except (EOFError, KeyboardInterrupt):
-            self._print(""); return
+            self._print("")
+            return
         choice = _MS.pick(rows, answer)
         if choice:
             self._switch_model(choice)
@@ -391,6 +417,12 @@ class Repl:
         if cmd.kind == "shell":
             self._run_shell(cmd.arg)
             return True
+        if cmd.kind == "diff":
+            self._show_diff(cmd.arg)
+            return True
+        if cmd.kind == "version":
+            self._show_version()
+            return True
         if cmd.kind == "rewind":
             self._do_rewind(cmd.arg)
             return True
@@ -398,7 +430,11 @@ class Repl:
             self._run_loop(cmd.arg)
             return True
         if cmd.kind == "unknown":
-            self._print(f"unknown command: /{cmd.arg} — try /help")
+            hint = suggest_command(cmd.arg)
+            if hint:
+                self._print(f"unknown command: /{cmd.arg} — did you mean /{hint}?  (/help for all)")
+            else:
+                self._print(f"unknown command: /{cmd.arg} — try /help")
             return True
         if cmd.kind == "turn":
             self._run_turn(cmd.arg)
@@ -422,6 +458,9 @@ class Repl:
             if exp["attached"]:
                 self._print("· included " + ", ".join("@" + p for p in exp["attached"]))
                 prompt = exp["text"]
+            if exp.get("missed"):
+                self._print("· skipped " + ", ".join("@" + p for p in exp["missed"])
+                            + " — not found")
         except Exception:
             pass
         # Track this prompt as a rewind point and snapshot start-of-turn file state.
@@ -441,7 +480,8 @@ class Repl:
         except KeyboardInterrupt:
             self._print("\n(interrupted)")
         except Exception as e:  # never let one bad turn kill the session
-            self._print(f"[error] {e}")
+            from src.errors import humanize_error
+            self._print(f"⚠ {humanize_error(e)}")
 
     def _run_shell(self, cmd: str):
         """`!cmd` — run a shell command the USER typed (a terminal escape), in the
@@ -484,9 +524,39 @@ class Repl:
             line = render_change_summary(
                 summarize_changes(self._rewind.records_for_turn(turn), _read))
             if line:
-                self._print(line)
+                self._print(line + "   → /diff to view")
         except Exception:
             pass
+
+    def _show_version(self):
+        """/version — show the current running version of korgex."""
+        from src.cli import _get_version
+        self._print(f"korgex version {_get_version()}")
+
+    def _show_diff(self, arg=None):
+        """/diff [n] — show colored diffs for the files changed in the last turn
+        (or turn n). Built from the rewind snapshots vs the files on disk."""
+        if self._rewind is None:
+            self._print("no changes yet — the agent hasn't edited anything this session")
+            return
+        try:
+            turn = int(arg) if (arg or "").strip().isdigit() else self._turn
+        except (TypeError, ValueError):
+            turn = self._turn
+        records = self._rewind.records_for_turn(turn)
+        if not records:
+            self._print(f"no file changes recorded for turn {turn}")
+            return
+
+        def _read(p):
+            try:
+                return open(p).read()
+            except OSError:
+                return None
+
+        from src.diff_view import render_turn_diffs
+        out = render_turn_diffs(records, _read, color=True)
+        self._print(out or f"no net changes in turn {turn}")
 
     def _open_task_count(self) -> int:
         led = getattr(self._agent, "_task_ledger", None)

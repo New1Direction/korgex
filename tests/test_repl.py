@@ -80,6 +80,34 @@ def test_slash_rewind_parses():
     assert R.parse_repl_input("/rewind 2").arg == "2"
 
 
+def test_slash_version_parses():
+    assert R.parse_repl_input("/version").kind == "version"
+    assert R.parse_repl_input("/version").arg is None
+
+
+def test_suggest_command_finds_close_typos():
+    assert R.suggest_command("skils") == "skills"
+    assert R.suggest_command("hlep") == "help"
+    assert R.suggest_command("retwind") == "rewind"
+
+
+def test_suggest_command_returns_none_for_nonsense():
+    assert R.suggest_command("xyzzy") is None
+    assert R.suggest_command("") is None
+
+
+def test_known_commands_covers_the_real_set():
+    # the suggester's vocabulary must include the actual commands
+    for c in ("model", "plan", "skills", "diff", "loop", "rewind", "help", "exit"):
+        assert c in R.KNOWN_COMMANDS
+
+
+def test_slash_diff_parses():
+    assert R.parse_repl_input("/diff").kind == "diff"
+    assert R.parse_repl_input("/diff").arg is None
+    assert R.parse_repl_input("/diff 3").arg == "3"
+
+
 def test_slash_loop_parses_with_and_without_task():
     cmd = R.parse_repl_input("/loop build the parser")
     assert cmd.kind == "loop"

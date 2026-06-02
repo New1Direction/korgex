@@ -109,6 +109,17 @@ def _start_background_server():
 
 # ── Subcommands ──────────────────────────────────────────────────────────
 
+def cmd_skills():
+    """Print all available skills and their descriptions."""
+    from src.skills import load_skills, default_skill_roots
+    # Pass cwd so project-local .korgex/skills are listed too, not just
+    # built-in + user-global.
+    skill_registry = load_skills(default_skill_roots(os.getcwd()))
+    for name in skill_registry.names():
+        skill = skill_registry.get(name)
+        print(f"{skill.name}: {skill.description}")
+    return 0
+
 def cmd_default():
     """Default: start backend + open VS Code with the sidecar."""
     _log("Korgex — starting backend...")
@@ -686,6 +697,7 @@ SUBCOMMANDS = {
     "mcp":               cmd_mcp,                 # add/list/remove MCP servers
     "mcp-server":        cmd_mcp_server,
     "setup":             cmd_setup,               # connect model providers
+    "skills":            cmd_skills,              # print available skills
 }
 
 
@@ -740,14 +752,21 @@ def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
         print(f"korgex: {e}", file=sys.stderr)
         return 2
     except Exception as e:
-        print(f"korgex: agent crashed: {type(e).__name__}: {e}", file=sys.stderr)
+        from src.errors import humanize_error
+        print(f"korgex: {humanize_error(e)}", file=sys.stderr)
         return 2
 
     text = (result or {}).get("result", "")
-    if text and quiet:
-        # In quiet mode the streamer didn't print; emit the final text now
+    if _should_emit_final(text, getattr(agent, "interactive", None)):
         print(text)
     return 0 if (result or {}).get("success", False) else 1
+
+
+def _should_emit_final(text: str, interactive) -> bool:
+    """Print the agent's final text iff it wasn't already streamed live. The
+    naked-prompt path doesn't stream (interactive is None/False), so the result
+    must be emitted here — otherwise `korgex "task"` prints nothing."""
+    return bool(text) and not interactive
 
 
 _DESCRIPTION = ("Korgex — autonomous coding agent. "
@@ -834,6 +853,11 @@ def _get_version() -> str:
 
 def main():
     argv = sys.argv[1:]
+
+    # Handle --version / -V before any other parsing.
+    if '--version' in argv or '-V' in argv:
+        print(_get_version())
+        sys.exit(0)
 
     # --introspect short-circuit. Foundry-style pre-parse: scan raw argv
     # before any parser builds or imports run, so the JSON document on

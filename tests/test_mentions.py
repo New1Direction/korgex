@@ -47,6 +47,18 @@ class TestExpandMentions:
         assert res["attached"] == []
         assert res["text"] == "see @nope.py"        # unchanged
 
+    def test_reports_a_missing_path_like_mention(self, tmp_path):
+        # A path-looking @mention that doesn't resolve is surfaced (likely a typo),
+        # not silently dropped.
+        res = M.expand_mentions("edit @src/nope.py please", cwd=str(tmp_path))
+        assert res["attached"] == []
+        assert res["missed"] == ["src/nope.py"]
+
+    def test_bare_word_mention_is_not_a_miss(self, tmp_path):
+        # "@bob" has no path shape — it's not a file reference, so no false warning.
+        res = M.expand_mentions("ping @bob about it", cwd=str(tmp_path))
+        assert res["missed"] == []
+
     def test_no_mentions_returns_text_unchanged(self, tmp_path):
         res = M.expand_mentions("hello there", cwd=str(tmp_path))
         assert res["text"] == "hello there"

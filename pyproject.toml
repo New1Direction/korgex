@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "korgex"
-version = "0.12.0"
+version = "0.12.1"
 description = "Autonomous AI coding agent — provider-agnostic, MCP-native, plan-first"
 readme = "README.md"
 license = { text = "MIT" }
@@ -70,3 +70,7 @@ src = ["assets/*.js", "skills_builtin/*/SKILL.md"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# Put the repo root on sys.path so `from src...` imports resolve under a bare
+# `pytest` invocation, not just `python -m pytest`. Without this the agent's own
+# self-verification (and CI / contributors) hit ModuleNotFoundError: src.
+pythonpath = ["."]
