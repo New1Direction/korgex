@@ -842,6 +842,11 @@ def _get_version() -> str:
 def main():
     argv = sys.argv[1:]
 
+    # Handle --version / -V before any other parsing.
+    if '--version' in argv or '-V' in argv:
+        print(_get_version())
+        sys.exit(0)
+
     # --introspect short-circuit. Foundry-style pre-parse: scan raw argv
     # before any parser builds or imports run, so the JSON document on
     # stdout is never polluted by import-time prints or argparse errors
