@@ -46,7 +46,8 @@ def available() -> tuple[bool, str]:
     return True, "bwrap"
 
 
-def wrap_command(argv: list, workspace_root: str, *, bwrap: str | None = None) -> list:
+def wrap_command(argv: list, workspace_root: str, install_root: str | None = None,
+                 *, bwrap: str | None = None) -> list:
     """Prefix ``argv`` with a bubblewrap sandbox.
 
     Layout: the whole filesystem is bound READ-ONLY (so python + stdlib + libs load),
@@ -54,15 +55,25 @@ def wrap_command(argv: list, workspace_root: str, *, bwrap: str | None = None) -
     is the ONLY writable real path; network is removed (``--unshare-net``); the
     sandbox dies with the parent. The kernel↔parent protocol rides stdio, which bwrap
     passes through untouched, so the governed bridge still reaches the (unsandboxed)
-    parent."""
+    parent.
+
+    ``install_root`` (where the korgex package lives, on the child's PYTHONPATH) is
+    re-bound read-only AFTER the ``/tmp`` tmpfs, so the kernel can still import the
+    package even when korgex is installed/checked-out UNDER ``/tmp`` (e.g. a CI
+    clone) — otherwise the tmpfs would hide it and the kernel couldn't start."""
     b = bwrap or shutil.which("bwrap") or "bwrap"
     ws = os.path.abspath(workspace_root)
-    return [
+    out = [
         b,
         "--ro-bind", "/", "/",      # whole fs READABLE (python, stdlib, shared libs)
         "--dev", "/dev",
         "--proc", "/proc",
         "--tmpfs", "/tmp",          # private writable scratch (real /tmp hidden)
+    ]
+    if install_root:
+        ir = os.path.abspath(install_root)
+        out += ["--ro-bind", ir, ir]  # re-expose the package even if it's under /tmp
+    out += [
         "--bind", ws, ws,           # the workspace is the ONLY writable real path
         "--chdir", ws,
         "--unshare-net",            # NO network egress
@@ -70,3 +81,4 @@ def wrap_command(argv: list, workspace_root: str, *, bwrap: str | None = None) -
         "--die-with-parent",
         "--", *argv,
     ]
+    return out

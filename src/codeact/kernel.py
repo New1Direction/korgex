@@ -109,7 +109,7 @@ class KernelHandle:
             ok, why = _sandbox.available()
             if not ok:
                 raise RuntimeError(f"CodeAct isolation requested but unavailable: {why}")
-            cmd = _sandbox.wrap_command(cmd, self.repo_root)
+            cmd = _sandbox.wrap_command(cmd, self.repo_root, install_root)
             self._isolated = True
         self._proc = subprocess.Popen(
             cmd,
