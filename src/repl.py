@@ -27,6 +27,7 @@ korgex — commands
   /tasks          show the agent's live task checklist for this conversation
   /jobs           list background shell tasks (Bash background=true) + their status
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
+  /diff [n]       show colored diffs of what changed in the last turn (or turn n)
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -78,6 +79,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("rewind", rest or None)
         if head == "/loop":
             return Command("loop", rest or None)
+        if head == "/diff":
+            return Command("diff", rest or None)
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
 
@@ -391,6 +394,9 @@ class Repl:
         if cmd.kind == "shell":
             self._run_shell(cmd.arg)
             return True
+        if cmd.kind == "diff":
+            self._show_diff(cmd.arg)
+            return True
         if cmd.kind == "rewind":
             self._do_rewind(cmd.arg)
             return True
@@ -484,9 +490,34 @@ class Repl:
             line = render_change_summary(
                 summarize_changes(self._rewind.records_for_turn(turn), _read))
             if line:
-                self._print(line)
+                self._print(line + "   → /diff to view")
         except Exception:
             pass
+
+    def _show_diff(self, arg=None):
+        """/diff [n] — show colored diffs for the files changed in the last turn
+        (or turn n). Built from the rewind snapshots vs the files on disk."""
+        if self._rewind is None:
+            self._print("no changes yet — the agent hasn't edited anything this session")
+            return
+        try:
+            turn = int(arg) if (arg or "").strip().isdigit() else self._turn
+        except (TypeError, ValueError):
+            turn = self._turn
+        records = self._rewind.records_for_turn(turn)
+        if not records:
+            self._print(f"no file changes recorded for turn {turn}")
+            return
+
+        def _read(p):
+            try:
+                return open(p).read()
+            except OSError:
+                return None
+
+        from src.diff_view import render_turn_diffs
+        out = render_turn_diffs(records, _read, color=True)
+        self._print(out or f"no net changes in turn {turn}")
 
     def _open_task_count(self) -> int:
         led = getattr(self._agent, "_task_ledger", None)

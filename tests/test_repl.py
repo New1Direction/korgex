@@ -80,6 +80,12 @@ def test_slash_rewind_parses():
     assert R.parse_repl_input("/rewind 2").arg == "2"
 
 
+def test_slash_diff_parses():
+    assert R.parse_repl_input("/diff").kind == "diff"
+    assert R.parse_repl_input("/diff").arg is None
+    assert R.parse_repl_input("/diff 3").arg == "3"
+
+
 def test_slash_loop_parses_with_and_without_task():
     cmd = R.parse_repl_input("/loop build the parser")
     assert cmd.kind == "loop"
