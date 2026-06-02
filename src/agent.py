@@ -22,7 +22,7 @@ from src.tool_abstraction import USER_TOOLS, route_tool_call
 import src.tools_impl  # noqa: F401
 from src.korg_ledger import get_default_client as _korg
 from src import edit_policy as _EP
-from src.plugins import PluginRegistry
+from src.plugins import PluginRegistry, default_plugin_dirs, load_plugins
 from src.hooks import load_hooks, run_event
 from src.workspace import path_within
 from src.guardrails import is_protected
@@ -222,6 +222,13 @@ class KorgexAgent:
         # (on_user_prompt / pre_tool / post_tool / on_stop). Empty → zero overhead;
         # a plugin that raises is isolated and can never break the loop.
         self.plugins = PluginRegistry()
+        # Drop-in user plugins: any *.py in ~/.korgex/plugins or <repo>/.korgex/plugins
+        # that defines register(registry) wires its hooks here. Failures are isolated
+        # (recorded, never fatal), so a broken plugin can't stop the agent booting.
+        try:
+            self._loaded_plugins = load_plugins(self.plugins, default_plugin_dirs(self.repo_root))
+        except Exception:
+            self._loaded_plugins = []
 
         # Opt-in LSP auto-diagnostics: after a Write/Edit, a language server checks
         # the file and its findings are folded back into the edit's result, so the
