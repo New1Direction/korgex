@@ -78,6 +78,7 @@ _OAUTH_BASE_URLS = {
     "grok": "https://api.x.ai/v1",
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
     "nous": "https://inference-api.nousresearch.com/v1",
+    "venice": "https://api.venice.ai/api/v1",
 }
 
 
@@ -118,6 +119,8 @@ def _oauth_token_and_base(provider: str):
         from src.model_router import GeminiClient, GrokClient, NousClient
         if provider == "nous":
             return (NousClient()._ensure_key() or None), base   # mints the agent-key
+        if provider == "venice":
+            return (os.environ.get("VENICE_API_KEY") or None), base  # api-key, not OAuth
         loader = {"grok": GrokClient, "gemini": GeminiClient}[provider]
         return (loader()._ensure_token() or None), base
     except Exception:
@@ -206,13 +209,16 @@ class KorgexAgent:
         self.mode = mode
         self.model = _resolve_model(model, mode)
         self.repo_root = repo_root or os.getcwd()
-        # Nous gateway: `nous/<vendor/model>` routes through the user's Nous
-        # subscription (OpenAI-compatible). Strip the prefix for the API and force
-        # OAuth + OpenAI transport; the actual model id is the suffix.
+        # Gateway prefixes route through a paid OpenAI-compatible gateway:
+        # `nous/<vendor/model>` (Nous subscription, OAuth agent-key) and
+        # `venice/<model>` (Venice, VENICE_API_KEY). The prefix is stripped to the
+        # real model id, and OpenAI transport + the gateway's token/endpoint forced.
         self._oauth_force = None
-        if self.model.lower().startswith("nous/"):
-            self._oauth_force = "nous"
-            self.model = self.model[5:]
+        for _pfx in ("nous/", "venice/"):
+            if self.model.lower().startswith(_pfx):
+                self._oauth_force = _pfx[:-1]
+                self.model = self.model[len(_pfx):]
+                break
         # KORGEX_PROVIDER forces the transport (overriding model-id autodetect),
         # so a Claude/Gemini model can be driven through an OpenAI-compatible
         # gateway like OpenRouter. Garbage values fall back to autodetect.
