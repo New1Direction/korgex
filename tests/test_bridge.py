@@ -147,14 +147,17 @@ def test_explicit_model_overrides_mode():
     assert a.provider == "openai"
 
 
-def test_default_model_when_nothing_specified():
-    saved = os.environ.pop("KORGEX_MODEL", None)
-    try:
-        a = KorgexAgent()
-        assert "claude" in a.model.lower()  # default is Sonnet 4.6
-    finally:
-        if saved is not None:
-            os.environ["KORGEX_MODEL"] = saved
+def test_default_model_when_nothing_specified(monkeypatch):
+    # Hermetic: no explicit model, no env, AND no config default → the builtin.
+    # (Must mock load_config — otherwise this reads the dev's real ~/.korgex config,
+    # which now legitimately overrides the builtin.)
+    from types import SimpleNamespace
+
+    from src import config as _C
+    monkeypatch.setattr(_C, "load_config", lambda: SimpleNamespace(default_model=None))
+    monkeypatch.delenv("KORGEX_MODEL", raising=False)
+    a = KorgexAgent()
+    assert "claude" in a.model.lower()  # builtin default is Sonnet 4.6
 
 
 # ── 4. MCP registration ──────────────────────────────────────────────────
