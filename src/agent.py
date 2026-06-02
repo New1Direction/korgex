@@ -1620,20 +1620,41 @@ class KorgexAgent:
         prompt = args.get("prompt") or args.get("description") or ""
         model = _MODEL_ALIASES.get(args.get("model")) or self.model
 
+        korg = self.ledger if self.ledger is not None else _korg()
         factory = self.subagent_factory or (lambda **kw: KorgexAgent(**kw))
         child = factory(
             model=model, repo_root=self.repo_root,
-            interactive=False, ledger=(self.ledger if self.ledger is not None else _korg()),
+            interactive=False, ledger=korg,
         )
         child_result = child.run_task(
             prompt, parent_seq=parent_seq, tools_filter=subagent_tools(sub_type),
         )
+        success = child_result.get("success", False)
+        result_text = child_result.get("result", "") or ""
+        child_root = child_result.get("root_seq")
+
+        # Typed aggregation node: a first-class record of the delegation's OUTCOME,
+        # chained under the spawning turn and naming the child's root seq. The audit/
+        # recall layer can traverse parent -> child subtrees from this without parsing
+        # the raw Agent tool-result blob — keeps multi-agent runs coherent + rewindable.
+        try:
+            korg.record_tool_call(
+                tool_name="subagent.result",
+                args={"agent_type": sub_type, "prompt": str(prompt)[:200]},
+                result={"success": success, "result": str(result_text)[:500],
+                        "iterations": child_result.get("iterations"),
+                        "child_root_seq": child_root},
+                success=success, duration_ms=0, triggered_by=parent_seq,
+            )
+        except Exception:
+            pass  # aggregation is an audit enhancement; never fail the delegation
+
         return {
             "agent_type": sub_type,
-            "success": child_result.get("success", False),
-            "result": child_result.get("result", ""),
+            "success": success,
+            "result": result_text,
             "iterations": child_result.get("iterations"),
-            "root_seq": child_result.get("root_seq"),
+            "root_seq": child_root,
         }
 
     def run_korgantic_task(self, task: str, effort: str = "auto") -> dict:
