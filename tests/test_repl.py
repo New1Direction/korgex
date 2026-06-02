@@ -80,6 +80,13 @@ def test_slash_rewind_parses():
     assert R.parse_repl_input("/rewind 2").arg == "2"
 
 
+def test_slash_loop_parses_with_and_without_task():
+    cmd = R.parse_repl_input("/loop build the parser")
+    assert cmd.kind == "loop"
+    assert cmd.arg == "build the parser"
+    assert R.parse_repl_input("/loop").arg is None
+
+
 def test_mcp_configured_reflects_config_file(tmp_path, monkeypatch):
     import io
     import json
