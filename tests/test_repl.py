@@ -87,6 +87,36 @@ def test_slash_loop_parses_with_and_without_task():
     assert R.parse_repl_input("/loop").arg is None
 
 
+def test_bang_runs_a_shell_command_not_an_agent_turn():
+    assert R.parse_repl_input("!ls -la").kind == "shell"
+    assert R.parse_repl_input("!ls -la").arg == "ls -la"
+    assert R.parse_repl_input("  !git status  ").arg == "git status"
+
+
+def test_bare_bang_is_shell_with_empty_arg():
+    assert R.parse_repl_input("!").kind == "shell"
+    assert R.parse_repl_input("!").arg == ""
+
+
+def test_bang_only_at_start_is_a_command():
+    # An exclamation mid-text is a normal message, not a shell escape.
+    assert R.parse_repl_input("ship it!").kind == "turn"
+    assert R.parse_repl_input("does it work!?").kind == "turn"
+
+
+def test_run_shell_executes_and_prints_output():
+    import io
+
+    class _ShellHarness(R.Repl):
+        def __init__(self, cwd):
+            self.out = io.StringIO()
+            self.repo_root = cwd
+
+    h = _ShellHarness(cwd=".")
+    h._run_shell("echo korgex_shell_ok")
+    assert "korgex_shell_ok" in h.out.getvalue()
+
+
 def test_repl_has_repo_root_set_to_cwd():
     # Regression: self.repo_root is referenced by /skills, @-mentions, skill
     # learning and the curator. It was never assigned — so those paths hit an
