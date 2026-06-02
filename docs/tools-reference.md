@@ -2,8 +2,8 @@
 
 korgex has a two-layer tool architecture:
 
-- **User-facing tools** (~12) — what the LLM sees. Named and described in Claude Code style. The agent calls these by name.
-- **Internal handlers** (49+) — what actually runs. internal `tool_*` functions in `src/tools_impl.py`. The router translates user-facing calls into internal handler calls.
+- **User-facing tools** (~12) — what the LLM sees: stable, model-facing names (Read, Write, Edit, Bash, …). The agent calls these by name.
+- **Internal handlers** (49+) — what actually runs: the `tool_*` functions in `src/tools_impl.py`. The router translates user-facing calls into internal handler calls.
 
 ---
 
