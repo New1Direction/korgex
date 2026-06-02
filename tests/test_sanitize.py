@@ -19,6 +19,17 @@ def test_redacts_values_under_secret_named_keys():
     assert out["normal"] == "keep" and out["count"] == 3
 
 
+def test_token_count_fields_are_not_redacted():
+    # prompt_tokens/completion_tokens CONTAIN "token" but are counts, not secrets —
+    # redacting them needlessly destroyed cost + audit data.
+    out = redact({"prompt_tokens": 1234, "completion_tokens": 56, "max_tokens": 4096,
+                  "api_token": "sk-secret"})
+    assert out["prompt_tokens"] == 1234        # kept
+    assert out["completion_tokens"] == 56      # kept
+    assert out["max_tokens"] == 4096           # kept
+    assert out["api_token"] == R               # a real credential is STILL redacted
+
+
 def test_redacts_known_secret_value_shapes_inside_strings():
     secrets = [
         "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",

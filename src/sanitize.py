@@ -44,8 +44,21 @@ def _redact_string(s: str) -> str:
     return s
 
 
+# Key names that CONTAIN "token" but are token COUNTS / config, not credentials —
+# so they're never redacted (otherwise cost/audit data is needlessly destroyed).
+_NOT_SECRET_KEYS = frozenset({
+    "prompt_tokens", "completion_tokens", "total_tokens", "tokens",
+    "input_tokens", "output_tokens", "cache_read_input_tokens",
+    "cache_creation_input_tokens", "max_tokens", "max_output_tokens",
+})
+
+
 def _is_secret_key(key) -> bool:
-    return isinstance(key, str) and bool(_SECRET_KEY_RE.search(key))
+    if not isinstance(key, str):
+        return False
+    if key.lower() in _NOT_SECRET_KEYS:
+        return False                       # token COUNTS aren't secrets
+    return bool(_SECRET_KEY_RE.search(key))
 
 
 def redact(value):

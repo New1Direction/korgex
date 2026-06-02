@@ -32,6 +32,7 @@ korgex — commands
   /trace [all]    show the verifiable cognition trace — what it did + what caused it
   /explain [on|off]  open a self-verifying HTML cognition audit (on = after every run)
   /why <file>     trace WHY a file was changed — back to the prompt that caused it
+  /cost           estimated $ spend this session (tokens from the verifiable ledger)
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -91,6 +92,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("explain", rest or None)
         if head == "/why":
             return Command("why", rest or None)
+        if head == "/cost":
+            return Command("cost")
         if head == "/version":
             return Command("version")
         return Command("unknown", head.lstrip("/"))
@@ -100,7 +103,7 @@ def parse_repl_input(line: str) -> Command:
 # The real command vocabulary — used to suggest a fix for a mistyped command.
 KNOWN_COMMANDS = [
     "model", "plan", "skills", "tasks", "jobs", "rewind", "diff", "trace", "explain",
-    "why", "loop", "version", "clear", "help", "exit", "quit",
+    "why", "cost", "loop", "version", "clear", "help", "exit", "quit",
 ]
 
 
@@ -441,6 +444,9 @@ class Repl:
         if cmd.kind == "why":
             self._show_why(cmd.arg)
             return True
+        if cmd.kind == "cost":
+            self._show_cost()
+            return True
         if cmd.kind == "version":
             self._show_version()
             return True
@@ -627,6 +633,27 @@ class Repl:
             self._print("explainer OFF")
         else:
             self._open_explainer()
+
+    def _show_cost(self):
+        """/cost — estimated $ spend this session, from the ledger's token counts.
+        Tokens are verifiable (the ledger); the $ is an estimate (public list prices)."""
+        import os
+        path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+            self.repo_root, ".korg", "journal.jsonl")
+        if not os.path.isfile(path):
+            self._print("no cognition recorded yet")
+            return
+        try:
+            from src import recall as R
+            from src.cost import estimate_cost, format_cost
+            s = estimate_cost(R.load_events(path))
+            self._print(format_cost(s))
+            for model, m in sorted(s["by_model"].items(), key=lambda kv: -kv[1]["usd"]):
+                mark = "" if m["known"] else "  (unpriced)"
+                self._print(f"  {model:<26} {m['input']:>8,} in  {m['output']:>8,} out  "
+                            f"${m['usd']:.4f}{mark}")
+        except Exception:
+            self._print("couldn't read the cognition ledger")
 
     def _show_why(self, arg=None):
         """/why <file> — trace why a file was touched, back through the causal chain
