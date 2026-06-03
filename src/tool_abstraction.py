@@ -347,6 +347,22 @@ file before acting on the recalled detail.
     {"name": "mode", "type": "string", "description": "Ranking mode", "default": "auto", "enum": ["auto", "semantic", "substring"]},
 ])
 
+register_user_tool("RemoteSignTip", """
+Call an authorized HTTP signer service to sign a 32-byte journal tip and return a
+verified ``{pubkey, tip, sig}`` checkpoint. This is for signer services you
+own/control — not for injecting hidden RPC bridges into third-party mobile apps.
+
+Fail-closed requirements live in the handler: KORGEX_REMOTE_SIGNER_TOKEN must be
+set, KORGEX_REMOTE_SIGNER_ALLOWED_HOSTS must explicitly allow the endpoint host,
+and the returned signature is verified locally before being trusted. Optionally set
+KORGEX_REMOTE_SIGNER_PUBKEY to pin which key may sign (otherwise the result carries a
+"not pinned" warning), and KORGEX_REMOTE_SIGNER_REQUIRE_HTTPS=1 to forbid plaintext
+http to non-loopback hosts.
+""".strip(), [
+    {"name": "url", "type": "string", "description": "HTTP(S) signer endpoint, e.g. http://127.0.0.1:8080/sign", "required": True},
+    {"name": "tip_hex", "type": "string", "description": "32-byte journal tip hash as 64 hex chars", "required": True},
+], exposure="deferred")
+
 
 def get_user_tool_schemas() -> list[dict]:
     """Return all user-facing tool schemas in a standard schema format."""
@@ -680,6 +696,7 @@ _TOOL_ROUTING = {
               "param_map": {"path": "path"}},
     "Recall": {"handler": "tool_recall",                   "module": "src.recall"},
     "Retrieve": {"handler": "tool_retrieve_blob",          "module": "src.tools_impl"},
+    "RemoteSignTip": {"handler": "tool_remote_sign_tip",    "module": "src.tools_impl"},
     "WebFetch": {"handler": "tool_web_fetch",              "module": "src.web_tools"},
     "WebSearch": {"handler": "tool_web_search",            "module": "src.web_tools"},
     "BusSend": {"handler": "tool_bus_send",                "module": "src.tools_impl",
