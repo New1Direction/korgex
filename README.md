@@ -1,6 +1,6 @@
-<p align="center">
-  <img src="assets/korgex-banner.svg" alt="korgex — the verifiable coding agent" width="100%">
-</p>
+<!-- HERO BANNER goes here — see "Images to make" #1.
+     Drop your image at docs/images/banner.png, then replace this comment with:
+     <p align="center"><img src="docs/images/banner.png" alt="korgex — the verifiable coding agent" width="100%"></p> -->
 
 <p align="center">
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/v/korgex?color=3fb950&label=pypi" alt="PyPI version"></a>
@@ -13,9 +13,13 @@
 
 # korgex
 
-**Autonomous coding agent. Provider-agnostic. MCP-native. Plan-first — and verifiable.**
+**An AI coding teammate for your terminal — that keeps the receipts.**
 
-A terminal-native AI engineer that reads your codebase, edits files, runs commands, and ships work. Speaks both Anthropic and OpenAI tool-use protocols, so it runs on Claude, GPT, Gemini, Grok, DeepSeek, or a local model through Ollama — no vendor lock-in. Connects to any MCP server. Streams live to your terminal. And every run is recorded to a **tamper-evident causal ledger** you can cryptographically verify after the fact. Open source, MIT-licensed.
+Tell korgex what you want in plain English — *"fix the failing test," "add a healthcheck endpoint"* — and it reads your code, makes the change, runs the tests, and shows you exactly what it did. It's free and open-source, and it works with whatever AI you prefer (Claude, ChatGPT, Gemini, Grok, or a private model running on your own computer), so you're never locked to one company.
+
+**Why it's different:** everything korgex does is saved to a tamper-proof record you can check later. If anyone alters that record — even by a single character — korgex can prove it. It's a coding assistant you can *audit*, not just hope to trust.
+
+<sub><b>For developers:</b> terminal-native, plan-first, speaks both the Anthropic and OpenAI tool-use protocols, runs on any OpenAI- or Anthropic-compatible model (incl. local via Ollama), connects to any MCP server, streams live, and records every run to a hash-chained causal ledger you can check with <code>korgex verify</code>. MIT-licensed.</sub>
 
 ```bash
 $ korgex "add a /healthz endpoint that returns 200 with uptime"
@@ -27,6 +31,10 @@ $ korgex "add a /healthz endpoint that returns 200 with uptime"
 $ korgex verify
   ✓ ledger intact — 7 events, hash-chain + causal DAG verified
 ```
+
+<!-- DEMO GIF goes here — see "Images to make" #2. A real terminal recording of a short run.
+     Drop it at docs/images/demo.gif, then add:
+     <p align="center"><img src="docs/images/demo.gif" alt="korgex in action" width="820"></p> -->
 
 ---
 
@@ -158,7 +166,11 @@ The agent is provider-agnostic by design: tool schemas are translated per provid
 
 ## Verifiable cognition
 
-What sets korgex apart: every run is recorded to a **tamper-evident causal ledger**, not an opaque log. Each event is hash-linked (`prev_hash`/`entry_hash`) to the previous one *and* causally linked (`triggered_by`) to what caused it — so a whole session can be cryptographically proven intact, and any edit, deletion, reorder, or splice is detected and localized to the offending event.
+**In plain terms:** korgex keeps a logbook of everything it does — every file it reads, every command it runs. Each entry is sealed to the one before it, like links in a chain, so if anyone later changes, adds, or removes even one entry, the chain visibly breaks. The result is honest, checkable proof of what the AI actually did — for audits, compliance, debugging, or simple peace of mind. As far as we know, no other coding agent does this.
+
+<!-- VERIFY SCREENSHOT goes here — see "Images to make" #3. A terminal shot of `korgex verify` (green ✓), bonus a tampered run showing the red ✗. docs/images/verify.png -->
+
+Under the hood: every run is recorded to a **tamper-evident causal ledger**, not an opaque log. Each event is hash-linked (`prev_hash`/`entry_hash`) to the previous one *and* causally linked (`triggered_by`) to what caused it — so a whole session can be cryptographically proven intact, and any edit, deletion, reorder, or splice is detected and localized to the offending event.
 
 ```mermaid
 flowchart LR
@@ -362,6 +374,8 @@ korgex --mode execute "implement the plan we just made"
 ---
 
 ## MCP integration
+
+*Plain version: MCP is an open "app-store" standard for AI — it lets korgex plug into outside services (GitHub, your files, a database, …) without custom glue.*
 
 korgex includes a native MCP (Model Context Protocol) client. Any MCP server in your `mcp.json` becomes part of the agent's tool surface. Manage them from the CLI with `korgex mcp` (add/list/remove stdio **or** remote url+auth servers).
 
