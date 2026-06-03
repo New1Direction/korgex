@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-06-03
+
+Five features on top of 0.16.0 — session continuity and custom commands, plus three that extend the verifiable-cognition surface: the agent's own self-improvement, security scanning, and web search all become auditable / cross-vendor.
+
+### Added
+- **Verifiable self-improvement.** korgex learns reusable skills from your sessions and curates/ages them in the background — but those self-modifications were silent daemon-thread writes with swallowed errors and no record. Now every one is a first-class, causally-linked ledger event (`skill.learned` / `skill.updated` / `skill.curated` / `skill.swept`), each chained to the turn that caused it; a failed pass records a tamper-evident `skill.review_failed` verdict instead of vanishing. Read the trail with `/skills log` (REPL) or `korgex skills log` (CLI); `korgex why <skill>` traces a learned skill back to the prompt that taught it; `korgex verify`/`trace` show skill changes like any other action. The one place the agent modified *itself* is now as auditable as everything else.
+- **`korgex scan` — verifiable security scanning.** Wraps the best scanner on your machine (trivy if present — vulnerabilities, leaked secrets, IaC misconfig, licenses; otherwise pip-audit / bandit) and turns its findings into **tamper-evident, causally-linked `security.scan` ledger events** tied to the exact code state — so `korgex verify`/`trace`/`why` can *prove* a scan happened and what it found, not just hand you an ephemeral report. `korgex scan [path]` prints findings and exits nonzero on a high/critical finding (a CI gate); a read-only `security_scan` agent tool lets the agent check code it just wrote; a `security-scan` skill teaches it when. korgex never reimplements a scanner — it wraps the one you have.
+- **WebSearch: self-hosted SearXNG + opt-in stealth.** WebSearch scraped DuckDuckGo's HTML alone — single-engine and brittle. Set `SEARXNG_URL` and it queries your self-hosted [SearXNG](https://github.com/searxng/searxng) JSON API instead: private, keyless, multi-engine — falling back to DuckDuckGo automatically when SearXNG is absent or errors (each result tags its `engine`). Plus an opt-in stealth path: with `KORGEX_WEB_STEALTH=1` and the `camoufox` package installed, web fetches route through [Camoufox](https://github.com/daijro/camoufox) for pages a plain HTTP client gets bot-blocked on — default off, degrades to plain httpx when unavailable, and detected-not-bundled so it's never a hard dependency.
+- **Session resume.** `korgex --resume` (and `/resume` in the REPL) reloads a prior session by replaying its **verifiable journal** back into context — so you pick up where you left off, grounded in the actual recorded prompts and actions rather than a lossy summary. `korgex sessions` lists what's resumable.
+- **Custom slash commands + a bigger built-in skill library.** Define reusable prompts as markdown in `.korgex/commands/*.md` (frontmatter `description`/`argument-hint`, `$ARGUMENTS` / `$1..$9` substitution), layered built-in → project → user, invoked as `/<name>` — Claude-Code style. And the built-in skill library grew from 34 to 49 with a cherry-picked, MIT-attributed pack from [ECC](https://github.com/affaan-m/ECC) (accessibility, agentic-engineering, backend-patterns, code-tour, codebase-onboarding, and more).
+
 ## [0.16.0] — 2026-06-02
 
 ### Added
