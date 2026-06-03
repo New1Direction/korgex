@@ -1051,8 +1051,19 @@ class KorgexAgent:
 
     # ── Main loop ────────────────────────────────────────────────────────
 
+    def mark_session_start(self):
+        """Record a session boundary marker to the ledger (idempotent per agent). Returns the
+        session id, or None if there's no ledger. Entry points (CLI/REPL) call this once at the
+        start of a top-level session; subagents never do — they chain under a parent."""
+        if getattr(self, "_session_id", None):
+            return self._session_id
+        korg = self.ledger if self.ledger is not None else _korg()
+        from src import resume as _resume
+        self._session_id = _resume.mark_session_start(korg, cwd=self.repo_root, model=self.model)
+        return self._session_id
+
     def run_task(self, prompt: str, output_schema: dict = None,
-                 parent_seq: int = None, tools_filter=None) -> dict:
+                 parent_seq: int = None, tools_filter=None, resume_context: str = None) -> dict:
         korg = self.ledger if self.ledger is not None else _korg()
         hooks = self.hooks if self.hooks is not None else load_hooks(self.repo_root)
         # Memory injection: assemble base + AGENTS.md + memory. Held in a LOCAL and
@@ -1073,6 +1084,12 @@ class KorgexAgent:
             )
             if ups.get("additional_context"):
                 effective_prompt = f"{prompt}\n\n[hook context]\n{ups['additional_context']}"
+
+        # Resume: prepend the reconstructed prior-session transcript so the model has
+        # continuity. The ledger still records the ORIGINAL prompt below — resume context
+        # augments only the model's view (same contract as UserPromptSubmit hooks).
+        if resume_context:
+            effective_prompt = f"{resume_context}\n\n— — —\n\n{effective_prompt}"
 
         # Fresh task → reset any deferred tools ToolSearch staged in a prior run.
         if tools_filter is None:
