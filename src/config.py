@@ -31,6 +31,8 @@ def provider_type_for_model(model: str) -> str:
         return "anthropic"
     if m.startswith(("gpt", "o1", "o3", "o4")) or "openai" in m:
         return "openai"
+    if m.startswith("ollama/"):  # local Ollama tag — must beat the generic "/" rule
+        return "ollama"
     if "/" in m:  # vendor/model form is the OpenRouter convention
         return "openrouter"
     return "anthropic"

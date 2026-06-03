@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`korgex local` — hardware-aware local-model advisor.** korgex is hosted-provider-first; it had no notion of which *local* model fits your machine. `korgex local` shells out to [llmfit](https://github.com/AlexsJones/llmfit) (if it's on PATH) to turn detected hardware (CPU/RAM/GPU/VRAM) into a ranked, fit-scored recommendation — model · quant · est. tok/s · fit · run-mode — for the offline/privacy crowd. `korgex local --use <ollama-tag>` wires the pick as your default (local Ollama, OpenAI-compatible) and records the choice to the verifiable ledger, so there's a tamper-evident record of "on this hardware, korgex chose model X." llmfit is **optional and never bundled** — absent, you get a one-line install hint, not a crash. Also fixes model routing: an `ollama/<tag>` id now resolves to the Ollama provider (it previously fell into the OpenRouter `vendor/model` branch).
+
 ## [0.15.0] — 2026-06-02
 
 The **autonomous-execution** batch — code-as-action, a destructive-command floor, and opt-in OS isolation, all on the verifiable ledger.
