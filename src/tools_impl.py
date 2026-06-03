@@ -31,6 +31,22 @@ _github_initialized = False
 _github_init_lock = threading.Lock()
 
 
+def tool_security_scan(path=None, scanner=None, context=None):
+    """Verifiable security scan — wraps the best available scanner (trivy, else
+    pip-audit/bandit). Read-only: never modifies files. The agent loop records this
+    call to the ledger, so findings are causally linked to the turn + tamper-evident
+    (korgex verify / why). Returns serializable findings + a summary."""
+    from src import security_scan as SS
+    ctx = context or {}
+    root = path or ctx.get("repo_root") or os.getcwd()
+    result = SS.run_scan(root, scanner=scanner)
+    rows = [{"kind": f.kind, "severity": f.severity, "id": f.id,
+             "target": f.target, "title": f.title, "fix": f.fix}
+            for f in result["findings"]]
+    return {"ok": result["ok"], "scanner": result["scanner"], "error": result["error"],
+            "summary": result["summary"], "findings": rows}
+
+
 def _get_swarm() -> AgentSwarm:
     global SWARM
     if SWARM is None:
