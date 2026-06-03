@@ -140,6 +140,12 @@ def resolve_client_config(model: str, cfg: Config, env: dict | None = None):
     # gateway can't be inferred from the name alone.
     if cfg.provider_for(ptype) is None and len(cfg.providers) == 1:
         ptype = cfg.providers[0].get("type", ptype)
+    # A custom OpenAI-compatible endpoint (KORGEX_API_URL — a self-hosted vLLM, an
+    # LM Studio, a gateway) is an explicit signal: route any non-Anthropic / unknown
+    # model id to it rather than defaulting to Anthropic, so a server-side model name
+    # like "Qwen2.5-Coder-32B" just works. A claude-* id still goes to Anthropic.
+    if ptype == "anthropic" and env.get("KORGEX_API_URL") and "claude" not in model.lower():
+        ptype = "openai"
     provider = cfg.provider_for(ptype)
     key = (provider or {}).get("api_key")
     if not key:
@@ -155,6 +161,8 @@ def resolve_client_config(model: str, cfg: Config, env: dict | None = None):
     if ptype == "ollama":
         base = (provider or {}).get("base_url") or _OLLAMA_URL
         return (key or "ollama"), base  # local needs no real key; placeholder is fine
-    # openai (and any other openai-compatible)
+    # openai (and any other openai-compatible, incl. a custom KORGEX_API_URL endpoint)
     base = (provider or {}).get("base_url") or env.get("KORGEX_API_URL")
+    if base and not key:
+        key = "EMPTY"   # self-hosted vLLM / llama.cpp accept any key — non-None so the client builds
     return key, base

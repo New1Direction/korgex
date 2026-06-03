@@ -94,6 +94,7 @@ korgex setup
 export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-proj-..."
 export KORGEX_API_KEY="sk-or-v1-..." KORGEX_API_URL="https://openrouter.ai/api/v1"   # OpenRouter
+export KORGEX_API_URL="http://your-gpu-box:8000/v1"   # self-hosted vLLM/llama.cpp → korgex --model Qwen2.5-Coder-32B "…"
 
 # 2. Run the agent on a naked prompt
 korgex "fix the failing test in tests/test_auth.py"

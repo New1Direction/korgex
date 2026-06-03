@@ -928,6 +928,7 @@ def cmd_local():
         print("  llmfit isn't installed — it's what sizes a local model to your hardware.")
         print("  get it:  https://github.com/AlexsJones/llmfit")
         print("  already know the model?  korgex local --use <ollama-tag>")
+        print("  remote self-hosted model?  export KORGEX_API_URL=http://<host>:8000/v1  (vLLM / OpenAI-compatible)")
         return 1
     system = LM.parse_system(LM.run_llmfit(["--json", "system"]) or {})
     recs = LM.parse_recommendations(

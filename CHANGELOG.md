@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Point korgex at a self-hosted / custom OpenAI-compatible endpoint.** Set `KORGEX_API_URL` (a self-hosted vLLM, LM Studio, or any OpenAI-compatible gateway) and korgex routes there — including for an arbitrary server-side model id like `Qwen2.5-Coder-32B`, which previously fell back to the Anthropic default. A keyless server needs no key (a placeholder is supplied). So `KORGEX_API_URL=http://your-box:8000/v1 korgex --model Qwen2.5-Coder-32B "…"` just works — the privacy / offline / cost-lever path, with nothing else to wire.
+
 ## [0.18.0] — 2026-06-03
 
 ### Added
