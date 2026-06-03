@@ -12,6 +12,8 @@ not commands.
 from __future__ import annotations
 
 import html as _html
+import json
+import os
 import re
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -90,6 +92,73 @@ def _http_get(url: str, timeout: int = 20):
         return r.status_code, r.text
 
 
+# ── SearXNG (self-hosted metasearch, JSON API) ──────────────────────────────
+
+def _searxng_base() -> str:
+    """The self-hosted SearXNG base URL (SEARXNG_URL), or '' if not configured.
+    When set, WebSearch prefers it: private, keyless, multi-engine results."""
+    return (os.environ.get("SEARXNG_URL") or "").strip().rstrip("/")
+
+
+def parse_searxng_json(data) -> list:
+    """Normalize SearXNG's JSON (`{"results":[{title,url,content},...]}`) into the
+    common [{title, url, snippet}] shape. Tolerant of anything malformed."""
+    if not isinstance(data, dict):
+        return []
+    results = data.get("results")
+    if not isinstance(results, list):
+        return []
+    out = []
+    for r in results:
+        if not isinstance(r, dict) or not r.get("url"):
+            continue
+        out.append({"title": (r.get("title") or "").strip(),
+                    "url": r.get("url"),
+                    "snippet": (r.get("content") or "").strip()})
+    return out
+
+
+# ── Opt-in stealth fetch (Camoufox) ─────────────────────────────────────────
+# A page behind aggressive bot-detection blocks a plain HTTP client. When the user
+# opts in (KORGEX_WEB_STEALTH) AND the `camoufox` package is installed, web fetches
+# route through Camoufox — a stealth (anti-fingerprint) Firefox — to read the
+# content. Default OFF, like korgex's other heavyweight, opt-in capabilities. This
+# is web ACCESS for the agent (reading public content), not an attack surface.
+
+def _web_stealth_enabled() -> bool:
+    return os.environ.get("KORGEX_WEB_STEALTH", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _camoufox_available() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("camoufox") is not None
+
+
+def camoufox_get(url: str, timeout: int = 30):
+    """Fetch a URL through Camoufox (stealth Firefox via Playwright) → (status, html).
+    Heavyweight + opt-in; imported lazily so korgex has no hard dependency on it.
+    Install with `pip install camoufox[geoip]` + `python -m camoufox fetch`."""
+    from camoufox.sync_api import Camoufox  # lazy: only when stealth is actually used
+    with Camoufox(headless=True) as browser:
+        page = browser.new_page()
+        resp = page.goto(url, timeout=timeout * 1000, wait_until="domcontentloaded")
+        html = page.content()
+        status = resp.status if resp is not None else 200
+    return status, html
+
+
+def _default_get(url: str, timeout: int = 20):
+    """Resolve the active fetch backend: opt-in Camoufox stealth when enabled AND
+    installed, else plain httpx. A stealth failure degrades to plain rather than
+    erroring. (Callers/tests inject `_get` directly, bypassing this.)"""
+    if _web_stealth_enabled() and _camoufox_available():
+        try:
+            return camoufox_get(url, timeout=max(timeout, 30))
+        except Exception:
+            pass  # stealth not usable at runtime → plain fetch
+    return _http_get(url, timeout=timeout)
+
+
 # ── tool entry points ─────────────────────────────────────────────────────────
 
 def tool_web_fetch(url: str, max_chars: int = _DEFAULT_MAX_CHARS, _get=None) -> dict:
@@ -97,7 +166,7 @@ def tool_web_fetch(url: str, max_chars: int = _DEFAULT_MAX_CHARS, _get=None) -> 
     injected fetcher (defaults to the real one)."""
     if not isinstance(url, str) or urlparse(url).scheme not in ("http", "https"):
         return {"error": f"WebFetch only supports http/https URLs, got: {url!r}"}
-    get = _get or _http_get
+    get = _get or _default_get
     try:
         status, body = get(url, timeout=20)
     except Exception as e:
@@ -111,15 +180,32 @@ def tool_web_fetch(url: str, max_chars: int = _DEFAULT_MAX_CHARS, _get=None) -> 
 
 
 def tool_web_search(query: str, max_results: int = 5, _get=None) -> dict:
-    """Search the web via DuckDuckGo's HTML endpoint (no API key). Returns
-    {query, results:[{title,url,snippet}]}. `_get` is the injected fetcher."""
+    """Search the web. Prefers a self-hosted SearXNG (private, keyless, multi-engine)
+    when SEARXNG_URL is set; otherwise — or if SearXNG returns nothing/errors — falls
+    back to DuckDuckGo's keyless HTML endpoint. Returns {query, results:[{title, url,
+    snippet}], count, engine}. `_get` is the injected fetcher."""
     if not isinstance(query, str) or not query.strip():
         return {"error": "WebSearch needs a non-empty query"}
-    get = _get or _http_get
-    url = "https://html.duckduckgo.com/html/?q=" + quote(query)
+
+    # 1) SearXNG JSON API — plain HTTP (it's a local API, not a bot-walled page).
+    base = _searxng_base()
+    if base:
+        try:
+            status, body = (_get or _http_get)(
+                f"{base}/search?q={quote(query)}&format=json", timeout=20)
+            if status == 200:
+                results = parse_searxng_json(json.loads(body))[:max_results]
+                if results:
+                    return {"query": query, "results": results,
+                            "count": len(results), "engine": "searxng"}
+        except Exception:
+            pass  # any SearXNG issue → fall through to DuckDuckGo
+
+    # 2) DuckDuckGo HTML (keyless) — via the stealth-capable fetch backend.
+    get = _get or _default_get
     try:
-        status, body = get(url, timeout=20)
+        status, body = get("https://html.duckduckgo.com/html/?q=" + quote(query), timeout=20)
     except Exception as e:
         return {"error": f"search failed: {type(e).__name__}: {e}", "query": query}
     results = parse_search_results(body)[:max_results]
-    return {"query": query, "results": results, "count": len(results)}
+    return {"query": query, "results": results, "count": len(results), "engine": "duckduckgo"}
