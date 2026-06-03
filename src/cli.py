@@ -335,6 +335,48 @@ def cmd_why():
     return 0
 
 
+def cmd_scan():
+    """`korgex scan [path]` — verifiable security scan. Runs the best available
+    scanner (trivy, else pip-audit/bandit), prints the findings, and records a
+    tamper-evident security.scan event to the ledger (prove it with `korgex verify`).
+    Exits nonzero when a high/critical finding is present, so CI can gate on it."""
+    from src import security_scan as SS
+    argv = sys.argv[1:]
+    rest = ([a for a in argv[argv.index("scan") + 1:] if not a.startswith("-")]
+            if "scan" in argv else [])
+    path = rest[0] if rest else os.getcwd()
+
+    result = SS.run_scan(path)
+    findings, summary = result["findings"], result["summary"]
+
+    if not result["ok"] and not findings:
+        print(f"  {result['error']}")
+        if result.get("scanner") is None:
+            print("  (install one: brew install trivy · pipx install pip-audit · pipx install bandit)")
+            return 2
+        return 1
+
+    if not findings:
+        print(f"  ✓ no security findings — scanned {path} with {result['scanner']}")
+    else:
+        print(f"  {result['scanner']}: {summary['total']} finding(s) · worst: {summary['worst']}")
+        for f in sorted(findings, key=lambda x: -SS.SEVERITY_ORDER.get(x.severity, 0)):
+            print(f"    [{f.severity:>8}] {f.kind:<8} {f.id}  {f.target}")
+            if f.title:
+                print(f"               {f.title[:88]}")
+
+    # Record it verifiably (best-effort — a missing ledger never fails the scan).
+    try:
+        from src.korg_ledger import get_default_client
+        if SS.record_scan(get_default_client(), result, path) is not None:
+            print("  recorded to the ledger · prove it: korgex verify")
+    except Exception:
+        pass
+
+    high = summary["by_severity"].get("critical", 0) + summary["by_severity"].get("high", 0)
+    return 1 if high else 0
+
+
 def cmd_drift():
     """Scan persistent memories for drift against their recorded source baselines."""
     from src import memory as M
@@ -880,6 +922,7 @@ SUBCOMMANDS = {
     "verify":            cmd_verify,
     "trace":             cmd_trace,
     "why":               cmd_why,
+    "scan":              cmd_scan,                # verifiable security scan (wraps trivy/pip-audit/bandit)
     "cost":              cmd_cost,
     "drift":             cmd_drift,
     "import":            cmd_import,
@@ -1006,6 +1049,8 @@ def _build_subcommand_parser():
         elif name == "cost":
             sp.add_argument("path", nargs="?",
                             help="journal JSONL (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+        elif name == "scan":
+            sp.add_argument("path", nargs="?", help="path to scan (default: current directory)")
         elif name == "import":
             sp.add_argument("vendor", nargs="?", help="claude-code")
             sp.add_argument("transcript", nargs="?", help="path to the vendor session transcript")

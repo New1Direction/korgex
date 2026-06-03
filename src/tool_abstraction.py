@@ -316,6 +316,20 @@ a skill matches the current task.
     {"name": "args", "type": "string", "description": "Optional arguments to pass to the skill"},
 ])
 
+register_user_tool("security_scan", """
+Run a verifiable security scan over the code and report findings. Wraps the best
+available scanner on the machine (trivy if installed — vulnerabilities, leaked
+secrets, IaC misconfig, licenses; otherwise pip-audit / bandit). Read-only: it never
+modifies files.
+
+Use it to check code you wrote or dependencies you added for known CVEs, secrets, or
+insecure patterns before finishing. The scan is recorded to the verifiable ledger, so
+the findings are tamper-evident and traceable (korgex verify / why).
+""".strip(), [
+    {"name": "path", "type": "string", "description": "Path to scan (default: the project root)"},
+    {"name": "scanner", "type": "string", "description": "Force a scanner: trivy | pip-audit | bandit (default: auto-detect the best available)"},
+])
+
 register_user_tool("ToolSearch", """
 Search for available tools at runtime. Use this when you're unsure which tool to use
 for a specific task. Returns tool descriptions that match your query.
@@ -716,6 +730,7 @@ _TOOL_ROUTING = {
     "browser_fetch":      {"handler": "tool_browser_fetch",      "module": "src.tools_impl"},
     "browser_crawl":      {"handler": "tool_browser_crawl",      "module": "src.tools_impl"},
     "browser_audit":      {"handler": "tool_browser_audit",      "module": "src.tools_impl"},
+    "security_scan":      {"handler": "tool_security_scan",      "module": "src.tools_impl"},
 }
 
 # NetCapture routes only when opt-in is enabled (mirrors the registration gate).
