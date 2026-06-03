@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-06-03
+
+### Added
+- **`korgex review` — verifiable code review.** Reviews a diff (this branch vs a base, or `--staged` / `--working`) across correctness / security / performance / maintainability, then **adversarially verifies** each finding — a second pass that must confirm it's a real issue, not a plausible-but-wrong nit. Confirmed findings are printed and recorded as tamper-evident `review.finding` ledger events, so `korgex verify` / `trace` / `why <file>` can prove a review happened and what it found; the command exits nonzero on a confirmed high/critical finding, so CI can gate on it. The model only supplies candidate findings — the verdict is verified and the trail is auditable. This makes korgex the only agent whose *code review* is provable, not just advisory. (Hardened by a live wire-dogfood that caught a real parsing gap: different models name their JSON fields differently, so the parser is tolerant of synonyms, infers a missing dimension from the finding text, and fills a single-file diff's path.)
+
 ## [0.17.0] — 2026-06-03
 
 Five features on top of 0.16.0 — session continuity and custom commands, plus three that extend the verifiable-cognition surface: the agent's own self-improvement, security scanning, and web search all become auditable / cross-vendor.
