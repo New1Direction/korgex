@@ -34,6 +34,7 @@ korgex — commands
   /why <file>     trace WHY a file was changed — back to the prompt that caused it
   /cost           estimated $ spend this session (tokens from the verifiable ledger)
   /resume [id]    reload a prior session's transcript into context (continue where you left off)
+  /<name> [args]  run a custom command from .korgex/commands/ (list them: korgex commands)
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -99,7 +100,9 @@ def parse_repl_input(line: str) -> Command:
             return Command("version")
         if head == "/resume":
             return Command("resume", rest or None)
-        return Command("unknown", head.lstrip("/"))
+        # Not a built-in slash command — hand the whole "name args" to custom-command
+        # resolution (a .korgex/commands/<name>.md), which falls back to an "unknown" hint.
+        return Command("custom", s[1:].strip())
     return Command("turn", s)
 
 
@@ -144,6 +147,7 @@ class Repl:
         # resume_context consumed by the next run_task.
         self._resume_on_start = resume
         self._pending_resume = None
+        self._commands = None  # lazy CommandRegistry (custom slash commands)
         # The project root = the launch dir (matches the lazily-built agent's
         # default). Used by /skills, @-mentions, skill learning + the curator —
         # all of which silently no-op'd while this was unset.
@@ -243,6 +247,28 @@ class Repl:
         if announce:
             self._print(f"↻ resuming {ctx.get('session_id') or 'previous'} — "
                         f"{ctx.get('turns', 0)} prior turn(s) loaded; they'll frame your next message")
+
+    def _command_registry(self):
+        if self._commands is None:
+            from src.commands import default_command_roots, load_commands
+            self._commands = load_commands(default_command_roots(self.repo_root))
+        return self._commands
+
+    def _run_custom_command(self, line):
+        """Resolve `/<name> [args]` against the command registry, render it, and run it as a
+        turn. Falls back to the familiar unknown-command hint when there's no such command."""
+        name, _, args = (line or "").partition(" ")
+        cmd = self._command_registry().get(name)
+        if cmd is None:
+            hint = suggest_command(name)
+            if hint:
+                self._print(f"unknown command: /{name} — did you mean /{hint}?  (/help for all)")
+            else:
+                self._print(f"unknown command: /{name} — try /help")
+            return
+        from src.commands import render_command
+        self._print(f"· /{name}")
+        self._run_turn(render_command(cmd, args.strip()))
 
     def _show_skills(self):
         """List skills with usage + lifecycle state. ✦ marks ones korgex learned."""
@@ -494,12 +520,8 @@ class Repl:
         if cmd.kind == "loop":
             self._run_loop(cmd.arg)
             return True
-        if cmd.kind == "unknown":
-            hint = suggest_command(cmd.arg)
-            if hint:
-                self._print(f"unknown command: /{cmd.arg} — did you mean /{hint}?  (/help for all)")
-            else:
-                self._print(f"unknown command: /{cmd.arg} — try /help")
+        if cmd.kind == "custom":
+            self._run_custom_command(cmd.arg)
             return True
         if cmd.kind == "turn":
             self._run_turn(cmd.arg)

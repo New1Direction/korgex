@@ -128,6 +128,7 @@ Run bare `korgex` for a streaming, multi-turn session. It connects your MCP serv
 | `/model [id]` | Show a priced model menu, or switch the live model mid-session. |
 | `/verify` · `/cost` | Verify the session ledger; show estimated $ spend from recorded tokens. |
 | `/resume [id]` | Reload a prior session's transcript into context and continue where you left off. |
+| `/<name> [args]` | Run a **custom command** — a markdown prompt from `.korgex/commands/` (or a built-in like `/code-review`, `/build-fix`, `/checkpoint`). |
 | `/clear` · `/help` · `/exit` | Reset the conversation · help · quit. |
 
 **Inline shortcuts**
@@ -292,6 +293,7 @@ Any non-subcommand argument is treated as a prompt: `korgex "create hello.txt wi
 | `korgex init` | Scaffold a starter `AGENTS.md` for the repo (detects stack + test/build commands; never clobbers). |
 | `korgex skills` | List every available skill (built-in, project, learned) with its description. |
 | `korgex sessions` | List recent sessions in this repo's ledger (resume one with `korgex --resume`). |
+| `korgex commands` | List custom slash commands (built-in, project, user); invoke them in the REPL as `/<name>`. |
 | `korgex local` | Recommend (and optionally wire) a local model that fits this machine. |
 | **Verifiable cognition** | |
 | `korgex verify [journal]` | Prove the ledger's hash-chain + causal DAG is intact (exit 0/1, CI-friendly). |
@@ -511,7 +513,7 @@ ruff check src/                                   # lint
 pytest -q                                         # the full suite
 ```
 
-The suite is **~1,263 tests** with no live LLM calls (everything is unit-tested) and runs on Linux CI across **Python 3.10, 3.11, 3.12, 3.13** on every push and PR. Major areas: the agent loop (routing, provider schemas, mode/model resolution, loop guards, the stall classifier, compaction), tools (fuzzy Edit, edit-freshness, background Bash, web), the verifiable ledger (hash-chain + causal DAG, redaction, the Ed25519 signed bus), CodeAct (kernel isolation, fuel, the tool bridge), MCP (namespaced multi-server router, OAuth refresh, full round-trip), prompt caching, skills (trust tiers, self-learning, the curator), and the REPL.
+The suite is **~1,285 tests** with no live LLM calls (everything is unit-tested) and runs on Linux CI across **Python 3.10, 3.11, 3.12, 3.13** on every push and PR. Major areas: the agent loop (routing, provider schemas, mode/model resolution, loop guards, the stall classifier, compaction), tools (fuzzy Edit, edit-freshness, background Bash, web), the verifiable ledger (hash-chain + causal DAG, redaction, the Ed25519 signed bus), CodeAct (kernel isolation, fuel, the tool bridge), MCP (namespaced multi-server router, OAuth refresh, full round-trip), prompt caching, skills (trust tiers, self-learning, the curator), and the REPL.
 
 ---
 
