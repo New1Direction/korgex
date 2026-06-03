@@ -122,14 +122,18 @@ def causal_path(by_seq: dict, seq) -> list:
 
 def _touches(e, target: str) -> bool:
     args = e.get("args") or {}
-    hay = " ".join(str(args.get(k, "")) for k in ("file_path", "path", "notebook_path", "command"))
+    # `name` lets `why <skill>` match a skill.learned/curated or a Skill invocation —
+    # so a learned skill's provenance traces back to its prompt like any file edit.
+    hay = " ".join(str(args.get(k, ""))
+                   for k in ("file_path", "path", "notebook_path", "command", "name"))
     return bool(target) and target in hay
 
 
 def explain_why(events, target: str, *, color: bool = True) -> str:
-    """Explain why `target` (a file path or substring) was touched: find every event
-    that acted on it and render the causal chain from the originating user_prompt
-    down to each touch. Trustworthy because the chain is verifiable (`korgex verify`)."""
+    """Explain why `target` (a file path, command, or skill name) was touched: find
+    every event that acted on it and render the causal chain from the originating
+    user_prompt down to each touch. Trustworthy because the chain is verifiable
+    (`korgex verify`)."""
     by_seq = {_seq(e): e for e in (events or []) if _seq(e) is not None}
     touches = [e for e in (events or [])
                if _kind(e) not in ("user_prompt", "llm_inference") and _touches(e, target)]

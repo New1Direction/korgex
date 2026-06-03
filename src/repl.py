@@ -24,6 +24,7 @@ korgex — commands
   /plan [on|off]  plan mode: agent stays read-only until you approve its plan
   /skills         list skills (✦ = learned by the agent) and their usage
   /skills curate  merge duplicate learned (✦) skills into one (agent-owned only)
+  /skills log     what the agent learned/curated + why — from the verifiable ledger
   /tasks          show the agent's live task checklist for this conversation
   /jobs           list background shell tasks (Bash background=true) + their status
   /rewind [n]     list undo points, or restore files to BEFORE prompt n
@@ -287,17 +288,45 @@ class Repl:
             self._print(f"  {r['name']}{mark}  —  {r['uses']} use(s){state}")
         if sum(1 for r in _SU.overview(reg, store) if r["trust"] == "agent") >= 2:
             self._print("→ /skills curate  merges duplicate learned (✦) skills")
+        self._print("→ /skills log  shows what the agent learned/curated + why (from the ledger)")
+
+    def _show_skill_log(self):
+        """/skills log — the agent's skill self-modifications (learned, curated, swept,
+        failed) straight from the verifiable ledger, oldest→newest. This is the audit
+        trail for the self-improvement loop; the same events show up in /trace."""
+        import os
+
+        from src import skill_ledger as _SL
+        from src.korg_ledger import load_journal_raw
+        path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+            self.repo_root, ".korg", "journal.jsonl")
+        if not os.path.exists(path):
+            self._print("no skill activity yet — the agent records what it learns and "
+                        "curates to the ledger as it works")
+            return
+        try:
+            rows = _SL.skill_log(load_journal_raw(path))
+        except Exception:
+            rows = []
+        if not rows:
+            self._print("no skill self-modifications recorded yet")
+            return
+        self._print("skill self-improvement log (from the verifiable ledger):")
+        for row in rows:
+            self._print("  " + _SL.format_row(row))
+        self._print("→ korgex why <skill> traces one back to the prompt that taught it")
 
     # Floor below which there's nothing worth consolidating; above it a fresh
     # learned skill triggers an auto-curation pass (new skills are rare → throttled).
     _CURATE_THRESHOLD = 8
 
-    def _curate_skills(self, *, blocking: bool):
+    def _curate_skills(self, *, blocking: bool, triggered_by: int | None = None):
         """Consolidate agent-LEARNED skills: an LLM groups near-duplicates, each
         group is merged into one skill and the redundant ones deleted. Manual via
         `/skills curate` (blocking, prints); also auto-run in the background after
-        the learned library grows. Only ever touches trust:agent skills. Opt out
-        with KORGEX_NO_CURATE=1; best-effort — never disturbs the session."""
+        the learned library grows. Only ever touches trust:agent skills. The pass is
+        recorded to the verifiable ledger (skill.curated, or skill.review_failed on
+        error). Opt out with KORGEX_NO_CURATE=1; best-effort — never disturbs the session."""
         import os
         if os.environ.get("KORGEX_NO_CURATE", "").strip().lower() in ("1", "true", "yes"):
             if blocking:
@@ -334,11 +363,18 @@ class Repl:
                         self._print("✓ learned skills already tidy — nothing to merge")
                     return
                 res = _C.apply_curation(plan, _SU.global_skills_dir(), reg)
+                from src import skill_ledger as _SL
+                _SL.record_curated(self._ledger_client(), merged=res.get("merged", []),
+                                   removed=res.get("removed", []), skipped=res.get("skipped", []),
+                                   triggered_by=triggered_by)
                 removed = len(res.get("removed", []))
                 kept = ", ".join(res.get("merged", [])) or "(none)"
                 msg = f"✦ curated skills: consolidated into {kept} · removed {removed} duplicate(s)"
                 self._print(msg) if blocking else emit("\n" + msg + "\n")
-            except Exception:
+            except Exception as e:
+                from src import skill_ledger as _SL
+                _SL.record_review_failed(self._ledger_client(), error=e, phase="curate",
+                                         triggered_by=triggered_by)
                 if blocking:
                     self._print("curation failed (best-effort) — skills left unchanged")
 
@@ -376,10 +412,24 @@ class Repl:
             self._print(f"  {act}: {path}")
         self._print("(conversation kept — /clear to also reset the chat)")
 
-    def _learn_from_turn(self, user_text: str, summary: str):
+    def _ledger_client(self):
+        """The ledger client the agent writes to (so skill events join the same
+        hash-chained journal), else the process default. Never raises."""
+        try:
+            agent = self._agent
+            if agent is not None and getattr(agent, "ledger", None) is not None:
+                return agent.ledger
+            from src.korg_ledger import get_default_client
+            return get_default_client()
+        except Exception:
+            return None
+
+    def _learn_from_turn(self, user_text: str, summary: str, triggered_by: int | None = None):
         """Background self-review: after a turn, ask the model (in a daemon thread,
         never blocking the REPL) whether a reusable skill emerged, and if so write it
-        as an agent-owned skill. Best-effort — any failure is swallowed. Opt out with
+        as an agent-owned skill. The self-modification is recorded to the verifiable
+        ledger (skill.learned, chained to the turn that taught it); a failed pass is
+        recorded too (skill.review_failed) rather than swallowed. Opt out with
         KORGEX_NO_LEARN=1."""
         import os
         if os.environ.get("KORGEX_NO_LEARN", "").strip().lower() in ("1", "true", "yes"):
@@ -389,6 +439,8 @@ class Repl:
             return
 
         def _bg():
+            from src import skill_ledger as _SL
+            led = self._ledger_client()
             try:
                 from src import skill_review as _SR
                 from src import skill_usage as _SU
@@ -408,15 +460,23 @@ class Repl:
                     res = _SR.apply_verdict(verdict, _SU.global_skills_dir(), registry=reg)
                     if res.get("saved"):
                         emit(f"\n✦ learned skill: {res['name']}\n")
+                        # Record the self-modification to the verifiable ledger, chained
+                        # to the turn that taught it — so `korgex why` can trace this
+                        # skill back to the prompt that produced it.
+                        _SL.record_learned(led, name=res["name"], action=verdict.action,
+                                           description=verdict.description, reason=verdict.reason,
+                                           triggered_by=triggered_by)
                         # The library just grew — if it's past the floor, consolidate
                         # near-duplicates in the background (new skills are rare, so
                         # this is naturally throttled to growth moments).
                         from src import skill_curator as _C
                         reg2 = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
                         if len(_C.agent_skills(reg2)) >= self._CURATE_THRESHOLD:
-                            self._curate_skills(blocking=False)
-            except Exception:
-                pass  # learning is an enhancement; never disturb the session
+                            self._curate_skills(blocking=False, triggered_by=triggered_by)
+            except Exception as e:
+                # Never disturb the session — but don't vanish either: a failed
+                # self-improvement pass becomes a tamper-evident ledger verdict.
+                _SL.record_review_failed(led, error=e, phase="review", triggered_by=triggered_by)
 
         import threading
         threading.Thread(target=_bg, daemon=True).start()
@@ -465,8 +525,11 @@ class Repl:
             self._toggle_plan(cmd.arg)
             return True
         if cmd.kind == "skills":
-            if (cmd.arg or "").strip().lower() == "curate":
+            sub = (cmd.arg or "").strip().lower()
+            if sub == "curate":
                 self._curate_skills(blocking=True)
+            elif sub == "log":
+                self._show_skill_log()
             else:
                 self._show_skills()
             return True
@@ -565,7 +628,8 @@ class Repl:
             print()  # newline so the next turn's prompt starts clean
             self._print_change_summary(_turn)
             summary = (result or {}).get("result", "") if isinstance(result, dict) else ""
-            self._learn_from_turn(text, summary)  # background; never blocks
+            root_seq = result.get("root_seq") if isinstance(result, dict) else None
+            self._learn_from_turn(text, summary, triggered_by=root_seq)  # background; never blocks
             if self._explain_auto:
                 self._open_explainer(announce=False)  # opt-in HTML cognition audit
         except KeyboardInterrupt:
@@ -922,7 +986,8 @@ class Repl:
 
     def _sweep_skills(self):
         """Age agent-learned skills by idle time on startup (active→stale→archived,
-        never deleted; only agent-owned skills). Cheap, pure, best-effort."""
+        never deleted; only agent-owned skills). Cheap, pure, best-effort. State
+        transitions are recorded to the ledger (skill.swept) so aging is auditable."""
         try:
             import time
 
@@ -930,7 +995,10 @@ class Repl:
             from src import skills as _SK
             reg = _SK.load_skills(_SK.default_skill_roots(self.repo_root))
             store = _SU.UsageStore(_SU.usage_path(_SU.global_skills_dir()))
-            _SU.sweep(store, reg, now=time.time())
+            transitions = _SU.sweep(store, reg, now=time.time())
+            if transitions:
+                from src import skill_ledger as _SL
+                _SL.record_swept(self._ledger_client(), transitions=transitions)
         except Exception:
             pass
 
