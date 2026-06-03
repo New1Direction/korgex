@@ -127,6 +127,7 @@ Run bare `korgex` for a streaming, multi-turn session. It connects your MCP serv
 | `/plan [on\|off]` | Plan mode — read-only until you approve the agent's plan. |
 | `/model [id]` | Show a priced model menu, or switch the live model mid-session. |
 | `/verify` · `/cost` | Verify the session ledger; show estimated $ spend from recorded tokens. |
+| `/resume [id]` | Reload a prior session's transcript into context and continue where you left off. |
 | `/clear` · `/help` · `/exit` | Reset the conversation · help · quit. |
 
 **Inline shortcuts**
@@ -281,6 +282,7 @@ Any non-subcommand argument is treated as a prompt: `korgex "create hello.txt wi
 | `--mcp` | Load MCP servers from `mcp.json` at startup. |
 | `--quiet` / `-q` | Disable the streaming TUI; only the final result prints. Use in pipes, scripts, CI. |
 | `--version` / `-V` | Print the korgex version and exit. |
+| `--resume` | Resume the last session — replay its transcript from the verifiable ledger. With a prompt: resume + run it; bare `korgex --resume`: reopen the REPL with that context. |
 
 ### Subcommands
 
@@ -289,6 +291,7 @@ Any non-subcommand argument is treated as a prompt: `korgex "create hello.txt wi
 | `korgex setup` | Connect model providers (any of them) — saves keys + a default model to `~/.korgex/config.json`. |
 | `korgex init` | Scaffold a starter `AGENTS.md` for the repo (detects stack + test/build commands; never clobbers). |
 | `korgex skills` | List every available skill (built-in, project, learned) with its description. |
+| `korgex sessions` | List recent sessions in this repo's ledger (resume one with `korgex --resume`). |
 | `korgex local` | Recommend (and optionally wire) a local model that fits this machine. |
 | **Verifiable cognition** | |
 | `korgex verify [journal]` | Prove the ledger's hash-chain + causal DAG is intact (exit 0/1, CI-friendly). |
@@ -542,9 +545,7 @@ To build locally for inspection: `python -m build` then `python -m twine check d
 
 These exist today; PRs welcome.
 
-- **OpenAI streaming has fewer rendered events than Anthropic.** Anthropic emits thinking blocks and message-delta usage; OpenAI emits only text and tool-call chunks. Both render correctly, but the TUI is richer for Anthropic.
-- **`--resume` is not yet implemented.** Exits with code 2 rather than silently starting fresh, so scripts fail loudly.
-- **Dashboard authentication is not implemented.** Don't expose port 8090 publicly without an auth-terminating reverse proxy in front.
+- **OpenAI streaming has fewer rendered events than Anthropic.** Anthropic emits thinking blocks and message-delta usage; OpenAI emits only text and tool-call chunks. Both render correctly, but the TUI is richer for Anthropic.- **Dashboard authentication is not implemented.** Don't expose port 8090 publicly without an auth-terminating reverse proxy in front.
 - **The VS Code sidecar is a legacy companion** to the dashboard; korgex's primary interface is the terminal REPL.
 
 ---

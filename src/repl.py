@@ -33,6 +33,7 @@ korgex — commands
   /explain [on|off]  open a self-verifying HTML cognition audit (on = after every run)
   /why <file>     trace WHY a file was changed — back to the prompt that caused it
   /cost           estimated $ spend this session (tokens from the verifiable ledger)
+  /resume [id]    reload a prior session's transcript into context (continue where you left off)
   /loop <task>    grind a task list unattended until it's all done (Ctrl-C stops)
   /clear          start a fresh conversation
   /help  /?       this help
@@ -96,6 +97,8 @@ def parse_repl_input(line: str) -> Command:
             return Command("cost")
         if head == "/version":
             return Command("version")
+        if head == "/resume":
+            return Command("resume", rest or None)
         return Command("unknown", head.lstrip("/"))
     return Command("turn", s)
 
@@ -132,10 +135,15 @@ SUGGESTED = {
 class Repl:
     """Owns the live session: the agent, the running model, the conversation."""
 
-    def __init__(self, cfg: _config.Config | None = None, out=None):
+    def __init__(self, cfg: _config.Config | None = None, out=None, resume=False):
         self.cfg = cfg if cfg is not None else _config.load_config()
         self.out = out or sys.stdout
         self.model, self.api_key = _config.resolve_model_and_key(None, self.cfg)
+        # Resume: when launched with --resume, capture the prior session's transcript on
+        # first-agent-build and frame the first turn with it. _pending_resume is a one-shot
+        # resume_context consumed by the next run_task.
+        self._resume_on_start = resume
+        self._pending_resume = None
         # The project root = the launch dir (matches the lazily-built agent's
         # default). Used by /skills, @-mentions, skill learning + the curator —
         # all of which silently no-op'd while this was unset.
@@ -208,7 +216,33 @@ class Repl:
             # available in-session (this was the gap: the REPL never enabled MCP).
             self._agent = KorgexAgent(model=self.model, interactive=True,
                                       load_mcp=self._mcp_configured())
+            # Resume BEFORE marking the new session boundary, so the transcript is rebuilt
+            # from the PRIOR session (not the empty one we're starting).
+            if self._resume_on_start:
+                self._resume_on_start = False
+                self._load_resume(announce=True)
+            self._agent.mark_session_start()
         return self._agent
+
+    def _load_resume(self, announce=True, session_id=None):
+        """Build a transcript from a prior session and stage it as a one-shot context for the
+        next turn. Mid-session, /resume loads the most recent OTHER session."""
+        from src import resume as _resume
+        journal = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(".korg", "journal.jsonl")
+        ctx = _resume.build_resume_context(journal, session_id=session_id)
+        cur = getattr(self._agent, "_session_id", None)
+        if session_id is None and cur and ctx.get("session_id") == cur:
+            others = [s for s in _resume.list_sessions(journal) if s.get("session_id") != cur]
+            ctx = (_resume.build_resume_context(journal, session_id=others[-1]["session_id"])
+                   if others else {"found": False})
+        if not ctx.get("found"):
+            if announce:
+                self._print("· no prior session to resume")
+            return
+        self._pending_resume = _resume.resume_preamble(ctx)
+        if announce:
+            self._print(f"↻ resuming {ctx.get('session_id') or 'previous'} — "
+                        f"{ctx.get('turns', 0)} prior turn(s) loaded; they'll frame your next message")
 
     def _show_skills(self):
         """List skills with usage + lifecycle state. ✦ marks ones korgex learned."""
@@ -447,6 +481,10 @@ class Repl:
         if cmd.kind == "cost":
             self._show_cost()
             return True
+        if cmd.kind == "resume":
+            self._ensure_agent()
+            self._load_resume(announce=True, session_id=cmd.arg)
+            return True
         if cmd.kind == "version":
             self._show_version()
             return True
@@ -499,7 +537,9 @@ class Repl:
         _turn = self._turn
         agent._rewind_sink = lambda path, pre: self._rewind.record_pre(_turn, path, pre)
         try:
-            result = agent.run_task(prompt)
+            rc = self._pending_resume
+            self._pending_resume = None
+            result = agent.run_task(prompt, resume_context=rc)
             print()  # newline so the next turn's prompt starts clean
             self._print_change_summary(_turn)
             summary = (result or {}).get("result", "") if isinstance(result, dict) else ""

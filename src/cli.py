@@ -806,10 +806,42 @@ def cmd_local():
     return 0
 
 
-def cmd_repl():
+def cmd_sessions():
+    """List recent korgex sessions in this repo's ledger (resume one with `korgex --resume`)."""
+    from src.resume import list_sessions
+
+    argv = sys.argv[1:]
+    path = None
+    if "sessions" in argv:
+        rest = [a for a in argv[argv.index("sessions") + 1:] if not a.startswith("-")]
+        if rest:
+            path = rest[0]
+    path = path or os.environ.get("KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+
+    if not Path(path).exists():
+        print(f"  No ledger journal at {path}")
+        return 1
+    sessions = list_sessions(path)
+    if not sessions:
+        print(f"  No marked sessions yet in {path}")
+        print("  (sessions are recorded going forward; older runs predate the marker)")
+        return 0
+    print(f"  {len(sessions)} session(s) in {path} — most recent last:\n")
+    for s in sessions:
+        fp = (s.get("first_prompt") or "").strip()
+        fp = fp[:60] + "…" if len(fp) > 60 else fp
+        print(f"  {s.get('session_id') or '?'}  {s.get('started_at') or ''}  "
+              f"[{s.get('model') or ''}]  {s.get('turns') or 0} turn(s)")
+        if fp:
+            print(f"      ↳ {fp}")
+    print('\n  resume the latest:  korgex --resume "<next task>"')
+    return 0
+
+
+def cmd_repl(resume=False):
     """Start an interactive korgex session (the conversational coding agent)."""
     from src.repl import Repl
-    Repl().run()
+    Repl(resume=resume).run()
     return 0
 
 
@@ -840,6 +872,7 @@ SUBCOMMANDS = {
     "setup":             cmd_setup,               # connect model providers
     "local":             cmd_local,               # recommend/wire a local model (llmfit)
     "skills":            cmd_skills,              # print available skills
+    "sessions":          cmd_sessions,            # list recent sessions (resume with --resume)
 }
 
 
@@ -867,18 +900,25 @@ def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
     # interactive=None lets the agent auto-detect TTY; quiet forces off
     interactive = False if quiet else None
 
+    resume_preamble = None
     if resume:
-        print(
-            "korgex: --resume is not yet implemented. "
-            "Exiting to avoid silently ignoring your intent in scripts/CI. "
-            "(Track: https://github.com/New1Direction/Korgex/issues)",
-            file=sys.stderr,
-        )
-        return 2
+        from src import resume as _resume
+        journal = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(".korg", "journal.jsonl")
+        ctx = _resume.build_resume_context(journal)
+        if not ctx["found"]:
+            print(f"korgex: no prior session to resume in {journal}. "
+                  f"Run a task first, or see `korgex sessions`.", file=sys.stderr)
+            return 2
+        resume_preamble = _resume.resume_preamble(ctx)
+        if not quiet:
+            sid = ctx.get("session_id") or "previous"
+            print(f"↻ resuming {sid} — replaying {ctx['turns']} prior turn(s) from the ledger",
+                  file=sys.stderr)
 
     try:
         agent = KorgexAgent(model=model, mode=mode,
                               interactive=interactive, load_mcp=mcp)
+        agent.mark_session_start()
         if effort:
             # korgantic max-power mode: effort-scaled workflow chain.
             kr = agent.run_korgantic_task(prompt, effort=effort)
@@ -889,7 +929,8 @@ def run_agent_shim(prompt: str, model: str = None, resume: bool = False,
             if missing:
                 print(f"  completeness gaps: {len(missing)}")
             return 0
-        result = agent.run_task(prompt, output_schema=output_schema)
+        result = agent.run_task(prompt, output_schema=output_schema,
+                                resume_context=resume_preamble)
     except RuntimeError as e:
         print(f"korgex: {e}", file=sys.stderr)
         return 2
@@ -1054,6 +1095,8 @@ def main():
 
     args = _build_prompt_parser().parse_args(argv)
     if not args.prompt_words:
+        if args.resume:
+            return cmd_repl(resume=True)
         _build_subcommand_parser().print_help()
         return 0
     return run_agent_shim(" ".join(args.prompt_words),
