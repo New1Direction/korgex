@@ -1,0 +1,30 @@
+# Runs the korgex test suite on LINUX (the deploy OS) for every push + PR.
+# Before this, the only workflows were the agent-bot and the PyPI publisher, so the
+# suite had only ever run on the maintainer's macOS — platform-specific gaps (e.g.
+# the undeclared `jsonschema` dependency) could ship. Browser tests lazy-import their
+# optional extras, so the core install exercises the offline suite without them.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (package + dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run the suite
+        run: python -m pytest -q

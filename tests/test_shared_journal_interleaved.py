@@ -35,7 +35,13 @@ if ROOT not in sys.path:
 
 from src import korg_ledger as L  # noqa: E402
 
-THUMP_BIN = Path("/Users/clubpenguin/Documents/API/thumper/target/debug/thump")
+# The thumper (Rust) cross-language segment is OPT-IN: set KORGEX_THUMP_BIN to the
+# built `thump` binary to exercise the genuine Python→Rust→Python shared-journal
+# proof. Unset (CI, fresh clones, any non-dev box) → that segment skips cleanly and
+# the test still proves the shared journal across korgex + korgchat. (No hardcoded
+# machine-specific path: it's not portable and doesn't belong in the repo.)
+_THUMP_ENV = os.environ.get("KORGEX_THUMP_BIN")
+THUMP_BIN = Path(_THUMP_ENV) if _THUMP_ENV else None
 
 
 def _read(path: Path):
@@ -73,7 +79,7 @@ def test_korgex_thumper_korgchat_share_one_verifiable_journal(tmp_path, monkeypa
 
     # --- Producer 2: thumper (Rust) — a real `bun run` via the real binary ----
     thumper_ran = False
-    if THUMP_BIN.exists():
+    if THUMP_BIN and THUMP_BIN.exists():
         proj = tmp_path / "proj"
         proj.mkdir()
         (proj / "package.json").write_text(
@@ -158,6 +164,6 @@ def test_thumper_segment_is_actually_exercised():
     """Guardrail: if the thumper binary exists, the interleaved test MUST cover
     the cross-language path — so a green run isn't silently korgex+korgchat only.
     This fails loudly if someone deletes the build rather than skips honestly."""
-    if not THUMP_BIN.exists():
-        pytest.skip("thumper binary not built — cross-language segment unavailable")
+    if not (THUMP_BIN and THUMP_BIN.exists()):
+        pytest.skip("KORGEX_THUMP_BIN unset / binary not built — cross-language segment unavailable")
     assert THUMP_BIN.exists()

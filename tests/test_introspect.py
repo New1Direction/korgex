@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
 from contextlib import redirect_stdout
@@ -196,7 +197,7 @@ def test_cli_introspect_short_circuits_before_parser():
         [sys.executable, "-m", "src.cli", "--introspect"],
         capture_output=True,
         text=True,
-        cwd="/Users/clubpenguin/Documents/korgex",
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  # repo root
     )
     assert result.returncode == 0, f"failed: stderr={result.stderr!r}"
     doc = json.loads(result.stdout)
