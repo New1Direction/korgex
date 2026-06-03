@@ -806,6 +806,26 @@ def cmd_local():
     return 0
 
 
+def cmd_commands():
+    """List available custom slash commands (built-in, project, and user)."""
+    from src.commands import default_command_roots, load_commands
+
+    reg = load_commands(default_command_roots(os.getcwd()))
+    names = reg.names()
+    if not names:
+        print("  No commands found.")
+        print("  Add markdown commands in .korgex/commands/ or ~/.korgex/commands/.")
+        return 0
+    print(f"  {len(names)} command(s) — invoke in the REPL as /<name>:\n")
+    for n in names:
+        c = reg.get(n)
+        hint = f"  {c.argument_hint}" if c.argument_hint else ""
+        print(f"  /{n}{hint}")
+        if c.description:
+            print(f"      {c.description}")
+    return 0
+
+
 def cmd_sessions():
     """List recent korgex sessions in this repo's ledger (resume one with `korgex --resume`)."""
     from src.resume import list_sessions
@@ -873,6 +893,7 @@ SUBCOMMANDS = {
     "local":             cmd_local,               # recommend/wire a local model (llmfit)
     "skills":            cmd_skills,              # print available skills
     "sessions":          cmd_sessions,            # list recent sessions (resume with --resume)
+    "commands":          cmd_commands,            # list custom slash commands
 }
 
 

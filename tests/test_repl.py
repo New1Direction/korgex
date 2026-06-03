@@ -38,9 +38,12 @@ def test_model_command_with_arg_switches():
     assert cmd.arg == "claude-opus-4-8"
 
 
-def test_unknown_slash_is_an_error_not_a_turn():
+def test_unknown_slash_routes_to_custom_not_a_turn():
+    # An unrecognized "/foo" becomes a custom-command attempt — resolved against the command
+    # registry, falling back to an unknown-command hint — never a blind conversational turn.
     cmd = R.parse_repl_input("/bogus")
-    assert cmd.kind == "unknown"
+    assert cmd.kind == "custom"
+    assert cmd.kind != "turn"
     assert "bogus" in cmd.arg
 
 
