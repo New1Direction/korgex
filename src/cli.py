@@ -407,6 +407,68 @@ def cmd_scan():
     return 1 if high else 0
 
 
+def cmd_review():
+    """`korgex review [base]` — verifiable code review of a diff. Reviews this branch's
+    changes across correctness/security/performance/maintainability, adversarially
+    verifies each finding, prints the confirmed ones, and records them as tamper-evident
+    review.finding ledger events (prove them with `korgex verify` / `korgex why <file>`).
+    base defaults to `main`; use `--staged` or `--working`. Exits nonzero on a confirmed
+    high/critical finding, so CI can gate on it."""
+    from src import code_review as CR
+    argv = sys.argv[1:]
+    rest = ([a for a in argv[argv.index("review") + 1:] if not a.startswith("-")]
+            if "review" in argv else [])
+    base = (rest[0] if rest else
+            ("staged" if "--staged" in argv else "working" if "--working" in argv else "main"))
+
+    diff = CR.get_diff(base)
+    if not diff.strip():
+        print(f"  no changes to review (base: {base}) — try `korgex review --staged` or a different base")
+        return 0
+
+    try:
+        from src.agent import KorgexAgent
+        agent = KorgexAgent(interactive=False)
+        client = agent._get_client()
+
+        def complete(system, user):
+            resp = agent._call(client, [{"role": "user", "content": user}], [], system_prompt=system)
+            return agent._extract_final_text(resp)
+    except Exception as e:
+        print(f"  review needs a model provider — run `korgex setup` first ({type(e).__name__})")
+        return 2
+
+    print(f"  reviewing {len(diff.splitlines())} diff line(s) (base: {base})…")
+    findings = CR.review_diff(diff, CR.make_reviewer(complete))
+    if not findings:
+        print("  ✓ no issues found")
+        return 0
+
+    print(f"  {len(findings)} candidate finding(s) — adversarially verifying each…")
+    confirmed = [f for f in CR.verify_findings(findings, CR.make_verifier(complete, diff)) if f.confirmed]
+    if not confirmed:
+        print(f"  ✓ {len(findings)} candidate(s) all refuted on verify — nothing confirmed")
+        return 0
+
+    summary = CR.summarize(confirmed)
+    print(f"  {len(confirmed)} confirmed finding(s) · worst: {summary['worst']}")
+    for f in sorted(confirmed, key=lambda x: -CR.SEVERITY_ORDER.get(x.severity, 0)):
+        loc = f":{f.line}" if f.line else ""
+        print(f"    [{f.severity:>8}] {f.dimension:<14} {f.file}{loc}  —  {f.title}")
+        if f.suggestion:
+            print(f"               → {f.suggestion}")
+
+    try:
+        from src.korg_ledger import get_default_client
+        if CR.record_review(get_default_client(), confirmed, base):
+            print("  recorded to the ledger · prove it: korgex verify / korgex why <file>")
+    except Exception:
+        pass
+
+    high = sum(1 for f in confirmed if CR.SEVERITY_ORDER.get(f.severity, 0) >= 3)
+    return 1 if high else 0
+
+
 def cmd_drift():
     """Scan persistent memories for drift against their recorded source baselines."""
     from src import memory as M
@@ -953,6 +1015,7 @@ SUBCOMMANDS = {
     "trace":             cmd_trace,
     "why":               cmd_why,
     "scan":              cmd_scan,                # verifiable security scan (wraps trivy/pip-audit/bandit)
+    "review":            cmd_review,              # verifiable code review of a diff (adversarially verified)
     "cost":              cmd_cost,
     "drift":             cmd_drift,
     "import":            cmd_import,
@@ -1081,6 +1144,10 @@ def _build_subcommand_parser():
                             help="journal JSONL (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
         elif name == "scan":
             sp.add_argument("path", nargs="?", help="path to scan (default: current directory)")
+        elif name == "review":
+            sp.add_argument("base", nargs="?", help="diff base (default: main; or 'staged' / 'working')")
+            sp.add_argument("--staged", action="store_true", help="review staged changes")
+            sp.add_argument("--working", action="store_true", help="review unstaged working-tree changes")
         elif name == "import":
             sp.add_argument("vendor", nargs="?", help="claude-code")
             sp.add_argument("transcript", nargs="?", help="path to the vendor session transcript")
