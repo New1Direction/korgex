@@ -110,7 +110,14 @@ def _start_background_server():
 # ── Subcommands ──────────────────────────────────────────────────────────
 
 def cmd_skills():
-    """Print all available skills and their descriptions."""
+    """Print all available skills, or `korgex skills log` for the agent's verifiable
+    self-improvement audit trail (what it learned/curated/aged + why)."""
+    argv = sys.argv[1:]
+    rest = ([a for a in argv[argv.index("skills") + 1:] if not a.startswith("-")]
+            if "skills" in argv else [])
+    if rest and rest[0].lower() == "log":
+        return _cmd_skills_log(rest[1] if len(rest) > 1 else None)
+
     from src.skills import load_skills, default_skill_roots
     # Pass cwd so project-local .korgex/skills are listed too, not just
     # built-in + user-global.
@@ -118,6 +125,29 @@ def cmd_skills():
     for name in skill_registry.names():
         skill = skill_registry.get(name)
         print(f"{skill.name}: {skill.description}")
+    return 0
+
+
+def _cmd_skills_log(path=None):
+    """`korgex skills log` — read skill self-improvement events back from the ledger."""
+    from src import skill_ledger as SL
+    from src.korg_ledger import load_journal_raw
+    path = path or os.environ.get("KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+    if not os.path.exists(path):
+        print(f"  No ledger journal at {path}")
+        print("  (the agent records what it learns/curates here as it works)")
+        return 1
+    try:
+        rows = SL.skill_log(load_journal_raw(path))
+    except Exception:
+        rows = []
+    if not rows:
+        print("  no skill self-modifications recorded yet")
+        return 0
+    print("  skill self-improvement log (from the verifiable ledger):")
+    for row in rows:
+        print("    " + SL.format_row(row))
+    print(f"  {len(rows)} skill event(s) · korgex why <skill> traces one back to its prompt")
     return 0
 
 def cmd_default():
