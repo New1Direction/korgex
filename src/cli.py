@@ -742,6 +742,70 @@ def cmd_setup():
     return run_setup()
 
 
+def _record_local(name: str, payload: dict) -> None:
+    """Best-effort verifiable record of a local-model decision (never fatal)."""
+    try:
+        from src import korg_ledger as KL
+        KL.get_default_client().record_tool_call(
+            tool_name=name, args={"source": "korgex local"}, result=payload,
+            success=True, duration_ms=0, triggered_by=None)
+    except Exception:
+        pass
+
+
+def cmd_local():
+    """Recommend (and optionally wire) a LOCAL model that fits this machine.
+
+    `korgex local`                 → hardware-aware recommendations (via llmfit)
+    `korgex local --use <tag>`     → set that Ollama model as the default + record it
+    `korgex local --use-case X`    → bias recommendations (coding|reasoning|chat)
+    """
+    from src import local_model as LM
+    from src import config as C
+
+    argv = sys.argv[1:]
+    rest = argv[argv.index("local") + 1:] if "local" in argv else []
+    use_model, use_case = None, "coding"
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--use" and i + 1 < len(rest):
+            use_model = rest[i + 1]
+            i += 2
+            continue
+        if rest[i] == "--use-case" and i + 1 < len(rest):
+            use_case = rest[i + 1]
+            i += 2
+            continue
+        i += 1
+
+    # Wire a specific local model — no llmfit needed.
+    if use_model:
+        cfg = C.load_config()
+        LM.set_local_model(cfg, use_model)
+        C.save_config(cfg)
+        _record_local("local.model_set", {"model": cfg.default_model})
+        tag = use_model.split("/")[-1]
+        print(f"  ✓ default model → {cfg.default_model}  (local, via Ollama)")
+        print(f"    if it isn't pulled yet:  ollama pull {tag}")
+        return 0
+
+    # Advise: needs llmfit (optional, never bundled).
+    if not LM.llmfit_available():
+        print("  llmfit isn't installed — it's what sizes a local model to your hardware.")
+        print("  get it:  https://github.com/AlexsJones/llmfit")
+        print("  already know the model?  korgex local --use <ollama-tag>")
+        return 1
+    system = LM.parse_system(LM.run_llmfit(["--json", "system"]) or {})
+    recs = LM.parse_recommendations(
+        LM.run_llmfit(["recommend", "--json", "--use-case", use_case, "--limit", "5"]) or {})
+    print(LM.format_advice(recs, system))
+    _record_local("local.advice", {"system": system, "top": recs[:3], "use_case": use_case})
+    if recs and recs[0].get("name"):
+        tag = recs[0]["name"].split("/")[-1].lower()
+        print(f"\n  wire it:  ollama pull {tag}  &&  korgex local --use {tag}")
+    return 0
+
+
 def cmd_repl():
     """Start an interactive korgex session (the conversational coding agent)."""
     from src.repl import Repl
@@ -774,6 +838,7 @@ SUBCOMMANDS = {
     "mcp":               cmd_mcp,                 # add/list/remove MCP servers
     "mcp-server":        cmd_mcp_server,
     "setup":             cmd_setup,               # connect model providers
+    "local":             cmd_local,               # recommend/wire a local model (llmfit)
     "skills":            cmd_skills,              # print available skills
 }
 
@@ -901,6 +966,11 @@ def _build_subcommand_parser():
         elif name == "mcp":
             sp.add_argument("args", nargs="*",
                             help="<list|add|remove> … (e.g. add <name> --url <url> | --command <cmd>)")
+        elif name == "local":
+            sp.add_argument("--use", metavar="OLLAMA_TAG",
+                            help="set this Ollama model as the default (e.g. qwen2.5-coder:7b)")
+            sp.add_argument("--use-case", choices=["coding", "reasoning", "chat"],
+                            help="bias recommendations (default: coding)")
     return p
 
 
