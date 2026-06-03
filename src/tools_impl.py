@@ -1478,6 +1478,65 @@ def tool_net_capture(command: str, context: dict = None):
     return _nc.run_with_capture(["bash", "-c", command], cwd=cwd)
 
 
+@register_tool("remote_sign_tip",
+               "Call an authorized HTTP signer service to sign a 32-byte ledger tip. "
+               "This is for signer services you own/control; it is not a mobile app "
+               "injection bridge. Requires KORGEX_REMOTE_SIGNER_TOKEN and "
+               "KORGEX_REMOTE_SIGNER_ALLOWED_HOSTS. Optional hardening: "
+               "KORGEX_REMOTE_SIGNER_PUBKEY (comma-separated hex keys) pins which key may "
+               "sign; KORGEX_REMOTE_SIGNER_REQUIRE_HTTPS=1 forbids plaintext http to "
+               "non-loopback hosts.", [
+    ToolParam("url", "STRING", "HTTP(S) endpoint for the signer, e.g. http://127.0.0.1:8080/sign", required=True),
+    ToolParam("tip_hex", "STRING", "32-byte journal tip hash as 64 hex chars.", required=True),
+])
+def tool_remote_sign_tip(url: str, tip_hex: str, context=None):
+    token = os.environ.get("KORGEX_REMOTE_SIGNER_TOKEN", "")
+    if not token:
+        return {"error": "KORGEX_REMOTE_SIGNER_TOKEN is required"}
+    allowed = [
+        h.strip() for h in os.environ.get("KORGEX_REMOTE_SIGNER_ALLOWED_HOSTS", "").split(",")
+        if h.strip()
+    ]
+    if not allowed:
+        return {"error": "KORGEX_REMOTE_SIGNER_ALLOWED_HOSTS is required"}
+    pins = [
+        p.strip() for p in os.environ.get("KORGEX_REMOTE_SIGNER_PUBKEY", "").split(",")
+        if p.strip()
+    ]
+    require_https = os.environ.get("KORGEX_REMOTE_SIGNER_REQUIRE_HTTPS", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    try:
+        from src import remote_signer
+
+        cp = remote_signer.sign_tip_via_http(
+            url,
+            tip_hex,
+            bearer_token=token,
+            allowed_hosts=allowed,
+            expected_pubkeys=pins or None,
+            require_https=require_https,
+            timeout=10.0,
+        )
+        out = {"ok": True, "checkpoint": cp}
+        warnings = []
+        if not pins:
+            warnings.append(
+                "signer identity is not pinned — set KORGEX_REMOTE_SIGNER_PUBKEY to authenticate "
+                "which key may sign (without it the signature is only self-consistent)"
+            )
+        if remote_signer.is_plaintext_remote(url):
+            warnings.append(
+                "bearer token was sent over plaintext http to a non-loopback host — prefer https "
+                "or set KORGEX_REMOTE_SIGNER_REQUIRE_HTTPS=1"
+            )
+        if warnings:
+            out["warnings"] = warnings
+        return out
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @register_tool("retrieve_blob",
                "Pull the FULL sealed original of a tool result that was compressed "
                "away, by its sha256 content handle. Returns the exact bytes, "
