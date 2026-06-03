@@ -365,6 +365,127 @@ def cmd_why():
     return 0
 
 
+def cmd_receipt():
+    """`korgex receipt [journal]` — mint a portable, self-verifying receipt of a run:
+    one file anyone can check (offline with `korgex receipt verify`, or by opening its
+    --html in any browser) with zero trust in korgex. `--sign` attests authorship with
+    your Ed25519 identity. `korgex receipt verify <file>` checks one."""
+    import time
+
+    from src import receipt as RC
+    from src.korg_ledger import load_journal_raw
+
+    argv = sys.argv[1:]
+    toks = argv[argv.index("receipt") + 1:] if "receipt" in argv else []
+
+    if toks and toks[0] == "verify":
+        targets = [t for t in toks[1:] if not t.startswith("-")]
+        if not targets:
+            print("  usage: korgex receipt verify <receipt.json>")
+            return 2
+        return _receipt_verify(targets[0])
+
+    claim = out = html_path = path = None
+    sign = False
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t == "--claim":
+            claim = toks[i + 1] if i + 1 < len(toks) else None
+            i += 2
+        elif t == "--sign":
+            sign = True
+            i += 1
+        elif t in ("--out", "-o"):
+            out = toks[i + 1] if i + 1 < len(toks) else None
+            i += 2
+        elif t == "--html":
+            nxt = toks[i + 1] if i + 1 < len(toks) else None
+            if nxt and not nxt.startswith("-"):
+                html_path, i = nxt, i + 2
+            else:
+                html_path, i = "", i + 1   # sentinel → derive from the json path
+        elif not t.startswith("-") and path is None:
+            path, i = t, i + 1
+        else:
+            i += 1
+
+    path = path or os.environ.get("KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+    if not Path(path).exists():
+        print(f"  No ledger journal at {path}")
+        print("  (set KORG_JOURNAL_PATH or pass: korgex receipt <journal>)")
+        return 1
+    events = load_journal_raw(path)
+    if not events:
+        print(f"  Ledger at {path} has no events yet — nothing to attest.")
+        return 1
+
+    signer_priv = RC.load_or_create_identity() if sign else None
+    receipt = RC.build_receipt(events, claim=claim, signer_priv=signer_priv,
+                               generated_at=time.time())
+
+    if not out:
+        stem = os.path.basename(path).rsplit(".", 1)[0] or "receipt"
+        out = os.path.join(os.path.expanduser("~"), ".korgex", "receipts", stem + ".korgreceipt.json")
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(receipt, fh, indent=2)
+
+    if html_path is not None:
+        if not html_path:
+            html_path = (out[:-5] if out.endswith(".json") else out) + ".html"
+        try:
+            with open(html_path, "w", encoding="utf-8") as fh:
+                fh.write(RC.render_html(receipt))
+        except OSError as exc:
+            print(f"  (html report failed: {exc})")
+            html_path = None
+
+    s = receipt["summary"]
+    print(f"  ✓ receipt minted — {receipt['event_count']} events, "
+          f"{s['tool_calls']} tool calls, {len(s['files'])} files, ${s['cost_usd']:.4f}")
+    if claim:
+        print(f"    claim: {claim}")
+    if signer_priv:
+        print(f"    signed by {receipt['signature']['pubkey'][:16]}… (your korgex identity)")
+    print(f"    tip {receipt['tip'][:16]}…")
+    print(f"    {out}")
+    if html_path:
+        print(f"    {html_path}   ← open in any browser; it re-verifies itself")
+    print("  share it; anyone checks it with:  korgex receipt verify <file>")
+    return 0
+
+
+def _receipt_verify(file_path: str) -> int:
+    """Verify a receipt file: chain intact + tip matches + (if signed) signature valid.
+    Exits nonzero on any failure, so CI can gate on a provable deliverable."""
+    from src import receipt as RC
+
+    if not Path(file_path).exists():
+        print(f"  No receipt at {file_path}")
+        return 1
+    try:
+        with open(file_path) as fh:
+            receipt = json.load(fh)
+    except (OSError, ValueError) as exc:
+        print(f"  could not read receipt: {exc}")
+        return 1
+
+    v = RC.verify_receipt(receipt)
+    n = receipt.get("event_count", len(receipt.get("events") or []))
+    if v["ok"]:
+        who = f" · signed by {v['signer'][:16]}…" if v.get("signature_ok") else ""
+        print(f"  ✓ receipt VALID — {n} events, hash-chain intact{who}")
+        if receipt.get("claim"):
+            print(f"    claim: {receipt['claim']}")
+        print(f"    tip {(receipt.get('tip') or '')[:16]}…")
+        return 0
+    print(f"  ✗ receipt INVALID — {len(v['errors'])} problem(s):")
+    for e in v["errors"][:6]:
+        print(f"      - {e}")
+    return 1
+
+
 def cmd_scan():
     """`korgex scan [path]` — verifiable security scan. Runs the best available
     scanner (trivy, else pip-audit/bandit), prints the findings, and records a
@@ -1015,6 +1136,7 @@ SUBCOMMANDS = {
     "verify":            cmd_verify,
     "trace":             cmd_trace,
     "why":               cmd_why,
+    "receipt":           cmd_receipt,             # mint/verify a portable, signed, self-verifying proof of a run
     "scan":              cmd_scan,                # verifiable security scan (wraps trivy/pip-audit/bandit)
     "review":            cmd_review,              # verifiable code review of a diff (adversarially verified)
     "cost":              cmd_cost,
@@ -1143,6 +1265,15 @@ def _build_subcommand_parser():
         elif name == "cost":
             sp.add_argument("path", nargs="?",
                             help="journal JSONL (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+        elif name == "receipt":
+            sp.add_argument("args", nargs="*",
+                            help="journal to attest, or 'verify <receipt.json>' to check one "
+                                 "(default journal: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+            sp.add_argument("--claim", help="a human one-liner describing what this run delivered")
+            sp.add_argument("--sign", action="store_true", help="sign the tip with your Ed25519 identity")
+            sp.add_argument("--out", "-o", help="receipt JSON path (default: ~/.korgex/receipts/<j>.korgreceipt.json)")
+            sp.add_argument("--html", nargs="?", const="",
+                            help="also write a self-verifying HTML receipt (default: <out>.html)")
         elif name == "scan":
             sp.add_argument("path", nargs="?", help="path to scan (default: current directory)")
         elif name == "review":

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`korgex receipt` — mint a portable, signed, self-verifying proof of a run.** Exports a slice of the ledger as one shareable file: the events (so it verifies offline, no original journal needed), the chain tip, a human `--claim`, a summary (files / tools / cost), and an optional Ed25519 signature (`--sign`, authorship via a persistent `~/.korgex/identity.key` or `KORGEX_SIGNING_KEY`). Anyone checks it with `korgex receipt verify <file>` (exit-coded so CI can gate on a provable deliverable), or by opening the `--html` form in any browser — it re-verifies the hash chain locally, with zero trust in korgex (reuses the conformance-tested in-browser verifier and its live tamper test). The consumer edge of the verifiable-cognition moat.
 - **Point korgex at a self-hosted / custom OpenAI-compatible endpoint.** Set `KORGEX_API_URL` (a self-hosted vLLM, LM Studio, or any OpenAI-compatible gateway) and korgex routes there — including for an arbitrary server-side model id like `Qwen2.5-Coder-32B`, which previously fell back to the Anthropic default. A keyless server needs no key (a placeholder is supplied). So `KORGEX_API_URL=http://your-box:8000/v1 korgex --model Qwen2.5-Coder-32B "…"` just works — the privacy / offline / cost-lever path, with nothing else to wire.
 
 ## [0.18.0] — 2026-06-03
