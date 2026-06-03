@@ -103,6 +103,33 @@ def test_resolve_client_ollama_local_base_url_no_key():
     assert key is not None
 
 
+# ── custom self-hosted OpenAI-compatible endpoint (KORGEX_API_URL) ────────────
+
+def test_custom_endpoint_routes_unknown_model_to_it():
+    # A self-hosted vLLM model name shouldn't fall back to Anthropic — KORGEX_API_URL
+    # is an explicit "use my OpenAI-compatible endpoint".
+    cfg = C.Config(default_model="Qwen2.5-Coder-32B", providers=[])
+    key, base_url = C.resolve_client_config(
+        "Qwen2.5-Coder-32B", cfg, env={"KORGEX_API_URL": "http://vast-box:8000/v1"})
+    assert base_url == "http://vast-box:8000/v1"
+    assert key  # a keyless vLLM still needs a non-empty placeholder so the client builds
+
+
+def test_custom_endpoint_uses_real_key_when_present():
+    cfg = C.Config(default_model="my-model", providers=[])
+    key, base_url = C.resolve_client_config(
+        "my-model", cfg, env={"KORGEX_API_URL": "http://host:8000/v1", "OPENAI_API_KEY": "sk-real"})
+    assert base_url == "http://host:8000/v1"
+    assert key == "sk-real"
+
+
+def test_custom_endpoint_does_not_hijack_claude():
+    cfg = C.Config(default_model="claude-sonnet-4-6", providers=[])
+    key, base_url = C.resolve_client_config(
+        "claude-sonnet-4-6", cfg, env={"KORGEX_API_URL": "http://host:8000/v1"})
+    assert base_url is None      # claude still goes to Anthropic even with KORGEX_API_URL set
+
+
 def test_resolve_client_env_key_fallback():
     # no config provider, but OPENAI_API_KEY in env → still resolves
     key, base_url = C.resolve_client_config("gpt-4o", C.Config(),
