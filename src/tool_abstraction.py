@@ -631,6 +631,39 @@ if _CODEACT_ENABLED:
     register_codeact_action()
 
 
+# NetCapture — OPT-IN (KORGEX_NETCAPTURE_ENABLE) auditable network-traffic debugger:
+# run an app the agent wrote UNDER capture and get a redacted trace of its HTTP(S).
+# Capture-only + process-scoped; ships available-but-off (it's a TLS-intercepting
+# capture proxy, so it's opt-in like CodeAct/browser, and the boundary stays clean).
+_NETCAPTURE_ENABLED = (
+    os.environ.get("KORGEX_NETCAPTURE_ENABLE", "off").strip().lower()
+    in ("1", "true", "yes", "on")
+)
+
+_NETCAPTURE_DESC = """\
+Run a command — an app or script you wrote — UNDER network capture, and get back its \
+output plus a trace of every HTTP(S) request/response it made (method, URL, status, \
+headers, body, timing). Use this to DEBUG an app's network behavior (auth flow, \
+missing headers, unexpected status codes, request/response shape) without printing \
+cURL commands or asking the user to copy-paste. Capture-only — traffic is observed, \
+never modified; secrets are masked. The trace is recorded to the verifiable ledger."""
+
+
+def register_netcapture_tool() -> None:
+    """Register the NetCapture tool. Called at import when KORGEX_NETCAPTURE_ENABLE is
+    on; exposed as a function so tests can register it on demand + clean up."""
+    register_user_tool("NetCapture", _NETCAPTURE_DESC, [
+        {"name": "command", "type": "string",
+         "description": "Shell command that runs the app/script to capture "
+                        "(e.g. 'python app.py', 'npm test'). Its HTTP(S) is recorded.",
+         "required": True},
+    ], exposure="direct")
+
+
+if _NETCAPTURE_ENABLED:
+    register_netcapture_tool()
+
+
 _TOOL_ROUTING = {
     "Read":  {"handler": "tool_read_file",                 "module": "src.tools_impl",
               "param_map": {"file_path": "filepath"}},
@@ -667,6 +700,12 @@ _TOOL_ROUTING = {
     "browser_crawl":      {"handler": "tool_browser_crawl",      "module": "src.tools_impl"},
     "browser_audit":      {"handler": "tool_browser_audit",      "module": "src.tools_impl"},
 }
+
+# NetCapture routes only when opt-in is enabled (mirrors the registration gate).
+if _NETCAPTURE_ENABLED:
+    _TOOL_ROUTING["NetCapture"] = {
+        "handler": "tool_net_capture", "module": "src.tools_impl",
+        "param_map": {"command": "command"}}
 
 
 def route_tool_call(tool_name: str, params: dict, repo_root: str = None, seq: int = None) -> dict:

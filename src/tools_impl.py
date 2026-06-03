@@ -1456,6 +1456,28 @@ def tool_browser_audit(url: str, _session=None, context=None):
         return _browser_unavailable_result()
 
 
+def tool_net_capture(command: str, context: dict = None):
+    """Run a command (an app/script you wrote) UNDER network capture and return its
+    output plus a redacted trace of every HTTP(S) request/response it made — so you
+    can debug API calls (auth, headers, status, bodies) without copy-pasting cURL.
+
+    Capture-only + process-scoped (only this command's traffic); secret header values
+    and known-shape body secrets are masked before the trace is returned/recorded.
+    Refuses a destructive command (same floor as Bash). Returns
+    {exit_code, stdout, stderr, captures:[{method,url,status,headers,body,ms}], count}.
+    """
+    from src import netcapture as _nc
+    from src import command_guard as _cg
+    if not command or not str(command).strip():
+        return {"error": "net_capture: empty command"}
+    verdict = _cg.assess_command(command)
+    if verdict:
+        return {"error": f"net_capture refused a destructive command: {verdict['reason']}",
+                "category": verdict["category"], "verdict": "DESTRUCTIVE_BLOCKED"}
+    cwd = context.get("repo_root") if isinstance(context, dict) else None
+    return _nc.run_with_capture(["bash", "-c", command], cwd=cwd)
+
+
 @register_tool("retrieve_blob",
                "Pull the FULL sealed original of a tool result that was compressed "
                "away, by its sha256 content handle. Returns the exact bytes, "
