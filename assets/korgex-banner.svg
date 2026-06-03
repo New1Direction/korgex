@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" role="img" aria-label="korgex — the verifiable coding agent">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070a10"/>
+      <stop offset="1" stop-color="#0d141f"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3fb950"/>
+      <stop offset="1" stop-color="#2dd4bf"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.28" cy="0.5" r="0.6">
+      <stop offset="0" stop-color="#3fb950" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#3fb950" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="300" fill="url(#bg)"/>
+  <rect width="1200" height="300" fill="url(#glow)"/>
+
+  <!-- faint baseline grid -->
+  <g stroke="#1c2733" stroke-width="1" opacity="0.5">
+    <line x1="0" y1="75" x2="1200" y2="75"/>
+    <line x1="0" y1="150" x2="1200" y2="150"/>
+    <line x1="0" y1="225" x2="1200" y2="225"/>
+  </g>
+
+  <!-- prompt -->
+  <text x="66" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="22" fill="#5b6b7b">~/project <tspan fill="#3fb950">❯</tspan> korgex "ship it"</text>
+
+  <!-- wordmark + cursor -->
+  <text x="62" y="186" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="108" font-weight="700" fill="url(#mark)" letter-spacing="-2">korgex</text>
+  <rect x="452" y="118" width="30" height="74" rx="3" fill="#2dd4bf"/>
+
+  <!-- tagline + pillars -->
+  <text x="68" y="232" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="25" fill="#c9d6e3">the verifiable coding agent</text>
+  <text x="68" y="266" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#5b6b7b">provider-agnostic&#160;&#160;·&#160;&#160;MCP-native&#160;&#160;·&#160;&#160;plan-first&#160;&#160;·&#160;&#160;tamper-evident</text>
+
+  <!-- hash-chained ledger motif -->
+  <text x="828" y="96" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" fill="#5b6b7b">korg-ledger · hash-chained</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#7fe0a0">
+    <line x1="886" y1="150" x2="922" y2="150" stroke="#2a3a2f" stroke-width="3"/>
+    <line x1="980" y1="150" x2="1016" y2="150" stroke="#2a3a2f" stroke-width="3"/>
+    <line x1="1074" y1="150" x2="1110" y2="150" stroke="#2a3a2f" stroke-width="3"/>
+
+    <rect x="828" y="120" width="58" height="60" rx="8" fill="#0f1a16" stroke="#2dd4bf" stroke-opacity="0.5"/>
+    <text x="857" y="155" text-anchor="middle" fill="#5b6b7b">a1f3</text>
+    <rect x="922" y="120" width="58" height="60" rx="8" fill="#0f1a16" stroke="#2dd4bf" stroke-opacity="0.5"/>
+    <text x="951" y="155" text-anchor="middle" fill="#5b6b7b">7c0e</text>
+    <rect x="1016" y="120" width="58" height="60" rx="8" fill="#0f1a16" stroke="#2dd4bf" stroke-opacity="0.5"/>
+    <text x="1045" y="155" text-anchor="middle" fill="#5b6b7b">b42d</text>
+    <rect x="1110" y="120" width="58" height="60" rx="8" fill="#0f1a16" stroke="#3fb950"/>
+    <text x="1139" y="155" text-anchor="middle" fill="#3fb950">✓</text>
+  </g>
+  <text x="1139" y="200" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#3fb950">verified</text>
+
+  <rect x="0" y="296" width="1200" height="4" fill="url(#mark)"/>
+</svg>
