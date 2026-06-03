@@ -122,10 +122,11 @@ def causal_path(by_seq: dict, seq) -> list:
 
 def _touches(e, target: str) -> bool:
     args = e.get("args") or {}
-    # `name` lets `why <skill>` match a skill.learned/curated or a Skill invocation —
-    # so a learned skill's provenance traces back to its prompt like any file edit.
+    # `name` lets `why <skill>` match a skill.learned/curated or a Skill invocation;
+    # `file` lets `why <file>` match a review.finding — so provenance traces back to its
+    # prompt like any file edit.
     hay = " ".join(str(args.get(k, ""))
-                   for k in ("file_path", "path", "notebook_path", "command", "name"))
+                   for k in ("file_path", "path", "notebook_path", "command", "name", "file"))
     return bool(target) and target in hay
 
 
