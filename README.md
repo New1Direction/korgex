@@ -1,6 +1,6 @@
-<!-- HERO BANNER goes here — see "Images to make" #1.
-     Drop your image at docs/images/banner.png, then replace this comment with:
-     <p align="center"><img src="docs/images/banner.png" alt="korgex — the verifiable coding agent" width="100%"></p> -->
+<p align="center">
+  <img src="docs/images/banner.jpg" alt="korgex — the verifiable coding agent" width="100%">
+</p>
 
 <p align="center">
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/v/korgex?color=3fb950&label=pypi" alt="PyPI version"></a>
