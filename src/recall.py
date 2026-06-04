@@ -101,13 +101,21 @@ def event_text(event: dict) -> str:
 def search(events: list, query: str, top_n: int = 5, mode: str = "auto") -> list:
     """Rank events against a query. Returns [{event, score}] (highest first).
 
-    Substring mode requires ALL query terms to appear (AND-of-terms), ranked by
-    total term occurrences, recency (seq_id) as tiebreak. Semantic mode is used
-    only when mode='semantic' AND fastembed is importable; otherwise substring.
+    Substring mode (default) requires ALL query terms to appear (AND-of-terms), ranked by
+    total term occurrences, recency (seq_id) as tiebreak. mode="fts" ranks by SQLite FTS5
+    BM25 (relevance, partial matches, no new dependency), falling back to substring if FTS5
+    is absent. mode="semantic" uses fastembed cosine when importable; otherwise substring.
     """
     terms = [t for t in (query or "").lower().split() if t]
     if not terms:
         return []
+
+    if mode == "fts":
+        from src import recall_index as RI
+        indexed = RI.search_fts(events, query, top_n=top_n)
+        if indexed is not None:
+            return indexed
+        # FTS5 unavailable on this interpreter → fall through to substring
 
     if mode == "semantic":
         semantic = _semantic_search(events, query, top_n)

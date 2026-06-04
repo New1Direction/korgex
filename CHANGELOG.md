@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FTS5 BM25 recall — sharper, dependency-free retrieval.** A new `recall.search(mode="fts")` (used by `korgex recall`) indexes the ledger events with SQLite **FTS5** and ranks by **BM25** instead of the default substring scorer's raw term-occurrence + strict all-terms-must-appear (which could return nothing for a multi-term query). Partial matches are allowed and path/identifier tokens are split, so e.g. searching `auth middleware` also surfaces a `test_auth.py` run. Runs on the Python **stdlib** (FTS5 is built into `sqlite3`) — no new dependency, no network — and falls back to substring if FTS5 is ever absent. (A persistent `sqlite-vec`/vec0 semantic store needs a Python whose `sqlite3` can load extensions, which macOS system Python can't; semantic ranking stays covered by the existing optional fastembed cosine path, `mode="semantic"`.)
+
 ## [0.21.0] — 2026-06-04
 
 ### Added
