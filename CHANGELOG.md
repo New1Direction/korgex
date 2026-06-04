@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **ACP (Agent Client Protocol) agent — `korgex acp`.** korgex now speaks the open [Agent Client Protocol](https://agentclientprotocol.com) as an *agent* over stdio (JSON-RPC 2.0), so ACP editors/clients (Zed et al.) can drive it. `src/acp.py`: the `initialize` capability handshake, `session/new`, `session/prompt` (bridged to korgex's agent loop, streaming `agent_message_chunk` updates + a stop reason), and `session/cancel`. Implemented **clean-room from the open spec**; the `AcpAgent` dispatcher is transport-agnostic and dependency-injected, so the protocol layer is fully unit-tested (the live-agent bridge redirects the agent's stdout to stderr so it can't corrupt the JSON-RPC channel). End-to-end against a real ACP client is the remaining validation. Fits the cross-vendor positioning: one verifiable agent, drivable from any ACP editor.
 
+### Changed
+- **Maintainability: extracted resolution helpers out of `agent.py`.** The pure provider/model/mode/subagent *resolution* functions (`_looks_anthropic`, `_oauth_provider_for`, `_oauth_token_and_base`, `subagent_tools`, `_resolve_params`, `_resolve_model` + their constants) moved from the agent loop into a focused, independently-testable `src/agent_resolve.py` (re-imported by `agent.py`, so behavior is byte-for-byte unchanged — all 1432 tests pass). `agent.py`: 2838 → 2704 lines. A first safe slice of a larger decomposition of the core loop.
+
 ## [0.23.0] — 2026-06-04
 
 ### Added
