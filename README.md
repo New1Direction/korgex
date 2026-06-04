@@ -212,6 +212,17 @@ korgex import transcript.json     # replay any vendor's session into a korg-ledg
 korgex trajectory --out train.jsonl   # export the journal as a provenance-stamped training trajectory
 ```
 
+**Hand someone a receipt.** `korgex receipt` mints a single portable file that proves what a run did — the events (so it checks **offline**), a plain-language `--claim`, a summary, and an optional `--sign` that attests *who* with your own key. The recipient confirms it with `korgex receipt verify <file>` (exit 0/1), or just opens the `--html` and watches it re-verify itself. A provable deliverable, not a screenshot.
+
+```bash
+korgex receipt --claim "shipped /healthz + passing test" --sign --html receipt.html
+#   ✓ receipt minted — 5 events, 3 tool calls, 2 files, $0.0078
+#   signed by b251a84c… (your korgex identity) · tip 46263017…
+#   receipt.html  ← open in any browser; it re-verifies itself
+
+korgex receipt verify receipt.korgreceipt.json   # ✓ VALID / ✗ INVALID (CI-gateable)
+```
+
 See [Self-Coding Bench](docs/self-coding-bench.md) for live reliability data across models.
 
 ---
