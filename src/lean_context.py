@@ -57,14 +57,26 @@ def summarize_event(event: dict) -> str:
 
 
 def build_lean_context(events, query, *, budget_tokens: int = 1500, top_n: int = 20,
-                       mode: str = "auto") -> dict:
+                       mode: str = "auto", causal=False) -> dict:
     """Retrieve the events relevant to `query`, render them as a compact block within
     `budget_tokens`, chronological for a coherent narrative. Always keeps at least the
     single most relevant line (so a tiny budget still yields something). Returns
     ``{text, refs, events_used, tokens_est}`` — `refs` are the cited seq ids, the
-    provenance handles back into the verifiable chain."""
+    provenance handles back into the verifiable chain.
+
+    `causal` expands the matches along the ledger's `triggered_by` DAG
+    (``recall.expand_causal``): ``True``/``"both"`` pulls causes and effects, ``"causes"``
+    only the prompt that triggered a matched action (no sibling leak — best for per-step
+    context), ``"effects"`` only the actions a matched prompt triggered. The budget still
+    caps the rendered lines. Off by default so plain text-relevance retrieval is
+    unchanged."""
     hits = recall.search(events or [], query, top_n=top_n, mode=mode)
-    chosen = sorted((h["event"] for h in hits), key=lambda e: _seq(e) or 0)
+    seed_events = [h["event"] for h in hits]
+    if causal:
+        direction = "both" if causal is True else str(causal)
+        seed_events = recall.expand_causal(events or [], seed_events, depth=1,
+                                           direction=direction, max_total=max(top_n * 3, 30))
+    chosen = sorted(seed_events, key=lambda e: _seq(e) or 0)
 
     lines: list[str] = []
     refs: list[int] = []
