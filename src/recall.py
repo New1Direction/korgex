@@ -220,6 +220,44 @@ def expand_causal(events: list, seeds: list, *, depth: int = 1,
     return out
 
 
+def _event_sim(e1: dict, e2: dict) -> float:
+    """Token-Jaccard similarity of two events' searchable text, in [0,1]."""
+    t1 = set(event_text(e1).lower().split())
+    t2 = set(event_text(e2).lower().split())
+    if not t1 or not t2:
+        return 0.0
+    return len(t1 & t2) / len(t1 | t2)
+
+
+def mmr_rerank(hits: list, *, lambda_: float = 0.7, top_n: int = None, sim=None) -> list:
+    """Re-rank scored hits for relevance AND diversity (Maximal Marginal Relevance), so a
+    cluster of near-duplicate events doesn't crowd out distinct ones (and waste a lean-context
+    budget). `hits` = [{event, score}] with score = relevance (higher better). `lambda_`
+    trades off: 1.0 = pure relevance, lower = more diversity. `sim(e1, e2) -> [0,1]` defaults
+    to token-Jaccard on event text. Returns the hits re-ordered (same dicts)."""
+    if not hits:
+        return []
+    sim = sim or _event_sim
+    scores = [h.get("score", 0.0) for h in hits]
+    lo, hi = min(scores), max(scores)
+    span = (hi - lo) or 1.0
+    rel = {id(h): (h.get("score", 0.0) - lo) / span for h in hits}  # normalize relevance to [0,1]
+
+    selected: list = []
+    remaining = list(hits)
+    limit = top_n or len(hits)
+    while remaining and len(selected) < limit:
+        best, best_mmr = None, None
+        for h in remaining:
+            penalty = max((sim(h["event"], s["event"]) for s in selected), default=0.0)
+            mmr = lambda_ * rel[id(h)] - (1.0 - lambda_) * penalty
+            if best_mmr is None or mmr > best_mmr:
+                best, best_mmr = h, mmr
+        selected.append(best)
+        remaining.remove(best)
+    return selected
+
+
 # ── memory-drift: reconcile recalled refs against the live workspace ──────
 
 def _sha256_bytes(data: bytes) -> str:
