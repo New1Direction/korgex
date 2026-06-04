@@ -398,7 +398,7 @@ def cmd_recall():
         print(f"  No ledger journal at {path}")
         return 1
 
-    ctx = LC.build_lean_context(load_journal_raw(path), query, mode="fts")
+    ctx = LC.build_lean_context(load_journal_raw(path), query, mode="fts", diversify=True)
     if not ctx["events_used"]:
         print(f"  nothing in the ledger matches: {query}")
         return 0

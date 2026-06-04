@@ -57,7 +57,7 @@ def summarize_event(event: dict) -> str:
 
 
 def build_lean_context(events, query, *, budget_tokens: int = 1500, top_n: int = 20,
-                       mode: str = "auto", causal=False) -> dict:
+                       mode: str = "auto", causal=False, diversify: bool = False) -> dict:
     """Retrieve the events relevant to `query`, render them as a compact block within
     `budget_tokens`, chronological for a coherent narrative. Always keeps at least the
     single most relevant line (so a tiny budget still yields something). Returns
@@ -67,33 +67,40 @@ def build_lean_context(events, query, *, budget_tokens: int = 1500, top_n: int =
     `causal` expands the matches along the ledger's `triggered_by` DAG
     (``recall.expand_causal``): ``True``/``"both"`` pulls causes and effects, ``"causes"``
     only the prompt that triggered a matched action (no sibling leak — best for per-step
-    context), ``"effects"`` only the actions a matched prompt triggered. The budget still
-    caps the rendered lines. Off by default so plain text-relevance retrieval is
-    unchanged."""
+    context), ``"effects"`` only the actions a matched prompt triggered.
+
+    `diversify` (MMR) selects within the budget by relevance AND novelty so a cluster of
+    near-duplicate events doesn't crowd out distinct ones — the chosen events are still
+    rendered chronologically. Off by default, in which case selection is purely
+    chronological (byte-for-byte the prior behavior)."""
     hits = recall.search(events or [], query, top_n=top_n, mode=mode)
+    if diversify:
+        hits = recall.mmr_rerank(hits, top_n=top_n)
     seed_events = [h["event"] for h in hits]
     if causal:
         direction = "both" if causal is True else str(causal)
         seed_events = recall.expand_causal(events or [], seed_events, depth=1,
                                            direction=direction, max_total=max(top_n * 3, 30))
-    chosen = sorted(seed_events, key=lambda e: _seq(e) or 0)
 
-    lines: list[str] = []
-    refs: list[int] = []
+    # Selection order: MMR rank (diverse-first) when diversifying, else chronological. Then
+    # render chronologically either way, for a coherent narrative.
+    pool = seed_events if diversify else sorted(seed_events, key=lambda e: _seq(e) or 0)
+
+    picked: list = []
     tokens = 0
-    for ev in chosen:
+    for ev in pool:
         line = summarize_event(ev)
         if not line:
             continue
         cost = estimate_tokens(line)
-        if lines and tokens + cost > budget_tokens:   # always allow the first line through
+        if picked and tokens + cost > budget_tokens:   # always allow the first line through
             break
-        lines.append(line)
+        picked.append((_seq(ev), line))
         tokens += cost
-        sid = _seq(ev)
-        if isinstance(sid, int):
-            refs.append(sid)
 
+    picked.sort(key=lambda t: t[0] if isinstance(t[0], int) else 0)
+    lines = [line for _, line in picked]
+    refs = [sid for sid, _ in picked if isinstance(sid, int)]
     return {"text": "\n".join(lines), "refs": refs,
             "events_used": len(lines), "tokens_est": tokens}
 
