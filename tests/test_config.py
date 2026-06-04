@@ -135,3 +135,48 @@ def test_resolve_client_env_key_fallback():
     key, base_url = C.resolve_client_config("gpt-4o", C.Config(),
                                             env={"OPENAI_API_KEY": "sk-ENV"})
     assert key == "sk-ENV"
+
+
+# ── named provider presets (self-hosted vLLM etc.) + active selection ─────────
+
+def test_upsert_set_active_roundtrips(tmp_path):
+    cfg = C.upsert_provider(C.Config(), "vllm", base_url="http://box:8000/v1", model="my-ft")
+    cfg = C.set_active(cfg, "vllm")
+    assert cfg.active_provider == "vllm"
+    assert cfg.active()["base_url"] == "http://box:8000/v1"
+    path = str(tmp_path / "c.json")
+    C.save_config(cfg, path)
+    again = C.load_config(path)
+    assert again.active_provider == "vllm"
+    assert again.active()["model"] == "my-ft"            # survives save/load
+
+
+def test_active_provider_pins_endpoint_for_its_model():
+    cfg = C.set_active(C.upsert_provider(C.Config(), "vllm",
+                       base_url="http://box:8000/v1", model="my-ft"), "vllm")
+    key, base = C.resolve_client_config("my-ft", cfg, env={})
+    assert base == "http://box:8000/v1"
+    assert key == "EMPTY"                                # keyless vLLM → placeholder so the client builds
+
+
+def test_active_provider_uses_its_key_when_set():
+    cfg = C.set_active(C.upsert_provider(C.Config(), "vllm",
+                       base_url="http://box:8000/v1", model="my-ft", api_key="sk-x"), "vllm")
+    assert C.resolve_client_config("my-ft", cfg, env={}) == ("sk-x", "http://box:8000/v1")
+
+
+def test_active_preset_does_not_capture_a_different_explicit_model():
+    cfg = C.set_active(C.upsert_provider(C.Config(), "vllm",
+                       base_url="http://box:8000/v1", model="my-ft"), "vllm")
+    key, base = C.resolve_client_config("claude-sonnet-4-6", cfg,
+                                        env={"ANTHROPIC_API_KEY": "sk-ant"})
+    assert base is None and key == "sk-ant"              # explicit claude still goes to Anthropic
+
+
+def test_upsert_replaces_same_name_and_remove_clears_active():
+    cfg = C.upsert_provider(C.Config(), "vllm", base_url="u1", model="m1")
+    cfg = C.upsert_provider(cfg, "vllm", base_url="u2", model="m2")   # replace, not duplicate
+    assert len([p for p in cfg.providers if p.get("name") == "vllm"]) == 1
+    assert cfg.provider_by_name("vllm")["base_url"] == "u2"
+    cfg = C.remove_provider(C.set_active(cfg, "vllm"), "vllm")
+    assert cfg.provider_by_name("vllm") is None and cfg.active() is None
