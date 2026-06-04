@@ -1179,6 +1179,7 @@ class KorgexAgent:
         from src import loop_guard as _LG
         _repeat_guard = _LG.RepeatGuard()
         _intent_guard = _LG.IntentGuard()
+        _rep_guard = _LG.RepetitionGuard()
         try:
             for i in range(max_iter):
                 # ── Auto-compaction: if the transcript is nearing the model's
@@ -1245,6 +1246,22 @@ class KorgexAgent:
                                 success=True, duration_ms=0, triggered_by=llm_seq,
                             )
                             continue  # give it another turn to actually call the tool
+                    # Single-message repetition rail: the model emitted a degenerate
+                    # repeated line/block within one response (a stuck loop, not a tool
+                    # call). Record it to the ledger and nudge it to break out (capped).
+                    if output_schema is None:
+                        _rep = _LG.detect_repetition(round_text)
+                        if _rep:
+                            korg.record_tool_call(
+                                tool_name="loop_guard.repetition",
+                                args={}, result={"kind": _rep["kind"], "reps": _rep["reps"]},
+                                success=True, duration_ms=0, triggered_by=llm_seq,
+                            )
+                            _rep_nudge = _rep_guard.nudge(_rep)
+                            if _rep_nudge is not None:
+                                messages.append(self._assistant_turn(response))
+                                messages.append({"role": "user", "content": _rep_nudge})
+                                continue
                     # Schema-constrained finish: do a final structured pass so
                     # the answer is a validated object on the ledger, not prose.
                     if output_schema is not None:

@@ -88,3 +88,64 @@ class IntentGuard:
         self._count += 1
         return ("You described an action but didn't call a tool. If you intend to act, "
                 "call the tool now; otherwise give your final answer.")
+
+
+def detect_repetition(text: str, *, min_line_reps: int = 4, min_block_reps: int = 3,
+                      min_score: int = 120, max_period: int = 12):
+    """Detect degenerate repetition WITHIN a single response — a model spewing the same
+    line, or the same multi-line block, over and over (a stuck loop, distinct from
+    `RepeatGuard`'s repeated *tool calls* across turns). Pure + LLM-free.
+
+    Uses a P×K score (``pattern_length × repetitions``): short patterns need many reps,
+    long ones only a few. Returns ``{kind, reps, pattern[, period]}`` for the first loop
+    found (single-line checked before multi-line), or ``None`` if the text looks healthy.
+    Blank/whitespace-only runs never count."""
+    if not text:
+        return None
+    lines = text.split("\n")
+    n = len(lines)
+
+    # 1) a non-blank line repeated on consecutive rows
+    i = 0
+    while i < n:
+        j = i + 1
+        while j < n and lines[j] == lines[i]:
+            j += 1
+        run, content = j - i, lines[i].strip()
+        if content and run >= min_line_reps and len(content) * run >= min_score:
+            return {"kind": "single_line", "reps": run, "pattern": content[:80]}
+        i = j
+
+    # 2) a multi-line block repeated on consecutive row-groups (period p)
+    for p in range(2, min(max_period, n // 2) + 1):
+        i = 0
+        while i + 2 * p <= n:
+            block = lines[i:i + p]
+            reps, k = 1, i + p
+            while k + p <= n and lines[k:k + p] == block:
+                reps, k = reps + 1, k + p
+            joined = "\n".join(block).strip()
+            if reps >= min_block_reps and joined and len(joined) * reps >= min_score:
+                return {"kind": "multi_line", "period": p, "reps": reps, "pattern": joined[:120]}
+            i += p * reps if reps > 1 else 1
+    return None
+
+
+class RepetitionGuard:
+    """Caps how many times we nudge a model out of single-message repetition, so the
+    nudge itself can't loop."""
+
+    def __init__(self, max_nudges: int = 2):
+        self.max_nudges = max_nudges
+        self._count = 0
+
+    def nudge(self, rep: dict):
+        """Return a corrective nudge for a detected repetition while under the cap, else
+        None (stop nudging — let the turn fall through)."""
+        if self._count >= self.max_nudges:
+            return None
+        self._count += 1
+        unit = "line" if rep.get("kind") == "single_line" else "block"
+        return (f"Your last response repeated the same {unit} {rep.get('reps', 'several')} "
+                "times — that's a stuck loop, not progress. Stop repeating: make the next "
+                "concrete tool call, or give your final answer.")
