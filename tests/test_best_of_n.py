@@ -87,3 +87,41 @@ def test_best_of_n_winner_even_if_not_auto_mergeable(tmp_path):
     assert out["passed_count"] == 2
     assert out["winner"] is not None                       # falls back to a passing attempt
     assert out["winner"]["merge_gate"]["requires_human_review"] is True
+
+
+# ── verifiable trail: the N attempts + the pick become tamper-evident events ───
+
+def test_best_of_n_records_a_verifiable_trail(tmp_path):
+    from src import korg_ledger as KL
+    from src import ledger_spec as S
+    repo = _git_repo(tmp_path)
+    jp = str(tmp_path / "j.jsonl")
+    led = KL.LocalJournalClient(journal_path=jp)
+    root = led.record_user_prompt("ship feature X")
+
+    def runner(prompt, wt):
+        (Path(wt) / "notes.txt").write_text("did it")
+        return {"success": True, "root_seq": 1}
+
+    out = run_best_of_n("ship X", runner, str(repo), n=3, worktree_base=str(tmp_path / "w"),
+                        ledger=led, parent_seq=root)
+    assert "root_seq" in out
+    events = KL.load_journal_raw(jp)
+    kinds = [e.get("tool_name") for e in events]
+    assert kinds.count("best_of_n.attempt") == 3           # one verifiable event per attempt
+    sel = next(e for e in events if e.get("tool_name") == "best_of_n.selected")
+    assert sel["result"]["passed_count"] == 3
+    assert sel["result"]["winner_branch"] is not None      # the pick is named
+    assert S.verify_chain(events) == []                    # …and the whole trail's chain is intact
+
+
+def test_best_of_n_without_ledger_is_unchanged(tmp_path):
+    repo = _git_repo(tmp_path)
+
+    def runner(prompt, wt):
+        (Path(wt) / "n.txt").write_text("x")
+        return {"success": True, "root_seq": 1}
+
+    out = run_best_of_n("x", runner, str(repo), n=2, worktree_base=str(tmp_path / "w"))
+    assert "root_seq" not in out                           # no ledger → no recording (back-compat)
+    assert out["passed_count"] == 2

@@ -176,7 +176,8 @@ def parallel(thunks, max_workers: int = 8) -> list:
 
 
 def run_best_of_n(prompt, agent_runner, repo_root: str, n: int = 3,
-                  worktree_base: str = None, branch_prefix: str = "korgex/bon") -> dict:
+                  worktree_base: str = None, branch_prefix: str = "korgex/bon",
+                  *, ledger=None, parent_seq=None) -> dict:
     """Run the SAME task n times concurrently, each in its OWN isolated worktree,
     and pick a winner that passed its gate. Inference-time scaling for reliability.
 
@@ -184,6 +185,11 @@ def run_best_of_n(prompt, agent_runner, repo_root: str, n: int = 3,
     gate active, so result["success"] reflects gate-pass). Each attempt's branch
     persists for review/merge; worktrees are cleaned up. Winner selection prefers
     an auto-mergeable passing attempt, else any passing attempt.
+
+    When `ledger` is given, the run leaves a VERIFIABLE trail: a root chained under
+    `parent_seq`, a `best_of_n.attempt` event per attempt (gate-pass + mergeability),
+    and a `best_of_n.selected` verdict naming the winner and WHY — so `korgex why` /
+    `verify` can prove the candidates ran and the pick is honest. No ledger → unchanged.
     """
     from src import workspace as W
     from src.guardrails import classify_diff
@@ -205,7 +211,47 @@ def run_best_of_n(prompt, agent_runner, repo_root: str, n: int = 3,
     winners = [a for a in attempts if a["passed"]]
     winner = (next((w for w in winners if w["merge_gate"]["auto_mergeable"]), None)
               or (winners[0] if winners else None))
-    return {"n": n, "attempts": attempts, "winner": winner, "passed_count": len(winners)}
+    out = {"n": n, "attempts": attempts, "winner": winner, "passed_count": len(winners)}
+    if ledger is not None:
+        out["root_seq"] = _record_best_of_n(ledger, prompt, attempts, winner, parent_seq)
+    return out
+
+
+def _record_best_of_n(ledger, prompt, attempts, winner, parent_seq) -> int:
+    """Record a best-of-N run as a verifiable causal subtree: a root, a typed event per
+    attempt (gate-pass + mergeability), and a selection verdict naming the winner and WHY.
+    Each write is wrapped — recording must never break the run."""
+    root = ledger.record_user_prompt(f"[best-of-n] {str(prompt)[:120]}", triggered_by=parent_seq)
+    for a in attempts:
+        gate = a.get("merge_gate") or {}
+        try:
+            ledger.record_tool_call(
+                tool_name="best_of_n.attempt",
+                args={"attempt": a.get("attempt"), "branch": a.get("branch")},
+                result={"passed": a.get("passed", False),
+                        "auto_mergeable": gate.get("auto_mergeable", False),
+                        "requires_human_review": gate.get("requires_human_review", False)},
+                success=bool(a.get("passed")), duration_ms=0, triggered_by=root)
+        except Exception:
+            pass
+    if winner is None:
+        why = "no attempt passed its gate"
+    elif (winner.get("merge_gate") or {}).get("auto_mergeable"):
+        why = "auto-mergeable passing attempt"
+    else:
+        why = "passing attempt (needs human review to merge)"
+    try:
+        ledger.record_tool_call(
+            tool_name="best_of_n.selected",
+            args={"n": len(attempts)},
+            result={"winner_branch": (winner or {}).get("branch"),
+                    "winner_attempt": (winner or {}).get("attempt"),
+                    "passed_count": sum(1 for a in attempts if a.get("passed")),
+                    "why": why},
+            success=winner is not None, duration_ms=0, triggered_by=root)
+    except Exception:
+        pass
+    return root
 
 
 def multi_modal_sweep(lenses, runner, base_prompt: str) -> list:
