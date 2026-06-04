@@ -365,6 +365,49 @@ def cmd_why():
     return 0
 
 
+def cmd_recall():
+    """`korgex recall <query>` — pull the past ledger events relevant to <query> as a
+    compact, provenance-stamped block: what was done, each line tagged with the #seq you
+    can check (`korgex why` / `korgex verify`). Retrieve-don't-carry — the lean,
+    *trustworthy* context that lets a smaller (even self-hosted) model run the loop."""
+    from src import lean_context as LC
+    from src.korg_ledger import load_journal_raw
+
+    argv = sys.argv[1:]
+    toks = argv[argv.index("recall") + 1:] if "recall" in argv else []
+    path = None
+    qparts = []
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        if t in ("--journal", "-j"):
+            path = toks[i + 1] if i + 1 < len(toks) else None
+            i += 2
+        elif not t.startswith("-"):
+            qparts.append(t)
+            i += 1
+        else:
+            i += 1
+
+    query = " ".join(qparts).strip()
+    if not query:
+        print("  usage: korgex recall <query> [--journal PATH]")
+        return 2
+    path = path or os.environ.get("KORG_JOURNAL_PATH", str(Path(".korg") / "journal.jsonl"))
+    if not Path(path).exists():
+        print(f"  No ledger journal at {path}")
+        return 1
+
+    ctx = LC.build_lean_context(load_journal_raw(path), query)
+    if not ctx["events_used"]:
+        print(f"  nothing in the ledger matches: {query}")
+        return 0
+    print(ctx["text"])
+    print(f"\n  {ctx['events_used']} events · ~{ctx['tokens_est']} tokens · "
+          f"refs {ctx['refs']} — verify the chain they live in:  korgex verify {path}")
+    return 0
+
+
 def cmd_receipt():
     """`korgex receipt [journal]` — mint a portable, self-verifying receipt of a run:
     one file anyone can check (offline with `korgex receipt verify`, or by opening its
@@ -1136,6 +1179,7 @@ SUBCOMMANDS = {
     "verify":            cmd_verify,
     "trace":             cmd_trace,
     "why":               cmd_why,
+    "recall":            cmd_recall,              # lean, verified context retrieved from the ledger
     "receipt":           cmd_receipt,             # mint/verify a portable, signed, self-verifying proof of a run
     "scan":              cmd_scan,                # verifiable security scan (wraps trivy/pip-audit/bandit)
     "review":            cmd_review,              # verifiable code review of a diff (adversarially verified)
@@ -1265,6 +1309,10 @@ def _build_subcommand_parser():
         elif name == "cost":
             sp.add_argument("path", nargs="?",
                             help="journal JSONL (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
+        elif name == "recall":
+            sp.add_argument("query", nargs="*", help="words to retrieve relevant ledger events for")
+            sp.add_argument("--journal", "-j",
+                            help="journal to search (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
         elif name == "receipt":
             sp.add_argument("args", nargs="*",
                             help="journal to attest, or 'verify <receipt.json>' to check one "
