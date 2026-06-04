@@ -58,10 +58,28 @@ def test_missing_journal_is_a_clean_error(tmp_path, monkeypatch):
     assert _run(monkeypatch, str(tmp_path / "nope.jsonl")) == 1
 
 
+def test_share_subcommand_renders_shareable_page_from_a_receipt(tmp_path, monkeypatch):
+    jp = _journal(tmp_path)
+    out = str(tmp_path / "r.json")
+    _run(monkeypatch, jp, "--claim", "shipped healthz", "-o", out)     # mint a receipt first
+    page = str(tmp_path / "share.html")
+    assert _run(monkeypatch, "share", out, "-o", page) == 0
+    txt = Path(page).read_text()
+    assert 'property="og:title"' in txt                                # a real social card (link unfurls)
+    assert "shipped healthz" in txt
+    assert "verifyChain" in txt                                        # still self-verifying in-browser
+    assert "korg-verify" in txt                                        # and offers independent re-checking
+
+
+def test_share_missing_file_is_a_clean_error(tmp_path, monkeypatch):
+    assert _run(monkeypatch, "share", str(tmp_path / "nope.json")) == 1
+
+
 def test_argparse_accepts_both_receipt_forms():
     # The real CLI routes through this strict parser BEFORE cmd_receipt sees argv —
     # the two-token `verify <file>` form must not be rejected as an extra positional.
     p = cli._build_subcommand_parser()
     p.parse_args(["receipt", "verify", "/tmp/r.json"])                       # must not SystemExit
+    p.parse_args(["receipt", "share", "/tmp/r.json", "-o", "/tmp/page.html"])  # share <file> form
     p.parse_args(["receipt", "j.jsonl", "--claim", "x", "--sign",
                   "-o", "o.json", "--html", "h.html"])

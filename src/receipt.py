@@ -151,15 +151,53 @@ def verify_receipt(receipt: dict, *, key: bytes | None = None) -> dict:
     }
 
 
-def render_html(receipt: dict) -> str:
-    """Render the receipt as one self-contained HTML page that re-verifies the chain in
-    the recipient's browser — reusing the conformance-tested audit_report verifier, so
-    there's no second hash-chain implementation to keep in sync. The claim is the
-    heading; the events are embedded and re-checked locally with no network calls."""
+# A real, hosted, on-brand card image (resolves with image/* content-type). Override with
+# KORGEX_SHARE_OG_IMAGE once a dedicated 1200×630 card is hosted on the share domain.
+DEFAULT_OG_IMAGE = "https://raw.githubusercontent.com/New1Direction/Korgex/main/docs/images/banner.jpg"
+
+
+def _share_description(receipt: dict) -> str:
+    """A one-line social-card description, built from the receipt's own summary."""
+    s = receipt.get("summary") or {}
+    n = receipt.get("event_count", len(receipt.get("events") or []))
+    bits = [f"{n} verifiable events"]
+    files = s.get("files") or []
+    if files:
+        bits.append(f"{len(files)} file{'s' if len(files) != 1 else ''} touched")
+    if s.get("cost_usd"):
+        bits.append(f"~${s['cost_usd']:.2f}")
+    signed = " · signed" if receipt.get("signature") else ""
+    return f"Tamper-evident proof of an AI agent run — {' · '.join(bits)}{signed}. Re-verify it yourself, zero trust."
+
+
+def render_html(receipt: dict, *, og_image: str | None = None, base_url: str | None = None) -> str:
+    """Render the receipt as one self-contained, *shareable* HTML page that re-verifies the
+    chain in the recipient's browser — reusing the conformance-tested audit_report verifier,
+    so there's no second hash-chain implementation to keep in sync. Adds an Open Graph /
+    Twitter card (a tweeted link unfurls), surfaces the signer, pins the signed tip for the
+    in-browser check, and embeds the receipt with the exact pip/Rust commands to re-check it
+    outside the browser. `base_url` is the page's public URL once hosted (og:url)."""
     from src import audit_report as AR
 
-    meta = {"session": receipt.get("claim") or "korgex receipt", "vendor": "korgex"}
-    sig = receipt.get("signature")
+    claim = receipt.get("claim") or "korgex receipt"
+    sig = receipt.get("signature") or {}
+    meta = {
+        "session": claim,
+        "vendor": "korgex",
+        "spec": receipt.get("spec", "korg-ledger@v1"),
+        "anchored_tip": receipt.get("tip"),  # in-browser verifier also flags a fully-regenerated chain
+        "share": {
+            "title": claim,
+            "description": _share_description(receipt),
+            "image": og_image or DEFAULT_OG_IMAGE,
+            "url": base_url,
+        },
+        "verify": {
+            "pip": "pip install korgex && korgex receipt verify <receipt>.json",
+            "cargo": "cargo install korg-verify && korg-verify <receipt>.json",
+        },
+        "receipt": receipt,
+    }
     if sig:
         meta["signed_by"] = sig.get("pubkey")
     return AR.render_html(receipt.get("events") or [], meta)

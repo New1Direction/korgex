@@ -98,6 +98,54 @@ def test_render_html_is_self_contained_and_shows_the_claim(tmp_path):
     assert "<script src=" not in html                   # no network calls — an audit artifact must not phone home
 
 
+# ── shareable: social unfurl card + recipient-side independent verification ────
+
+def _head(html: str) -> str:
+    return html.split("</head>", 1)[0]
+
+
+def test_render_html_emits_social_card_with_claim_in_head(tmp_path):
+    rec = R.build_receipt(_chain(tmp_path), claim="shipped the /healthz endpoint", generated_at=1.0)
+    head = _head(R.render_html(rec))
+    # a tweeted link must unfurl as a card — OG + Twitter tags, the claim as the title
+    assert 'property="og:title"' in head
+    assert "shipped the /healthz endpoint" in head
+    assert 'property="og:description"' in head
+    assert 'name="twitter:card"' in head
+
+
+def test_render_html_card_image_defaults_and_is_overridable(tmp_path):
+    rec = R.build_receipt(_chain(tmp_path), claim="x", generated_at=1.0)
+    assert "https://example.com/card.png" in R.render_html(rec, og_image="https://example.com/card.png")
+    assert 'property="og:image"' in R.render_html(rec)        # a sensible default card is set
+
+
+def test_render_html_surfaces_signer_for_signed_receipt(tmp_path):
+    priv, pub = signing.generate_keypair()
+    rec = R.build_receipt(_chain(tmp_path), claim="x", signer_priv=priv, generated_at=1.0)
+    html = R.render_html(rec)
+    # not merely buried in the embedded JSON — actually shown to the reader, with the key
+    assert "Signed by" in html
+    assert pub in html.split("<script", 1)[0]                 # the signer appears in the visible markup, before any script
+
+
+def test_render_html_offers_independent_verification(tmp_path):
+    rec = R.build_receipt(_chain(tmp_path), claim="x", generated_at=1.0)
+    html = R.render_html(rec)
+    # the exact commands to re-check outside the browser …
+    assert "korgex receipt verify" in html
+    assert "korg-verify" in html
+    # … and the full receipt embedded, so the reader can download the exact JSON to check
+    assert "korgex-receipt@v1" in html
+    assert "Download" in html
+
+
+def test_audit_report_without_share_meta_has_no_card(tmp_path):
+    from src import audit_report as AR
+    html = AR.render_html(_chain(tmp_path), {"session": "s", "vendor": "korgex"})
+    assert "og:title" not in html                             # plain journal audit unchanged — card only when sharing
+
+
 # ── signing identity (persisted, so authorship is continuous across runs) ──────
 
 def test_identity_prefers_env():
