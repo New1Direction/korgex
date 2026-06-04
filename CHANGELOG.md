@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-06-04
+
+Three features that turn the verifiable-cognition moat into distribution and self-hosting.
+
+### Added
+- **`korgex receipt share <file>` — a shareable, self-verifying proof page.** Renders a receipt as one self-contained HTML page that **unfurls as a social card** when posted (Open Graph + Twitter `summary_large_image`, the claim as the title) and **re-verifies the hash chain in the recipient's browser** — reusing the conformance-tested in-browser verifier, no second implementation. It surfaces the signer and offers a "verify it yourself, another way" panel: a button to download the exact receipt JSON, plus the `korgex receipt verify` / `korg-verify` commands. Host it where real HTML is served (e.g. GitHub Pages) and the link unfurls with a proof card; `KORGEX_SHARE_BASE_URL` / `KORGEX_SHARE_OG_IMAGE` override `og:url` / `og:image`. The viral loop for provable agent work: run → share a link → a stranger verifies it with zero trust → shares.
+- **Causal retrieval — lean context that follows the ledger DAG, not just text.** Retrieval now walks the `triggered_by` edges korgex already records: `recall.expand_causal` pulls a matched event's **cause** (the prompt that triggered an action — the "why") and/or its **effects** (the actions a prompt triggered — the "what happened"). `lean_context.build_lean_context(..., causal=...)` makes it opt-in (off by default → plain text-relevance retrieval is unchanged), and the live loop uses `causal="causes"` so each matched action brings the prompt that explains it **without dragging in a broad prompt's unrelated siblings**. Zero new dependencies — the causal half of retrieval that flat text search over a non-causal store can't do. (Semantic ranking already existed, optional/lazy via fastembed.)
+- **`korgex providers` — point korgex at your own endpoint in one command.** `korgex providers add <name> --url <base> --model <model> [--type openai] [--key K | --key-env VAR]`, then `korgex providers use <name>` aims the whole agent at a self-hosted OpenAI-compatible box (vLLM, llama.cpp, a gateway) — a named layer over the existing `KORGEX_API_URL` routing, no env-var juggling. `list` / `remove` round it out. Named providers (`name → endpoint → model`) plus an active selection live in `~/.korgex/config.json`; resolution prefers the active named provider for its model — the way two OpenAI-compatible endpoints are told apart. Keyless servers need no key.
+
+### Fixed
+- **A `claude-*` model id is never rerouted.** Previously, with exactly one non-Anthropic provider configured (or a custom `KORGEX_API_URL` set), an explicit `claude-…` request could be hijacked to that endpoint. Claude is unambiguous and now always resolves to Anthropic, regardless of configured presets or custom endpoints.
+
 ## [0.19.0] — 2026-06-04
 
 ### Added
