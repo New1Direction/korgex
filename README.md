@@ -190,6 +190,7 @@ flowchart LR
 korgex verify                 # prove the recorded run wasn't altered (exit 0/1, CI-friendly)
 korgex trace                  # the causal trace — what the agent did + what caused it
 korgex why src/auth.py        # walk the causal chain back from a file change to its prompt
+korgex recall "rate limiter"  # pull lean, verified context for a query — retrieve, don't carry
 korgex cost                   # estimated $ spend for the session, from recorded token counts
 export KORG_LEDGER_HMAC_KEY=… # make the chain tamper-PROOF, not just tamper-evident
 ```
