@@ -432,19 +432,22 @@ def cmd_receipt():
     if toks and toks[0] == "share":
         rest = toks[1:]
         receipt_file = share_out = None
+        publish = False
         k = 0
         while k < len(rest):
             t = rest[k]
             if t in ("--out", "-o") and k + 1 < len(rest):
                 share_out, k = rest[k + 1], k + 2
+            elif t == "--publish":
+                publish, k = True, k + 1
             elif not t.startswith("-") and receipt_file is None:
                 receipt_file, k = t, k + 1
             else:
                 k += 1
         if not receipt_file:
-            print("  usage: korgex receipt share <receipt.json> [-o page.html]")
+            print("  usage: korgex receipt share <receipt.json> [-o page.html] [--publish]")
             return 2
-        return _receipt_share(receipt_file, out=share_out)
+        return _receipt_share(receipt_file, out=share_out, publish=publish)
 
     claim = out = html_path = path = None
     sign = False
@@ -547,12 +550,16 @@ def _receipt_verify(file_path: str) -> int:
     return 1
 
 
-def _receipt_share(file_path: str, *, out: str | None = None) -> int:
+def _receipt_share(file_path: str, *, out: str | None = None, publish: bool = False) -> int:
     """Render a minted receipt as a shareable, self-verifying HTML proof page — a real
     social card (it unfurls when tweeted), in-browser re-verification, and the exact
     pip/Rust commands + a download button for independent checking. Host it anywhere that
     serves real HTML (e.g. GitHub Pages) and the link unfurls with a proof card.
-    ``KORGEX_SHARE_BASE_URL`` / ``KORGEX_SHARE_OG_IMAGE`` override og:url / og:image."""
+    ``KORGEX_SHARE_BASE_URL`` / ``KORGEX_SHARE_OG_IMAGE`` override og:url / og:image.
+
+    With ``--publish`` it writes the page into your configured static-site checkout
+    (``KORGEX_SHARE_PAGES_REPO``) under ``r/<id>.html`` and git-pushes it, returning a real
+    public URL — closing the viral loop (run → publish → share a link anyone verifies)."""
     from src import receipt as RC
 
     if not Path(file_path).exists():
@@ -564,6 +571,34 @@ def _receipt_share(file_path: str, *, out: str | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"  could not read receipt: {exc}")
         return 1
+
+    if publish:
+        from src import share_publish as SP
+
+        repo = os.environ.get("KORGEX_SHARE_PAGES_REPO")
+        pub_base = os.environ.get("KORGEX_SHARE_BASE_URL")
+        if not repo or not pub_base:
+            print("  --publish needs two env vars:")
+            print("    KORGEX_SHARE_PAGES_REPO  — a local checkout of your static site (a git repo)")
+            print("    KORGEX_SHARE_BASE_URL    — its public base, e.g. https://yvaehkorg.lol")
+            return 2
+        try:
+            res = SP.publish_receipt(receipt, repo_dir=repo, base_url=pub_base,
+                                     og_image=os.environ.get("KORGEX_SHARE_OG_IMAGE"))
+        except OSError as exc:
+            print(f"  could not write into {repo}: {exc}")
+            return 1
+        claim = receipt.get("claim") or "receipt"
+        pushed = SP.git_deploy(repo, res["rel_path"], f"publish receipt {res['id']} — {claim}")
+        v = RC.verify_receipt(receipt)
+        mark = "✓ VALID" if v["ok"] else "✗ INVALID (page shows TAMPERED)"
+        print(f"  published proof page ({mark} in-browser):")
+        print(f"    {res['url']}")
+        if pushed:
+            print("    git-pushed — your host serves it shortly; the link unfurls as a proof card.")
+        else:
+            print(f"    wrote {res['path']} — git push skipped/failed; commit & push {repo} to deploy.")
+        return 0
 
     base_url = os.environ.get("KORGEX_SHARE_BASE_URL")
     og_image = os.environ.get("KORGEX_SHARE_OG_IMAGE")
@@ -1465,6 +1500,9 @@ def _build_subcommand_parser():
             sp.add_argument("--out", "-o", help="receipt JSON path (default: ~/.korgex/receipts/<j>.korgreceipt.json)")
             sp.add_argument("--html", nargs="?", const="",
                             help="also write a self-verifying HTML receipt (default: <out>.html)")
+            sp.add_argument("--publish", action="store_true",
+                            help="for 'share': publish the page to KORGEX_SHARE_PAGES_REPO and "
+                                 "return a public URL")
         elif name == "providers":
             sp.add_argument("args", nargs="*", help="add <name> | list | use <name> | remove <name>")
             sp.add_argument("--url", help="OpenAI-compatible base URL (e.g. http://localhost:8000/v1)")
