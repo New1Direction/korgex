@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-06-04
+
 ### Added
 - **Verifiable prompt-cache hits + honest cache-aware cost.** Each turn's prompt-cache usage was captured but dead-ended at a behind-a-flag print — it never reached the ledger or the cost model. Now the disjoint cache breakdown (`cache_read_tokens` / `cache_creation_tokens` / `uncached_input_tokens`) is recorded on every `llm_inference` event, so a cache hit is **provable from the tamper-evident journal** (`korgex verify`), not just a console line. `src/cost.py` prices that breakdown correctly: cached reads at their real discounted rate (Anthropic ~90% off, OpenAI ~50% off) and Anthropic cache writes at their ~25% surcharge — fixing a two-sided error where the old `prompt_tokens × rate` estimate **undercounted Anthropic** (it ignored cache tokens entirely) and **overcounted OpenAI** (it billed the cached subset at full rate). `korgex cost` now also surfaces cache reads and dollars saved.
 
