@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-06-04
+
 ### Added
 - **`korgex receipt share <file> --publish` — hosted shareable receipts.** Publishes a receipt's self-verifying page into a configured static-site checkout (`KORGEX_SHARE_PAGES_REPO`) under `r/<id>.html` and git-pushes it, returning a real public URL like `https://yvaehkorg.lol/r/<id>.html`. Served as real HTML it unfurls as a social card *and* re-verifies the hash chain in the recipient's browser; the id is the receipt's chain tip (content-addressed → same receipt = same stable URL). Zero new infrastructure — reuses a static host you already have and your existing git auth. Closes the loop: run → publish → share a link a stranger verifies with zero trust.
 
