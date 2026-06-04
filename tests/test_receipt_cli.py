@@ -75,6 +75,29 @@ def test_share_missing_file_is_a_clean_error(tmp_path, monkeypatch):
     assert _run(monkeypatch, "share", str(tmp_path / "nope.json")) == 1
 
 
+def test_share_publish_writes_into_pages_repo_and_returns_a_url(tmp_path, monkeypatch):
+    jp = _journal(tmp_path)
+    out = str(tmp_path / "r.json")
+    _run(monkeypatch, jp, "--claim", "shipped healthz", "-o", out)     # mint a receipt
+    site = tmp_path / "site"
+    site.mkdir()
+    monkeypatch.setenv("KORGEX_SHARE_PAGES_REPO", str(site))
+    monkeypatch.setenv("KORGEX_SHARE_BASE_URL", "https://yvaehkorg.lol")
+    assert _run(monkeypatch, "share", out, "--publish") == 0           # write ok even if git push no-ops
+    rec = json.loads(Path(out).read_text())
+    page = site / "r" / f"{rec['tip'][:12]}.html"
+    assert page.exists()
+    assert "https://yvaehkorg.lol/r/" in page.read_text()              # public URL baked into the card
+
+
+def test_share_publish_requires_config(tmp_path, monkeypatch):
+    out = str(tmp_path / "r.json")
+    _run(monkeypatch, _journal(tmp_path), "-o", out)
+    monkeypatch.delenv("KORGEX_SHARE_PAGES_REPO", raising=False)
+    monkeypatch.delenv("KORGEX_SHARE_BASE_URL", raising=False)
+    assert _run(monkeypatch, "share", out, "--publish") == 2           # missing config → usage error
+
+
 def test_argparse_accepts_both_receipt_forms():
     # The real CLI routes through this strict parser BEFORE cmd_receipt sees argv —
     # the two-token `verify <file>` form must not be rejected as an extra positional.
