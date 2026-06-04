@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-06-04
+
 ### Added
 - **Lean context in the live loop (opt-in `KORGEX_LEAN_CONTEXT=1`).** The agent now injects the past ledger events relevant to the current prompt as a compact, verified block (built by `recall`/`lean_context`), so a smaller/self-hosted model gets trustworthy context without carrying the whole history. Off by default; fail-safe (degrades to no block on any error, like memory recall); budget via `KORGEX_LEAN_CONTEXT_TOKENS` (default 800). This is the retrieve-don't-carry path wired end-to-end.
 - **`korgex recall <query>` — lean, *verified* context from the ledger (retrieve, don't carry).** Pulls the past events relevant to a query and renders a compact, provenance-stamped block — each line says what was done, tagged with the `#seq` you can check (`korgex why` / `korgex verify`). Because the events are hash-chained, the retrieved memory is trustworthy, so a smaller (even self-hosted) model can run the loop on a short, lean prompt instead of carrying the whole history. New `src/lean_context.py` (`build_lean_context` with a token budget + `unresolved_refs` provenance check) builds on the existing `recall.search`. Documentation-first by design.
