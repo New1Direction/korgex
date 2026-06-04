@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-06-04
+
 ### Added
 - **Verifiable best-of-N selection.** `run_best_of_n` (korgantic) — run the same task N times in isolated worktrees, gate each, pick a passing/auto-mergeable winner — now optionally records its run to the ledger: a root, a `best_of_n.attempt` event per candidate (gate-pass + auto-mergeability), and a `best_of_n.selected` verdict naming the winner and *why* (auto-mergeable · needs-review · none-passed). With that trail, `korgex why`/`verify` can **prove** the N candidates ran under the test gate and the pick is honest — korgex's best-of-N becomes auditable, not just returned in a dict. Opt-in via a `ledger=` arg; without it, behavior is byte-for-byte unchanged.
 - **MMR re-ranking for recall (diversity).** `recall.mmr_rerank` + an opt-in `diversify=True` on `build_lean_context` (now used by `korgex recall`) re-rank matches for relevance AND novelty (Maximal Marginal Relevance), so a cluster of near-duplicate events doesn't eat the lean-context budget — the chosen events are still rendered chronologically. Pure/LLM-free (token-Jaccard similarity); default off, in which case selection stays purely chronological.
