@@ -348,6 +348,7 @@ Any non-subcommand argument is treated as a prompt: `korgex "create hello.txt wi
 
 | Variable | Purpose |
 |---|---|
+| `KORGEX_LEAN_CONTEXT` · `KORGEX_LEAN_CONTEXT_TOKENS` | Inject lean, *verified* ledger context relevant to the prompt instead of carrying full history (budget default 800) — lets a smaller/self-hosted model run the loop. |
 | `KORGEX_CODEACT_ENABLE` · `KORGEX_CODEACT_ISOLATION` | Enable the CodeAct code-kernel; OS isolation (Linux/bubblewrap). |
 | `KORGEX_NETCAPTURE_ENABLE` | Enable the auditable HTTP(S) capture tool. |
 | `KORGEX_PARALLEL_AGENTS` | Concurrency for multi-agent orchestration. |

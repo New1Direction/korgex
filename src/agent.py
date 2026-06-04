@@ -465,6 +465,33 @@ class KorgexAgent:
         except Exception:
             return ""  # recall must never break the agent loop
 
+    def _lean_context_block(self, prompt: str) -> str:
+        """Opt-in (KORGEX_LEAN_CONTEXT): retrieve the past ledger events relevant to the
+        current prompt and return them as a compact, provenance-stamped block — verified
+        context the model can trust, so it needn't re-read or carry the whole history.
+        Short, trustworthy context is what lets a smaller/self-hosted model run the loop.
+        Never raises; degrades to "" (an enhancement, not core — like memory recall)."""
+        if os.environ.get("KORGEX_LEAN_CONTEXT", "off").strip().lower() not in ("1", "true", "yes", "on"):
+            return ""
+        try:
+            from src import lean_context as LC
+            from src.korg_ledger import load_journal_raw
+
+            path = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(
+                self.repo_root, ".korg", "journal.jsonl")
+            if not os.path.exists(path):
+                return ""
+            budget = int(os.environ.get("KORGEX_LEAN_CONTEXT_TOKENS", "800"))
+            ctx = LC.build_lean_context(load_journal_raw(path), prompt, budget_tokens=budget)
+            if not ctx["events_used"]:
+                return ""
+            return ("## Relevant prior work — from the verifiable ledger\n"
+                    "Each line is a recorded action; its #seq is checkable with `korgex why` / "
+                    "`korgex verify`, so you can trust these as facts and needn't re-read to "
+                    "reconstruct them.\n" + ctx["text"])
+        except Exception:
+            return ""  # lean context is an enhancement, never break the loop
+
     def _get_session(self):
         """Create the InteractiveSession on demand (avoids Rich import in non-TTY runs)."""
         if self._session is None and self.interactive:
@@ -1129,6 +1156,15 @@ class KorgexAgent:
         recalled = self._recall_and_reconcile(korg, prompt_seq)
         if recalled:
             sys_prompt = sys_prompt + "\n\n" + recalled
+            if self.provider != "anthropic" and messages and messages[0].get("role") == "system":
+                messages[0]["content"] = sys_prompt
+
+        # retrieve-don't-carry (opt-in KORGEX_LEAN_CONTEXT): inject the past ledger
+        # events relevant to this prompt as a compact, verified block, so a leaner
+        # model needn't carry the whole history. Same injection path as recall above.
+        lean = self._lean_context_block(prompt)
+        if lean:
+            sys_prompt = sys_prompt + "\n\n" + lean
             if self.provider != "anthropic" and messages and messages[0].get("role") == "system":
                 messages[0]["content"] = sys_prompt
 
