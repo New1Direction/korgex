@@ -412,7 +412,8 @@ def cmd_receipt():
     """`korgex receipt [journal]` — mint a portable, self-verifying receipt of a run:
     one file anyone can check (offline with `korgex receipt verify`, or by opening its
     --html in any browser) with zero trust in korgex. `--sign` attests authorship with
-    your Ed25519 identity. `korgex receipt verify <file>` checks one."""
+    your Ed25519 identity. `korgex receipt verify <file>` checks one; `korgex receipt
+    share <file>` renders a shareable, self-verifying proof page (social card + download)."""
     import time
 
     from src import receipt as RC
@@ -427,6 +428,23 @@ def cmd_receipt():
             print("  usage: korgex receipt verify <receipt.json>")
             return 2
         return _receipt_verify(targets[0])
+
+    if toks and toks[0] == "share":
+        rest = toks[1:]
+        receipt_file = share_out = None
+        k = 0
+        while k < len(rest):
+            t = rest[k]
+            if t in ("--out", "-o") and k + 1 < len(rest):
+                share_out, k = rest[k + 1], k + 2
+            elif not t.startswith("-") and receipt_file is None:
+                receipt_file, k = t, k + 1
+            else:
+                k += 1
+        if not receipt_file:
+            print("  usage: korgex receipt share <receipt.json> [-o page.html]")
+            return 2
+        return _receipt_share(receipt_file, out=share_out)
 
     claim = out = html_path = path = None
     sign = False
@@ -527,6 +545,47 @@ def _receipt_verify(file_path: str) -> int:
     for e in v["errors"][:6]:
         print(f"      - {e}")
     return 1
+
+
+def _receipt_share(file_path: str, *, out: str | None = None) -> int:
+    """Render a minted receipt as a shareable, self-verifying HTML proof page — a real
+    social card (it unfurls when tweeted), in-browser re-verification, and the exact
+    pip/Rust commands + a download button for independent checking. Host it anywhere that
+    serves real HTML (e.g. GitHub Pages) and the link unfurls with a proof card.
+    ``KORGEX_SHARE_BASE_URL`` / ``KORGEX_SHARE_OG_IMAGE`` override og:url / og:image."""
+    from src import receipt as RC
+
+    if not Path(file_path).exists():
+        print(f"  No receipt at {file_path}")
+        return 1
+    try:
+        with open(file_path) as fh:
+            receipt = json.load(fh)
+    except (OSError, ValueError) as exc:
+        print(f"  could not read receipt: {exc}")
+        return 1
+
+    base_url = os.environ.get("KORGEX_SHARE_BASE_URL")
+    og_image = os.environ.get("KORGEX_SHARE_OG_IMAGE")
+    if not out:
+        out = (file_path[:-5] if file_path.endswith(".json") else file_path) + ".html"
+    try:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(RC.render_html(receipt, og_image=og_image, base_url=base_url))
+    except OSError as exc:
+        print(f"  could not write {out}: {exc}")
+        return 1
+
+    v = RC.verify_receipt(receipt)
+    mark = "✓ VALID" if v["ok"] else "✗ INVALID (the page will show TAMPERED)"
+    print(f"  shareable proof page written — re-checks {mark} in-browser")
+    if receipt.get("claim"):
+        print(f"    claim: {receipt['claim']}")
+    print(f"    {out}")
+    print("  host it where real HTML is served (e.g. your GitHub Pages) — the link unfurls")
+    print("  as a proof card, and recipients re-verify it themselves (browser / pip / Rust).")
+    return 0
 
 
 def cmd_scan():
@@ -1315,7 +1374,8 @@ def _build_subcommand_parser():
                             help="journal to search (default: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
         elif name == "receipt":
             sp.add_argument("args", nargs="*",
-                            help="journal to attest, or 'verify <receipt.json>' to check one "
+                            help="journal to attest, 'verify <receipt.json>' to check one, or "
+                                 "'share <receipt.json>' to render a shareable proof page "
                                  "(default journal: $KORG_JOURNAL_PATH or .korg/journal.jsonl)")
             sp.add_argument("--claim", help="a human one-liner describing what this run delivered")
             sp.add_argument("--sign", action="store_true", help="sign the tip with your Ed25519 identity")

@@ -27,20 +27,87 @@ def _embed_json(value) -> str:
     )
 
 
+def _h(s) -> str:
+    """Escape for HTML text and double-quoted attribute values."""
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _og_tags(share: dict) -> str:
+    """Open Graph + Twitter-card tags so a shared link unfurls as a proof card."""
+    rows: list[str] = []
+
+    def tag(prop: str, val, attr: str = "property") -> None:
+        if val:
+            rows.append(f'<meta {attr}="{prop}" content="{_h(val)}">')
+
+    tag("og:type", "website")
+    tag("og:title", share.get("title"))
+    tag("og:description", share.get("description"))
+    tag("og:image", share.get("image"))
+    tag("og:url", share.get("url"))
+    tag("twitter:card", "summary_large_image" if share.get("image") else "summary", attr="name")
+    tag("twitter:title", share.get("title"), attr="name")
+    tag("twitter:description", share.get("description"), attr="name")
+    tag("twitter:image", share.get("image"), attr="name")
+    return "\n".join(rows)
+
+
+def _share_block(meta: dict) -> str:
+    """An optional 'verify it yourself, another way' panel — the signer, the exact pip/Rust
+    commands, and a button to download the embedded receipt JSON. Rendered only for
+    receipt-backed pages; a plain journal audit gets nothing here (output unchanged)."""
+    signed_by = meta.get("signed_by")
+    verify = meta.get("verify") or {}
+    has_receipt = bool(meta.get("receipt"))
+    if not (signed_by or verify or has_receipt):
+        return ""
+    parts = ['<h2>Verify it yourself, another way</h2>', '<div class="verify-another">']
+    if signed_by:
+        parts.append(
+            f'<div class="signer">Signed by <code>{_h(signed_by)}</code> '
+            '<span class="dim">— Ed25519 over the chain tip (authorship)</span></div>')
+    parts.append(
+        '<p class="dim">This page already re-checked the hash chain in your browser. To check it '
+        'independently — including the signature — download the receipt and run one of:</p>')
+    if verify.get("pip"):
+        parts.append(f'<pre class="cmd">{_h(verify["pip"])}</pre>')
+    if verify.get("cargo"):
+        parts.append(f'<pre class="cmd">{_h(verify["cargo"])}</pre>')
+    if has_receipt:
+        parts.append('<button id="btnDownload">⬇ Download receipt (.json)</button>')
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
 def render_html(events: list, meta: dict | None = None) -> str:
-    """Return a single self-contained HTML document that re-verifies `events` in-browser."""
+    """Return a single self-contained HTML document that re-verifies `events` in-browser.
+
+    Optional `meta` keys make it a *shareable* proof page: ``share`` (title/description/
+    image/url → Open Graph + Twitter card), ``signed_by`` (surfaced to the reader),
+    ``verify`` (pip/cargo commands) and ``receipt`` (embedded so the reader can download
+    the exact JSON). Without those, the output is the plain audit page as before."""
     meta = dict(meta or {})
     meta.setdefault("session", "session")
     meta.setdefault("vendor", "unknown")
     meta.setdefault("spec", "korg-ledger@v1")
     meta["event_count"] = len(events)
 
+    share = meta.get("share") or {}
+    page_title = share.get("title") or "korg-ledger · forensic audit"
+    receipt = meta.get("receipt")
+    embed_meta = {k: v for k, v in meta.items() if k != "receipt"}  # receipt rides in RECEIPT — don't double-embed
+
     verifier_js = _ASSET.read_text(encoding="utf-8")
     return (
         _TEMPLATE
+        .replace("__OG_TAGS__", _og_tags(share) if share else "")
+        .replace("__PAGE_TITLE__", _h(page_title))
+        .replace("<!--__SHARE_BLOCK__-->", _share_block(meta))
         .replace("/*__VERIFIER_JS__*/", verifier_js)
+        .replace('"__RECEIPT_JSON__"', _embed_json(receipt) if receipt else "null")
         .replace('"__EVENTS_JSON__"', _embed_json(events))
-        .replace('"__META_JSON__"', _embed_json(meta))
+        .replace('"__META_JSON__"', _embed_json(embed_meta))
     )
 
 
@@ -49,7 +116,8 @@ _TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>korg-ledger · forensic audit</title>
+__OG_TAGS__
+<title>__PAGE_TITLE__</title>
 <style>
   :root{
     --bg:#0a0c0f; --panel:#0f1318; --line:#1d2733; --ink:#c7d2dd; --dim:#6b7a8a;
@@ -120,6 +188,11 @@ _TEMPLATE = r"""<!doctype html>
   footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:var(--dim);font-size:12px;max-width:70ch}
   footer b{color:var(--ink)} a{color:var(--accent)}
   .mono-note{color:var(--dim);font-size:12px;margin-top:10px}
+  .verify-another{border:1px solid var(--line);border-radius:14px;padding:18px 20px;background:#0c1116}
+  .verify-another .signer{margin-bottom:12px;word-break:break-all}
+  .verify-another code{color:var(--hash)} .dim{color:var(--dim)}
+  pre.cmd{background:#0a0e12;border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+          color:var(--ink);font-size:12.5px;margin:8px 0;white-space:pre-wrap;word-break:break-all}
 </style>
 </head>
 <body>
@@ -161,6 +234,8 @@ _TEMPLATE = r"""<!doctype html>
     </div>
   </div>
 
+  <!--__SHARE_BLOCK__-->
+
   <footer>
     This page re-derived every <b>entry_hash</b> from the recorded events using the
     <b>korg-ledger@v1</b> reference verifier — entirely in your browser, with no network calls. It did
@@ -175,6 +250,7 @@ _TEMPLATE = r"""<!doctype html>
 <script>
 const EVENTS = "__EVENTS_JSON__";
 const META = "__META_JSON__";
+const RECEIPT = "__RECEIPT_JSON__";
 let working = structuredClone(EVENTS);
 
 const $ = (id) => document.getElementById(id);
@@ -271,6 +347,17 @@ $('btnTamper').onclick = async () => {
   await verifyAndRender();
 };
 $('btnReset').onclick = async () => { working = structuredClone(EVENTS); await verifyAndRender(); };
+
+if (RECEIPT && $('btnDownload')) {
+  $('btnDownload').onclick = () => {
+    const blob = new Blob([JSON.stringify(RECEIPT, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const slug = (RECEIPT.claim || 'receipt').replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'receipt';
+    a.download = slug + '.korgreceipt.json';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);
+  };
+}
 
 verifyAndRender();
 </script>
