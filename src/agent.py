@@ -163,7 +163,8 @@ class KorgexAgent:
         # never rewrite the cached prefix, and only force compaction when the savings
         # beat the cache-read discount. All-zero until the first call — when it stays
         # zero (no cache seen), compaction degrades to its size-only behavior.
-        self._last_cache = {"cache_read": 0, "cache_creation": 0, "prompt_tokens": 0}
+        self._last_cache = {"cache_read": 0, "cache_creation": 0,
+                            "prompt_tokens": 0, "uncached_input": 0}
         # Live task ledger — the agent's self-updating checklist. TaskCreate/TaskUpdate
         # drive it; its open items are fed back into the prompt each turn so the model
         # works through them instead of drifting or claiming done early.
@@ -1088,6 +1089,10 @@ class KorgexAgent:
                 # Emit one llm_inference event per completed round-trip.
                 # Parallel tool calls in this batch all use llm_seq as triggered_by
                 # (they are siblings, not a chain — see agent_event_spec.md §2).
+                # Cache breakdown (captured into _last_cache by _call) rides onto the
+                # event so a prompt-cache hit is PROVABLE from the ledger and the
+                # dollar-cost can price cached tokens at their real (discounted) rate.
+                _lc = self._last_cache
                 llm_seq = korg.record_llm_call(
                     model=self.model,
                     prompt_tokens=getattr(getattr(response, "usage", None), "input_tokens", 0)
@@ -1097,6 +1102,9 @@ class KorgexAgent:
                     duration_ms=_llm_ms,
                     triggered_by=prompt_seq,
                     assistant_text=round_text if round_text else None,
+                    cache_read_tokens=_lc.get("cache_read", 0),
+                    cache_creation_tokens=_lc.get("cache_creation", 0),
+                    uncached_input_tokens=_lc.get("uncached_input"),
                 )
                 # ───────────────────────────────────────────────────────────
 

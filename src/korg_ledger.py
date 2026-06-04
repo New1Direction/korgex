@@ -124,6 +124,31 @@ def _agent_identity() -> str:
     return f"agent:korgex@{ver}"
 
 
+def _llm_call_args(
+    model: str,
+    prompt_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    uncached_input_tokens: int | None = None,
+) -> dict:
+    """Shape the ``args`` of an ``llm_inference`` event — one place so every transport
+    (HTTP / bridge / local journal) records the same thing.
+
+    The disjoint prompt-cache breakdown is folded in ONLY when caching is active
+    (a read or a write happened). On a cold turn nothing extra is added, so the
+    on-disk shape is byte-identical to pre-cache journals — older readers and the
+    hash-chain over historical events are undisturbed. ``uncached_input_tokens`` is
+    the full-rate input (no overlap with the cache counts); it's omitted when not
+    supplied so a caller that only knows the raw counts still degrades cleanly."""
+    args: dict[str, Any] = {"model": model, "prompt_tokens": prompt_tokens}
+    if cache_read_tokens or cache_creation_tokens:
+        args["cache_read_tokens"] = int(cache_read_tokens)
+        args["cache_creation_tokens"] = int(cache_creation_tokens)
+        if uncached_input_tokens is not None:
+            args["uncached_input_tokens"] = int(uncached_input_tokens)
+    return args
+
+
 # ---------------------------------------------------------------------------
 # Hashing — spec §7.2
 # ---------------------------------------------------------------------------
@@ -442,6 +467,9 @@ class KorgLedgerClient:
         duration_ms: int,
         triggered_by: int | None,
         assistant_text: str | None = None,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+        uncached_input_tokens: int | None = None,
     ) -> int | None:
         """
         Emit an LLM inference event synchronously.
@@ -454,13 +482,19 @@ class KorgLedgerClient:
         `result` field — downstream consumers (KorgChat /recall, audit
         replay) can then grep the journal for what the model actually said,
         not just token counts. None preserves the v0.3.1 on-disk shape.
+
+        Cache: the disjoint prompt-cache breakdown (read/creation/uncached) rides
+        on the args when caching was active, so a cache hit is provable from the
+        ledger and the dollar-cost can price cached tokens correctly. Omitted on a
+        cold turn — the on-disk shape is unchanged.
         """
         result: dict[str, Any] = {"completion_tokens": completion_tokens}
         if assistant_text is not None:
             result["text"] = assistant_text
         return self._post_sync(
             tool_name="llm_inference",
-            args={"model": model, "prompt_tokens": prompt_tokens},
+            args=_llm_call_args(model, prompt_tokens, cache_read_tokens,
+                                cache_creation_tokens, uncached_input_tokens),
             result=result,
             success=True,
             duration_ms=duration_ms,
@@ -623,12 +657,21 @@ class KorgBridgeClient:
         duration_ms: int,
         triggered_by: int | None,
         assistant_text: str | None = None,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+        uncached_input_tokens: int | None = None,
     ) -> int:
         """v0.3.2: forward `assistant_text` to the bridge so the reply text
         lands on the event's `result.text`. Matches the HTTP client's new
         signature so callers stay uniform regardless of which transport
-        get_default_client() chose."""
-        return self._bridge.record_llm_call(
+        get_default_client() chose.
+
+        Cache: forward the prompt-cache breakdown when the (Rust) bridge accepts it.
+        An older bridge without those params raises TypeError — we degrade to the
+        pre-cache call (the breakdown is simply absent on that transport), exactly as
+        record_user_prompt degrades for the triggered_by param. The local-journal and
+        HTTP transports carry it regardless."""
+        base = dict(
             model=model,
             prompt_tokens=int(prompt_tokens),
             completion_tokens=int(completion_tokens),
@@ -637,6 +680,18 @@ class KorgBridgeClient:
             source_agent=self.source_agent,
             assistant_text=assistant_text,
         )
+        if cache_read_tokens or cache_creation_tokens:
+            try:
+                return self._bridge.record_llm_call(
+                    cache_read_tokens=int(cache_read_tokens),
+                    cache_creation_tokens=int(cache_creation_tokens),
+                    uncached_input_tokens=(None if uncached_input_tokens is None
+                                           else int(uncached_input_tokens)),
+                    **base,
+                )
+            except TypeError:
+                pass  # older bridge: drop the cache fields, keep the event
+        return self._bridge.record_llm_call(**base)
 
 
 # ---------------------------------------------------------------------------
@@ -722,12 +777,14 @@ class LocalJournalClient:
         return self._append("user_prompt", {"prompt": prompt}, {}, True, 0, triggered_by)
 
     def record_llm_call(self, model, prompt_tokens, completion_tokens, duration_ms,
-                        triggered_by, assistant_text=None) -> int:
+                        triggered_by, assistant_text=None, cache_read_tokens=0,
+                        cache_creation_tokens=0, uncached_input_tokens=None) -> int:
         result: dict[str, Any] = {"completion_tokens": completion_tokens}
         if assistant_text is not None:
             result["text"] = assistant_text
-        return self._append("llm_inference", {"model": model, "prompt_tokens": prompt_tokens},
-                            result, True, duration_ms, triggered_by)
+        args = _llm_call_args(model, prompt_tokens, cache_read_tokens,
+                              cache_creation_tokens, uncached_input_tokens)
+        return self._append("llm_inference", args, result, True, duration_ms, triggered_by)
 
     def record_tool_call(self, tool_name, args, result, success, duration_ms,
                          triggered_by=None) -> int:

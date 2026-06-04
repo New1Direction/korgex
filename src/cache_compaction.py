@@ -57,17 +57,34 @@ def _as_int(val) -> int:
 
 def extract_cache_tokens(usage) -> dict:
     """Normalize a provider ``usage`` object into
-    ``{"cache_read", "cache_creation", "prompt_tokens"}`` (all ints).
+    ``{"cache_read", "cache_creation", "prompt_tokens", "uncached_input"}`` (all ints).
 
     Anthropic: ``cache_read_input_tokens`` / ``cache_creation_input_tokens`` /
     ``input_tokens``. OpenAI: ``prompt_tokens`` with the cache hit nested under
     ``prompt_tokens_details.cached_tokens``. Tolerant of dict OR attr shapes and of
-    missing/garbage fields — defaults everything to 0 and never raises."""
-    if usage is None:
-        return {"cache_read": 0, "cache_creation": 0, "prompt_tokens": 0}
+    missing/garbage fields — defaults everything to 0 and never raises.
 
-    # cache_read: Anthropic field first, else OpenAI's nested cached_tokens.
-    cache_read = _as_int(_get(usage, "cache_read_input_tokens", 0))
+    The two providers count differently, and that difference is the whole reason a
+    naive ``prompt_tokens × rate`` cost is wrong:
+
+      • **Anthropic** ``input_tokens`` is the NEW (uncached) input only — the cached
+        reads and writes are billed ON TOP, so they do NOT overlap it.
+      • **OpenAI** ``prompt_tokens`` is the TOTAL prompt, with the cached reads a
+        SUBSET of it.
+
+    ``uncached_input`` resolves that here (where the raw shape is visible) into one
+    disjoint figure: the full-rate input tokens, with no token also counted in
+    ``cache_read``/``cache_creation``. So ``uncached_input + cache_read +
+    cache_creation`` is the true billable input for either provider, and a consumer
+    (cost) never has to re-guess the convention from counts alone."""
+    if usage is None:
+        return {"cache_read": 0, "cache_creation": 0, "prompt_tokens": 0,
+                "uncached_input": 0}
+
+    # cache_read: Anthropic field first, else OpenAI's nested cached_tokens. Track
+    # which path produced it — it pins the counting convention below.
+    anthropic_read = _as_int(_get(usage, "cache_read_input_tokens", 0))
+    cache_read = anthropic_read
     if not cache_read:
         details = _get(usage, "prompt_tokens_details", None)
         if details is not None:
@@ -76,14 +93,23 @@ def extract_cache_tokens(usage) -> dict:
     cache_creation = _as_int(_get(usage, "cache_creation_input_tokens", 0))
 
     # prompt_tokens: Anthropic calls it input_tokens, OpenAI prompt_tokens.
-    prompt_tokens = _as_int(_get(usage, "prompt_tokens", 0))
-    if not prompt_tokens:
-        prompt_tokens = _as_int(_get(usage, "input_tokens", 0))
+    raw_prompt = _as_int(_get(usage, "prompt_tokens", 0))
+    prompt_tokens = raw_prompt or _as_int(_get(usage, "input_tokens", 0))
+
+    # Anthropic shape: input_tokens (no prompt_tokens), or an Anthropic-only cache
+    # field is present. Then prompt_tokens is ALREADY the uncached part. Otherwise
+    # (OpenAI) the cached read is inside prompt_tokens, so subtract it out (clamped).
+    is_anthropic_shape = (raw_prompt == 0) or anthropic_read > 0 or cache_creation > 0
+    if is_anthropic_shape:
+        uncached_input = prompt_tokens
+    else:
+        uncached_input = max(0, prompt_tokens - cache_read - cache_creation)
 
     return {
         "cache_read": cache_read,
         "cache_creation": cache_creation,
         "prompt_tokens": prompt_tokens,
+        "uncached_input": uncached_input,
     }
 
 

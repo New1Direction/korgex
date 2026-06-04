@@ -51,6 +51,9 @@ _NOT_SECRET_KEYS = frozenset({
     "input_tokens", "output_tokens", "cache_read_input_tokens",
     "cache_creation_input_tokens", "max_tokens", "max_output_tokens",
     "tokens_before", "tokens_after",  # cache-aware compaction event counts
+    # the disjoint prompt-cache breakdown recorded on llm_inference events —
+    # provable cache hits + honest cost; counts, never credentials.
+    "cache_read_tokens", "cache_creation_tokens", "uncached_input_tokens",
 })
 
 

@@ -31,7 +31,10 @@ def test_extract_anthropic_attr_shape():
     usage = _Obj(cache_read_input_tokens=900, cache_creation_input_tokens=100,
                  input_tokens=1000)
     out = CC.extract_cache_tokens(usage)
-    assert out == {"cache_read": 900, "cache_creation": 100, "prompt_tokens": 1000}
+    # Anthropic input_tokens is the NEW (uncached) input — cache tokens are billed
+    # ON TOP, so uncached_input == input_tokens and they don't overlap.
+    assert out == {"cache_read": 900, "cache_creation": 100,
+                   "prompt_tokens": 1000, "uncached_input": 1000}
 
 
 def test_extract_openai_attr_shape():
@@ -42,23 +45,47 @@ def test_extract_openai_attr_shape():
     assert out["cache_read"] == 900
     assert out["prompt_tokens"] == 1000
     assert out["cache_creation"] == 0  # OpenAI doesn't separate creation
+    # OpenAI prompt_tokens INCLUDES the cached subset — the full-rate part is the
+    # remainder, so the cost model never double-counts the cached tokens.
+    assert out["uncached_input"] == 100
 
 
 def test_extract_dict_shape_both_providers():
     anth = {"cache_read_input_tokens": 50, "cache_creation_input_tokens": 5,
             "input_tokens": 60}
     assert CC.extract_cache_tokens(anth) == {
-        "cache_read": 50, "cache_creation": 5, "prompt_tokens": 60}
+        "cache_read": 50, "cache_creation": 5, "prompt_tokens": 60,
+        "uncached_input": 60}
     oai = {"prompt_tokens": 200, "prompt_tokens_details": {"cached_tokens": 120}}
     out = CC.extract_cache_tokens(oai)
     assert out["cache_read"] == 120 and out["prompt_tokens"] == 200
+    assert out["uncached_input"] == 80  # 200 total − 120 cached
+
+
+def test_extract_uncached_input_is_disjoint_breakdown():
+    # The whole point: uncached_input + cache_read + cache_creation is the TRUE
+    # billable input, with no token counted twice, for either provider shape.
+    anth = _Obj(cache_read_input_tokens=900, cache_creation_input_tokens=100,
+                input_tokens=1000)
+    a = CC.extract_cache_tokens(anth)
+    assert a["uncached_input"] + a["cache_read"] + a["cache_creation"] == 2000
+    oai = _Obj(prompt_tokens=1000, prompt_tokens_details=_Obj(cached_tokens=900))
+    o = CC.extract_cache_tokens(oai)
+    assert o["uncached_input"] + o["cache_read"] + o["cache_creation"] == 1000
+
+
+def test_extract_openai_garbage_cache_never_makes_uncached_negative():
+    # cached_tokens larger than prompt_tokens is impossible but must clamp, not go < 0
+    bad = _Obj(prompt_tokens=100, prompt_tokens_details=_Obj(cached_tokens=999))
+    out = CC.extract_cache_tokens(bad)
+    assert out["uncached_input"] == 0
 
 
 def test_extract_none_and_missing_fields_are_zero_never_raises():
     assert CC.extract_cache_tokens(None) == {
-        "cache_read": 0, "cache_creation": 0, "prompt_tokens": 0}
+        "cache_read": 0, "cache_creation": 0, "prompt_tokens": 0, "uncached_input": 0}
     assert CC.extract_cache_tokens(_Obj()) == {
-        "cache_read": 0, "cache_creation": 0, "prompt_tokens": 0}
+        "cache_read": 0, "cache_creation": 0, "prompt_tokens": 0, "uncached_input": 0}
     # a details object that raises on attribute access must not blow up
     class _Raises:
         @property
@@ -67,6 +94,7 @@ def test_extract_none_and_missing_fields_are_zero_never_raises():
     bad = _Obj(prompt_tokens=10, prompt_tokens_details=_Raises())
     out = CC.extract_cache_tokens(bad)
     assert out["cache_read"] == 0 and out["prompt_tokens"] == 10
+    assert out["uncached_input"] == 10
 
 
 # ── update_frozen_prefix: leading turns inside the provider-cached prefix ───────

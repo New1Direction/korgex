@@ -139,7 +139,7 @@ Run bare `korgex` for a streaming, multi-turn session. It connects your MCP serv
 
 **Project rules.** `korgex init` scaffolds an `AGENTS.md`; korgex auto-reads it — plus any nested `AGENTS.md` up the tree and `.korgex/rules/*.md` — every session, so it follows your house style.
 
-**Prompt caching** keeps the system prompt + tools warm across turns (automatic on OpenAI/Gemini/Grok/DeepSeek; `cache_control` breakpoints on Claude/Qwen). Set `KORGEX_CACHE_STATS=1` to see per-turn cache hits.
+**Prompt caching** keeps the system prompt + tools warm across turns (automatic on OpenAI/Gemini/Grok/DeepSeek; `cache_control` breakpoints on Claude/Qwen). Set `KORGEX_CACHE_STATS=1` to see per-turn cache hits — and every hit is recorded on the ledger, so `korgex cost` prices cached tokens at their real discounted rate (and shows what the cache saved you), provable with `korgex verify`.
 
 ---
 

@@ -34,7 +34,8 @@ def test_call_captures_anthropic_cache_into_last_cache(tmp_path, monkeypatch):
     a = KorgexAgent(repo_root=str(tmp_path), interactive=False, model="claude-3-5-sonnet")
     assert a.provider == "anthropic"
     # default is all-zero before any call
-    assert a._last_cache == {"cache_read": 0, "cache_creation": 0, "prompt_tokens": 0}
+    assert a._last_cache == {"cache_read": 0, "cache_creation": 0,
+                             "prompt_tokens": 0, "uncached_input": 0}
 
     usage = _Obj(cache_read_input_tokens=800, cache_creation_input_tokens=50,
                  input_tokens=900)
@@ -218,3 +219,85 @@ def test_maybe_compact_ledger_event_has_cache_fields(tmp_path, monkeypatch):
     assert r["cache_read_before"] == 5
     assert r["cache_creation_before"] == 2
     assert ev["triggered_by"] == 7
+
+
+# ── the ledger carries the cache breakdown (verifiable cache) ───────────────────
+
+class _CapLed:
+    """Capturing ledger: keeps every record_llm_call's kwargs so a test can prove
+    the agent threaded the cache breakdown onto the inference event."""
+    def __init__(self):
+        self.llm_calls = []
+        self.events = []
+
+    def record_user_prompt(self, prompt, triggered_by=None):
+        return 1
+
+    def record_llm_call(self, **kw):
+        self.llm_calls.append(kw)
+        return len(self.llm_calls) + 1
+
+    def record_tool_call(self, **kw):
+        self.events.append(kw)
+        return len(self.events) + 100
+
+
+def test_agent_records_cache_breakdown_on_llm_event(tmp_path, monkeypatch):
+    # End-to-end glue: a warm-cache turn must land cache_read/creation/uncached on
+    # the llm_inference event so `korgex verify` can prove the cache hit later.
+    from src.agent import KorgexAgent
+    led = _CapLed()
+    a = KorgexAgent(model="claude-sonnet-4-6", interactive=False,
+                    repo_root=str(tmp_path), ledger=led)
+    monkeypatch.setattr(a, "_get_client", lambda: object())
+
+    def fake_call(client, messages, tools_payload, system_prompt=None,
+                  system_volatile=None):
+        # mimic _call's side effect: the provider's cache usage is captured
+        a._last_cache = {"cache_read": 800, "cache_creation": 50,
+                         "prompt_tokens": 900, "uncached_input": 900}
+        class R:
+            pass
+        r = R()
+        r.usage = None
+        return r
+    monkeypatch.setattr(a, "_call", fake_call)
+    monkeypatch.setattr(a, "_extract_tool_calls", lambda r: [])
+    monkeypatch.setattr(a, "_extract_final_text", lambda r: "Done — the answer is 42.")
+
+    a.run_task("what is the answer?")
+
+    assert led.llm_calls, "an llm_inference call should have been recorded"
+    kw = led.llm_calls[0]
+    assert kw["cache_read_tokens"] == 800
+    assert kw["cache_creation_tokens"] == 50
+    assert kw["uncached_input_tokens"] == 900
+
+
+def test_agent_omits_cache_fields_when_cold(tmp_path, monkeypatch):
+    # No cache activity → no cache kwargs forced onto the call (shape preserved).
+    from src.agent import KorgexAgent
+    led = _CapLed()
+    a = KorgexAgent(model="claude-sonnet-4-6", interactive=False,
+                    repo_root=str(tmp_path), ledger=led)
+    monkeypatch.setattr(a, "_get_client", lambda: object())
+
+    def fake_call(client, messages, tools_payload, system_prompt=None,
+                  system_volatile=None):
+        a._last_cache = {"cache_read": 0, "cache_creation": 0,
+                         "prompt_tokens": 500, "uncached_input": 500}
+        class R:
+            pass
+        r = R()
+        r.usage = None
+        return r
+    monkeypatch.setattr(a, "_call", fake_call)
+    monkeypatch.setattr(a, "_extract_tool_calls", lambda r: [])
+    monkeypatch.setattr(a, "_extract_final_text", lambda r: "Done.")
+
+    a.run_task("hi")
+
+    assert led.llm_calls
+    kw = led.llm_calls[0]
+    assert kw.get("cache_read_tokens", 0) == 0
+    assert kw.get("cache_creation_tokens", 0) == 0
