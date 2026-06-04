@@ -45,6 +45,7 @@ class Config:
     """In-memory view of ~/.korgex/config.json."""
     default_model: str | None = None
     providers: list[dict] = field(default_factory=list)
+    active_provider: str | None = None
 
     def provider_for(self, ptype: str) -> dict | None:
         """The first saved provider entry of this type, or None."""
@@ -52,6 +53,17 @@ class Config:
             if p.get("type") == ptype:
                 return p
         return None
+
+    def provider_by_name(self, name: str | None) -> dict | None:
+        """The saved provider entry with this name, or None."""
+        for p in self.providers:
+            if name and p.get("name") == name:
+                return p
+        return None
+
+    def active(self) -> dict | None:
+        """The selected named provider (set by ``korgex providers use``), or None."""
+        return self.provider_by_name(self.active_provider) if self.active_provider else None
 
     def api_key_for(self, ptype: str) -> str | None:
         p = self.provider_for(ptype)
@@ -62,7 +74,8 @@ class Config:
         return bool(self.providers)
 
     def to_dict(self) -> dict:
-        return {"default_model": self.default_model, "providers": self.providers}
+        return {"default_model": self.default_model, "providers": self.providers,
+                "active_provider": self.active_provider}
 
 
 def default_path() -> str:
@@ -85,7 +98,8 @@ def load_config(path: str | None = None) -> Config:
     providers = data.get("providers") or []
     if not isinstance(providers, list):
         providers = []
-    return Config(default_model=data.get("default_model"), providers=providers)
+    return Config(default_model=data.get("default_model"), providers=providers,
+                  active_provider=data.get("active_provider"))
 
 
 def save_config(cfg: Config, path: str | None = None) -> str:
@@ -98,6 +112,37 @@ def save_config(cfg: Config, path: str | None = None) -> str:
     os.replace(tmp, path)
     os.chmod(path, 0o600)
     return path
+
+
+def upsert_provider(cfg: Config, name: str, *, base_url: str, model: str,
+                    type: str = "openai", api_key: str | None = None) -> Config:
+    """Return a new Config with a NAMED provider added (or replaced if `name` exists).
+    The preset binds name → endpoint → model, so selecting it points korgex at a
+    self-hosted OpenAI-compatible box (vLLM, llama.cpp, a gateway) in one move.
+    Immutable: builds a new Config rather than mutating the input."""
+    entry = {"name": name, "type": type, "base_url": base_url, "model": model}
+    if api_key:
+        entry["api_key"] = api_key
+    others = [p for p in cfg.providers if p.get("name") != name]
+    return Config(default_model=cfg.default_model, providers=others + [entry],
+                  active_provider=cfg.active_provider)
+
+
+def set_active(cfg: Config, name: str) -> Config:
+    """Return a new Config with `name` selected as the active provider; its model becomes
+    the default, so the agent resolves to that endpoint with no extra flags."""
+    p = cfg.provider_by_name(name)
+    default_model = (p or {}).get("model") or cfg.default_model
+    return Config(default_model=default_model, providers=list(cfg.providers),
+                  active_provider=name)
+
+
+def remove_provider(cfg: Config, name: str) -> Config:
+    """Return a new Config with the named provider removed (clearing it as active if it
+    was the selected one)."""
+    others = [p for p in cfg.providers if p.get("name") != name]
+    active = None if cfg.active_provider == name else cfg.active_provider
+    return Config(default_model=cfg.default_model, providers=others, active_provider=active)
 
 
 def resolve_model_and_key(model: str | None, cfg: Config, env: dict | None = None):
@@ -134,19 +179,30 @@ def resolve_client_config(model: str, cfg: Config, env: dict | None = None):
     Falls back to the provider's conventional env key so env-only users still work.
     """
     env = os.environ if env is None else env
-    ptype = provider_type_for_model(model)
-    # If the model-id heuristic doesn't match a configured provider but exactly one
-    # provider IS configured, trust it — a bare local model id ("llama3.3") or a
-    # gateway can't be inferred from the name alone.
-    if cfg.provider_for(ptype) is None and len(cfg.providers) == 1:
-        ptype = cfg.providers[0].get("type", ptype)
-    # A custom OpenAI-compatible endpoint (KORGEX_API_URL — a self-hosted vLLM, an
-    # LM Studio, a gateway) is an explicit signal: route any non-Anthropic / unknown
-    # model id to it rather than defaulting to Anthropic, so a server-side model name
-    # like "Qwen2.5-Coder-32B" just works. A claude-* id still goes to Anthropic.
-    if ptype == "anthropic" and env.get("KORGEX_API_URL") and "claude" not in model.lower():
-        ptype = "openai"
-    provider = cfg.provider_for(ptype)
+
+    # An explicitly-selected named provider (`korgex providers use`) pins the endpoint for
+    # ITS model — this is how two OpenAI-compatible boxes are told apart (provider_for by
+    # type can't). A different explicit model id falls through to the normal heuristics.
+    active = cfg.active()
+    if active and (not model or model == active.get("model")):
+        provider = active
+        ptype = active.get("type", "openai")
+    else:
+        ptype = provider_type_for_model(model)
+        # A claude-* id is unambiguous — never reroute it (not to a lone configured
+        # provider, not to a custom endpoint); it always resolves to Anthropic.
+        if "claude" not in (model or "").lower():
+            # If the model-id heuristic doesn't match a configured provider but exactly
+            # one provider IS configured, trust it — a bare local model id ("llama3.3")
+            # or a gateway can't be inferred from the name alone.
+            if cfg.provider_for(ptype) is None and len(cfg.providers) == 1:
+                ptype = cfg.providers[0].get("type", ptype)
+            # A custom OpenAI-compatible endpoint (KORGEX_API_URL — a self-hosted vLLM, an
+            # LM Studio, a gateway) is an explicit signal: route an unknown model id to it
+            # rather than defaulting to Anthropic, so "Qwen2.5-Coder-32B" just works.
+            if ptype == "anthropic" and env.get("KORGEX_API_URL"):
+                ptype = "openai"
+        provider = cfg.provider_for(ptype)
     key = (provider or {}).get("api_key")
     if not key:
         env_var = _ENV_KEY.get(ptype)

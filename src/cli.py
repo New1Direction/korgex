@@ -1228,6 +1228,88 @@ def cmd_repl(resume=False):
 import argparse
 
 # Map subcommand name → handler. Existing bodies untouched.
+def cmd_providers():
+    """Register and select model providers — including a self-hosted OpenAI-compatible
+    endpoint (vLLM, llama.cpp, a gateway), so `korgex` runs against your own box in one
+    command instead of juggling env vars.
+
+      korgex providers add <name> --url <base> --model <model> [--type openai] [--key K | --key-env VAR]
+      korgex providers list
+      korgex providers use <name>
+      korgex providers remove <name>
+    """
+    from src import config as C
+
+    argv = sys.argv[1:]
+    rest = argv[argv.index("providers") + 1:] if "providers" in argv else []
+    action = rest[0] if rest and not rest[0].startswith("-") else "list"
+
+    opts: dict = {}
+    i = 1
+    while i < len(rest):
+        t = rest[i]
+        if t in ("--url", "--model", "--type", "--key", "--key-env") and i + 1 < len(rest):
+            opts[t.lstrip("-")] = rest[i + 1]
+            i += 2
+        else:
+            i += 1
+    name = next((t for t in rest[1:] if not t.startswith("-")), None)
+
+    cfg = C.load_config()
+
+    if action == "list":
+        if not cfg.providers:
+            print("  no providers configured. Add one:")
+            print("    korgex providers add vllm --url http://localhost:8000/v1 --model my-model")
+            return 0
+        for p in cfg.providers:
+            nm = p.get("name") or f"({p.get('type')})"
+            mdl = f"  [{p.get('model')}]" if p.get("model") else ""
+            url = f" → {p.get('base_url')}" if p.get("base_url") else ""
+            star = "  *active" if p.get("name") and p.get("name") == cfg.active_provider else ""
+            print(f"  {nm}{mdl}  {p.get('type')}{url}{star}")
+        return 0
+
+    if action == "add":
+        if not name or not opts.get("url") or not opts.get("model"):
+            print("  usage: korgex providers add <name> --url <base_url> --model <model> "
+                  "[--type openai] [--key K | --key-env VAR]")
+            return 2
+        api_key = opts.get("key")
+        if not api_key and opts.get("key-env"):
+            api_key = os.environ.get(opts["key-env"])
+        cfg = C.upsert_provider(cfg, name, base_url=opts["url"], model=opts["model"],
+                                type=opts.get("type", "openai"), api_key=api_key)
+        path = C.save_config(cfg)
+        print(f"  ✓ provider '{name}' → {opts['url']}  [{opts['model']}]")
+        print(f"    {path}")
+        print(f"    activate it:  korgex providers use {name}")
+        return 0
+
+    if action == "use":
+        if not name or not cfg.provider_by_name(name):
+            print(f"  no provider named '{name}'. See: korgex providers list")
+            return 2
+        cfg = C.set_active(cfg, name)
+        C.save_config(cfg)
+        p = cfg.provider_by_name(name)
+        print(f"  ✓ active provider: {name} → {p.get('base_url')}  [{p.get('model')}]")
+        print("    korgex now runs against this endpoint (no env vars needed).")
+        return 0
+
+    if action == "remove":
+        if not name or not cfg.provider_by_name(name):
+            print(f"  no provider named '{name}'.")
+            return 2
+        cfg = C.remove_provider(cfg, name)
+        C.save_config(cfg)
+        print(f"  ✓ removed provider '{name}'")
+        return 0
+
+    print(f"  unknown action '{action}'. Use: add | list | use | remove")
+    return 2
+
+
 SUBCOMMANDS = {
     "serve":             cmd_default,             # default behavior: dashboard + VS Code
     "dashboard":         cmd_dashboard,           # dashboard only
@@ -1253,6 +1335,7 @@ SUBCOMMANDS = {
     "mcp-server":        cmd_mcp_server,
     "setup":             cmd_setup,               # connect model providers
     "local":             cmd_local,               # recommend/wire a local model (llmfit)
+    "providers":         cmd_providers,           # register/select a self-hosted OpenAI-compatible endpoint
     "skills":            cmd_skills,              # print available skills
     "sessions":          cmd_sessions,            # list recent sessions (resume with --resume)
     "commands":          cmd_commands,            # list custom slash commands
@@ -1382,6 +1465,13 @@ def _build_subcommand_parser():
             sp.add_argument("--out", "-o", help="receipt JSON path (default: ~/.korgex/receipts/<j>.korgreceipt.json)")
             sp.add_argument("--html", nargs="?", const="",
                             help="also write a self-verifying HTML receipt (default: <out>.html)")
+        elif name == "providers":
+            sp.add_argument("args", nargs="*", help="add <name> | list | use <name> | remove <name>")
+            sp.add_argument("--url", help="OpenAI-compatible base URL (e.g. http://localhost:8000/v1)")
+            sp.add_argument("--model", help="model id served at that endpoint")
+            sp.add_argument("--type", help="provider type (default: openai)")
+            sp.add_argument("--key", help="API key (vLLM / llama.cpp need none)")
+            sp.add_argument("--key-env", help="env var that holds the API key")
         elif name == "scan":
             sp.add_argument("path", nargs="?", help="path to scan (default: current directory)")
         elif name == "review":
