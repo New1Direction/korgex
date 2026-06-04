@@ -482,7 +482,10 @@ class KorgexAgent:
             if not os.path.exists(path):
                 return ""
             budget = int(os.environ.get("KORGEX_LEAN_CONTEXT_TOKENS", "800"))
-            ctx = LC.build_lean_context(load_journal_raw(path), prompt, budget_tokens=budget)
+            # causal="causes": each matched action also brings the prompt that triggered it
+            # (the "why"), without dragging in unrelated siblings of a broad prompt.
+            ctx = LC.build_lean_context(load_journal_raw(path), prompt, budget_tokens=budget,
+                                        causal="causes")
             if not ctx["events_used"]:
                 return ""
             return ("## Relevant prior work — from the verifiable ledger\n"

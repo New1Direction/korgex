@@ -18,7 +18,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any
 
 
 def _journal_path(repo_root: str = None) -> str:
@@ -145,6 +144,72 @@ def _semantic_search(events: list, query: str, top_n: int):
         out.append({"event": ev, "score": float(np.dot(v, qv) / denom)})
     out.sort(key=lambda h: h["score"], reverse=True)
     return out[:top_n]
+
+
+def expand_causal(events: list, seeds: list, *, depth: int = 1,
+                  direction: str = "both", max_total: int = None) -> list:
+    """Expand seed events along the causal DAG (`triggered_by`) up to `depth` hops.
+    Returns seeds + neighbors as a deduped event list — seeds first, then nearest
+    neighbors — optionally capped at `max_total`.
+
+    `direction` selects which edges to follow:
+      - ``"causes"``  — only the event that triggered each seed (the "why"). One cause per
+        event, so it never drags in unrelated siblings — the safe choice for per-step
+        context.
+      - ``"effects"`` — only the events each seed triggered (the "what happened"). A broad
+        prompt can fan out to many, so bound it.
+      - ``"both"``    — both (default).
+
+    This is the causal half of retrieval, the part flat text search over a non-causal
+    store can't do: a matched action brings the prompt that caused it, a matched prompt
+    brings the actions it triggered.
+    """
+    want_causes = direction in ("both", "causes")
+    want_effects = direction in ("both", "effects")
+
+    by_seq: dict = {}
+    children: dict = {}
+    for e in events or []:
+        s = e.get("seq_id")
+        if s is not None:
+            by_seq[s] = e
+        tb = e.get("triggered_by")
+        if tb is not None:
+            children.setdefault(tb, []).append(e)
+
+    seen: dict = {}
+
+    def _add(e) -> bool:
+        s = e.get("seq_id")
+        key = s if s is not None else id(e)
+        if key in seen:
+            return False
+        seen[key] = e
+        return True
+
+    for e in seeds or []:
+        _add(e)
+
+    frontier = list(seeds or [])
+    for _ in range(max(0, depth)):
+        nxt = []
+        for e in frontier:
+            if want_causes:
+                tb = e.get("triggered_by")
+                if tb is not None and tb in by_seq and _add(by_seq[tb]):
+                    nxt.append(by_seq[tb])
+            if want_effects:
+                for ch in children.get(e.get("seq_id"), []):
+                    if _add(ch):
+                        nxt.append(ch)
+        frontier = nxt
+        if not frontier:
+            break
+
+    out = list(seen.values())
+    if max_total is not None and len(out) > max_total:
+        out = out[:max_total]
+    return out
 
 
 # ── memory-drift: reconcile recalled refs against the live workspace ──────
