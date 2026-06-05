@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.tool_abstraction import USER_TOOLS, route_tool_call
+from src import tool_abstraction as _TA
 # tools_impl must be imported so its @register_tool decorators populate the registry
 import src.tools_impl  # noqa: F401
 from src import korg_ledger as _kl
@@ -27,6 +28,7 @@ from src.korg_ledger import get_default_client as _korg
 from src.sanitize import redact as _redact
 from src import edit_policy as _EP
 from src import command_guard as _cmd_guard
+from src import egress_guard as _egress
 from src.plugins import PluginRegistry, default_plugin_dirs, load_plugins
 from src.hooks import load_hooks, run_event
 from src.workspace import path_within
@@ -1246,6 +1248,10 @@ class KorgexAgent:
                         if cg_block is not None:
                             blocks[call["id"]] = cg_block
                             continue
+                        eg_block = self._egress_guard(call, korg, llm_seq)
+                        if eg_block is not None:
+                            blocks[call["id"]] = eg_block
+                            continue
                         pm_block = self._plan_mode_block(call, korg, llm_seq)
                         if pm_block is not None:
                             blocks[call["id"]] = pm_block
@@ -1356,6 +1362,15 @@ class KorgexAgent:
                     cg_block = self._command_guard_block(call, korg, llm_seq)
                     if cg_block is not None:
                         messages.append(self._tool_result_turn(call["id"], cg_block))
+                        continue
+
+                    # ── Egress floor: secret/exfil shapes leaving the box ────
+                    # Inspect the OUTBOUND payload of transmitting tools; flag (+
+                    # ledger), redact, or block per KORGEX_EGRESS. Additive: flag
+                    # mode (default) never alters or blocks.
+                    eg_block = self._egress_guard(call, korg, llm_seq)
+                    if eg_block is not None:
+                        messages.append(self._tool_result_turn(call["id"], eg_block))
                         continue
 
                     # ── Plan mode (read-only until approved) ─────────────────
@@ -1816,6 +1831,10 @@ class KorgexAgent:
         cg_block = self._command_guard_block(call, korg, code_action_seq)
         if cg_block is not None:
             return cg_block
+        # Egress floor — secret/exfil shapes leaving via this tool (records its own event).
+        eg_block = self._egress_guard(call, korg, code_action_seq)
+        if eg_block is not None:
+            return eg_block
         # Plan mode (read-only until approved) — records its own block event.
         pm_block = self._plan_mode_block(call, korg, code_action_seq)
         if pm_block is not None:
@@ -2165,6 +2184,65 @@ class KorgexAgent:
                     "severity": verdict["severity"]},
             success=False, duration_ms=0, triggered_by=llm_seq)
         return block
+
+    def _egress_guard(self, call: dict, korg, llm_seq):
+        """Shape-based egress FLOOR. Inspects the OUTBOUND payload of a transmitting
+        tool (web/bus/browser/MCP/network-Bash) for secret shapes + large encoded
+        blobs and records a tamper-evident verdict. Acts per ``KORGEX_EGRESS``:
+
+          flag   (default, ON) → record `egress.flag`, warn, proceed unchanged.
+          redact               → record `egress.redact`, mask the secret in
+                                  ``call['args']``, proceed with the masked payload.
+          block                → record `egress.block`, return a refusal dict.
+          off                  → disabled.
+
+        OFF under BYPASS. Fails OPEN — the guard must never break the loop. The
+        recorded verdict carries finding SHAPES only (never the raw secret), so the
+        shareable ledger can't itself become the exfil channel."""
+        if self.edit_policy == _EP.BYPASS:
+            return None
+        try:
+            mode = _egress.mode_from_env(os.environ)
+            if mode == "off":
+                return None
+            name = call.get("name")
+            args = call.get("args") or {}
+            mcp = getattr(_TA, "_MCP_TOOLS", None)
+            if not _egress.is_outbound(name, args, mcp_tools=mcp):
+                return None
+            allow = _egress.split_env_list("KORGEX_EGRESS_ALLOW")
+            deny = _egress.split_env_list("KORGEX_EGRESS_DENY")
+            verdict = _egress.inspect(name, args, allow=allow, deny=deny, mcp_tools=mcp)
+            if not verdict["findings"] and not verdict["denied_by_list"]:
+                return None  # nothing risky leaving — stay out of the way
+            new_args, action = _egress.apply(verdict, name, args, mode)
+            event = {"allow": "egress.flag", "redacted": "egress.redact",
+                     "blocked": "egress.block"}.get(action, "egress.flag")
+            korg.record_tool_call(
+                tool_name=event,
+                args={"tool": name, "destination": verdict.get("destination")},
+                result=_egress.verdict_payload(name, verdict, mode=mode, action=action,
+                                               allow=allow, deny=deny),
+                success=(action != "blocked"), duration_ms=0, triggered_by=llm_seq)
+            shapes = ", ".join(sorted({f["label"] for f in verdict["findings"]})) or "denied destination"
+            if action == "blocked":
+                return {
+                    "error": f"blocked: egress guard — outbound payload contains {shapes} "
+                             f"bound for {verdict.get('destination') or 'an external destination'}",
+                    "verdict": "EGRESS_BLOCKED",
+                    "hint": "a secret/exfil shape was detected leaving the box. Remove it, or set "
+                            "KORGEX_EGRESS=flag (warn only) or off if this is intended.",
+                }
+            if action == "redacted":
+                call["args"] = new_args  # the masked payload is what actually leaves
+            try:
+                sys.stderr.write(f"  ⚠ egress[{mode}]: {shapes} → "
+                                 f"{verdict.get('destination') or '?'}\n")
+            except Exception:
+                pass
+            return None
+        except Exception:
+            return None  # fail-open
 
     def _edit_policy_block(self, call: dict, korg, llm_seq):
         """Edit-approval gate. For a file-mutating tool: consult the policy, record

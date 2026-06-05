@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Egress / exfil guard** (`KORGEX_EGRESS=off|flag|redact|block`, default `flag` = ON). A shape-based floor over data leaving the box through outbound tools (`WebFetch`/`WebSearch`/`BusSend`/`browser_navigate`/MCP/network `Bash`): it inspects the outbound payload for **secret shapes** (reusing `sanitize.py`'s patterns — one source of truth, no drift) and **large encoded blobs**, and records each detection as a tamper-evident `egress.flag`/`egress.redact`/`egress.block` ledger verdict. `flag` warns + records but never alters or blocks (additive — zero breakage by default); `redact` masks the secret in the outbound payload before it leaves; `block` refuses. **Leak-proofing:** the verdict carries only the finding's *shape* (kind/label/severity), never the raw secret, so the shareable ledger can't itself become the exfil channel. Opt-in destination control via `KORGEX_EGRESS_ALLOW`/`KORGEX_EGRESS_DENY`. Wired into both serial tool paths and the CodeAct bridge; fails open; off under `BYPASS`.
+
 ## [0.33.0] — 2026-06-05
 
 ### Added
