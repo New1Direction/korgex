@@ -165,6 +165,9 @@ class KorgexAgent:
         # zero (no cache seen), compaction degrades to its size-only behavior.
         self._last_cache = {"cache_read": 0, "cache_creation": 0,
                             "prompt_tokens": 0, "uncached_input": 0}
+        # Cached mise project-task block (computed lazily, at most one `mise tasks ls`
+        # subprocess per agent). None = not yet computed; "" = no mise tasks here.
+        self._mise_block = None
         # Live task ledger — the agent's self-updating checklist. TaskCreate/TaskUpdate
         # drive it; its open items are fed back into the prompt each turn so the model
         # works through them instead of drifting or claiming done early.
@@ -291,6 +294,18 @@ class KorgexAgent:
                 parts.append(block)
         except Exception:
             pass  # skills are an enhancement; never break prompt assembly
+
+        # Project tasks (mise): the repo's real build/test/lint, so the agent runs
+        # them instead of guessing. Computed once per agent (skips the subprocess
+        # entirely when there's no mise config); never breaks prompt assembly.
+        try:
+            if self._mise_block is None:
+                from src import mise_tasks as _MT
+                self._mise_block = _MT.project_task_block(self.repo_root)
+            if self._mise_block:
+                parts.append(self._mise_block)
+        except Exception:
+            pass
 
         return "\n\n".join(parts)
 
