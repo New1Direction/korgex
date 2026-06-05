@@ -181,6 +181,53 @@ def adopt(src_dir: str, dest_root: str) -> list:
             for d in find_skill_dirs(src)]
 
 
+# ── export: push korgex skills out to other agents ──────────────────────────────
+
+# Project-relative skills dirs for the common agents (matches their on-disk layout).
+# Same Agent-Skills format, so an exported korgex skill is directly usable.
+KNOWN_AGENT_TARGETS = {
+    "claude": ".claude/skills",
+    "cursor": ".cursor/skills",
+    "codex": ".codex/skills",
+    "opencode": ".opencode/skills",
+}
+
+
+def resolve_export_target(target: str, project_root: str) -> str:
+    """Map an export target to a directory: a known agent alias → its project-local
+    skills dir; anything else is treated as a literal directory path (``~`` expanded)."""
+    rel = KNOWN_AGENT_TARGETS.get((target or "").strip().lower())
+    if rel:
+        return os.path.join(project_root, *rel.split("/"))
+    return os.path.expanduser(target)
+
+
+def export_skill(skill_dir: str, target_dir: str, name: str) -> str:
+    """Copy a korgex skill directory into ``target_dir/<name>``; return the destination.
+    The skill is left in the shared Agent-Skills format so the other agent can read it
+    directly (it just ignores korgex's extra ``trust``/``source`` frontmatter keys)."""
+    out = os.path.join(target_dir, _safe_name(name))
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    os.makedirs(target_dir, exist_ok=True)
+    shutil.copytree(skill_dir, out)
+    return out
+
+
+def export_skills(names, target_dir: str, registry) -> list:
+    """Export each named skill (resolved from a loaded ``SkillRegistry``) into
+    ``target_dir``. Unknown names are skipped. Returns ``[(name, dest), …]`` — the
+    move that makes korgex's self-learned skills usable by other agents."""
+    done = []
+    for name in names:
+        sk = registry.get(name)
+        if sk is None:
+            continue
+        dest = export_skill(os.path.dirname(sk.path), target_dir, sk.name)
+        done.append((sk.name, dest))
+    return done
+
+
 # ── skills.sh search ────────────────────────────────────────────────────────────
 
 def _http_get(url: str) -> str:
