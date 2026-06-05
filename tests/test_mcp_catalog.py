@@ -45,6 +45,15 @@ def test_firecrawl_preset_carries_the_api_key():
     assert "FIRECRAWL_API_KEY" in row["needs"]
 
 
+def test_openapi_to_mcp_is_a_self_run_remote():
+    # Java/Spring server you build + run yourself; korgex connects over HTTP on :8000.
+    cfg = resolve("openapi-to-mcp")
+    assert cfg == {"url": "http://localhost:8000/mcp"}
+    row = next(r for r in entries() if r["alias"] == "openapi-to-mcp")
+    assert row["transport"] == "http"
+    assert "jar" in row["description"].lower()   # the build/run caveat is surfaced
+
+
 def test_resolve_fills_path_placeholder_for_filesystem():
     cfg = resolve("filesystem", path_value="/home/u/proj")
     assert "/home/u/proj" in cfg["args"]
