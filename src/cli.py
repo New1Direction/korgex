@@ -1294,6 +1294,7 @@ def cmd_local():
     argv = sys.argv[1:]
     rest = argv[argv.index("local") + 1:] if "local" in argv else []
     use_model, use_case = None, "coding"
+    omlx_flag, omlx_url = False, None
     i = 0
     while i < len(rest):
         if rest[i] == "--use" and i + 1 < len(rest):
@@ -1304,7 +1305,45 @@ def cmd_local():
             use_case = rest[i + 1]
             i += 2
             continue
+        if rest[i] == "--omlx":
+            omlx_flag = True
+            i += 1
+            continue
+        if rest[i] == "--omlx-url" and i + 1 < len(rest):
+            omlx_url = rest[i + 1]
+            i += 2
+            continue
         i += 1
+
+    # ── omlx: a local Apple-Silicon MLX server (OpenAI/Anthropic compatible). korgex
+    # just points at it — no inference code of its own. `--use` wires it; bare lists
+    # what the running server is serving.
+    if omlx_flag:
+        base = omlx_url or LM.OMLX_BASE_URL
+        if use_model:
+            cfg = C.load_config()
+            cfg = LM.set_omlx_model(cfg, use_model, base)
+            C.save_config(cfg)
+            _record_local("local.model_set",
+                          {"model": cfg.default_model, "backend": "omlx", "base_url": base})
+            print(f"  ✓ default model → {cfg.default_model}  (local, via omlx @ {base})")
+            print("    every turn stays provable:  korgex verify")
+            return 0
+        served = LM.detect_omlx(base)
+        if served is None:
+            print(f"  omlx isn't reachable at {base}")
+            print("  start it:  omlx serve <mlx-model>   (https://github.com/jundot/omlx, Apache-2.0)")
+            print("  not the default port?  korgex local --omlx --omlx-url http://localhost:<port>/v1")
+            return 1
+        if not served:
+            print(f"  omlx is up at {base} but has no model loaded.")
+            print("  load one in its admin panel, then:  korgex local --omlx --use <model>")
+            return 0
+        print(f"  omlx @ {base} is serving:")
+        for mid in served:
+            print(f"    • {mid}")
+        print(f"\n  wire it:  korgex local --omlx --use {served[0]}")
+        return 0
 
     # Wire a specific local model — no llmfit needed.
     if use_model:
@@ -1694,10 +1733,16 @@ def _build_subcommand_parser():
                                  "adopt <dir> | export <name|all> [target] | "
                                  "check [name|all] | update [name|all]")
         elif name == "local":
-            sp.add_argument("--use", metavar="OLLAMA_TAG",
-                            help="set this Ollama model as the default (e.g. qwen2.5-coder:7b)")
+            sp.add_argument("--use", metavar="MODEL",
+                            help="set this model as the default "
+                                 "(Ollama tag e.g. qwen2.5-coder:7b, or with --omlx an MLX model id)")
             sp.add_argument("--use-case", choices=["coding", "reasoning", "chat"],
                             help="bias recommendations (default: coding)")
+            sp.add_argument("--omlx", action="store_true",
+                            help="target a local omlx MLX server: bare lists its served models, "
+                                 "--use <model> wires it (OpenAI-compatible, default :8000)")
+            sp.add_argument("--omlx-url", metavar="URL",
+                            help="omlx base URL if not the default http://localhost:8000/v1")
     return p
 
 

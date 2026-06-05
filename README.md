@@ -262,7 +262,7 @@ Beyond the core file/shell/search loop, korgex ships several deeper systems. The
 - **Remote signing** (`KORGEX_REMOTE_SIGNER_*`). Sign a ledger tip via an HTTP signer **you own and control**, so the signing key can live off the agent host (a separate box, an HSM). Fail-closed: bearer token, host allowlist, optional pubkey pinning, local signature verification.
 - **Verifiable agent bus** (`korgex bus`, `KORG_BUS_*`). Agents coordinate over an Ed25519-signed, tamper-evident korg-ledger journal — "who said what" is a signature, not a claim.
 - **Recall + memory** — cross-session memory that is drift-checked against source baselines ([Verifiable cognition](#verifiable-cognition)).
-- **Local models** (`korgex local`). Hardware-aware advisor (CPU/RAM/GPU/VRAM → ranked, fit-scored picks via [llmfit](https://github.com/AlexsJones/llmfit), optional) that can wire a local Ollama model as your default.
+- **Local models** (`korgex local`). Hardware-aware advisor (CPU/RAM/GPU/VRAM → ranked, fit-scored picks via [llmfit](https://github.com/AlexsJones/llmfit), optional) that can wire a local **Ollama** model as your default. On Apple Silicon, `korgex local --omlx` targets a running [**omlx**](https://github.com/jundot/omlx) MLX server (OpenAI-compatible, continuous batching + tiered KV cache): bare lists the models it's serving, `--omlx --use <model-id>` wires it as your default (add `--omlx-url` for a non-default port). korgex doesn't reimplement inference — it just points at the local endpoint.
 
 ---
 
