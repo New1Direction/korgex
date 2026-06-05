@@ -22,6 +22,11 @@ PRESETS = {
         "description": "Local git — status, diff, log, commit, branches (no auth)",
         "command": "uvx", "args": ["mcp-server-git"], "category": "dev",
     },
+    "mise": {
+        "description": "mise (jdx/mise) — this project's tool versions, env vars + runnable "
+                       "tasks (and run_task); mise ships this MCP server for agents",
+        "command": "mise", "args": ["mcp"], "needs": ["mise installed"], "category": "dev",
+    },
     "time": {
         "description": "Current time + timezone conversion (no auth)",
         "command": "uvx", "args": ["mcp-server-time"], "category": "utility",

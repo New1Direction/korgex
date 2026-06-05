@@ -417,7 +417,7 @@ korgex --mode execute "implement the plan we just made"
 
 *Plain version: MCP is an open "app-store" standard for AI — it lets korgex plug into outside services (GitHub, your files, a database, …) without custom glue.*
 
-korgex includes a native MCP (Model Context Protocol) client. Any MCP server in your `mcp.json` becomes part of the agent's tool surface. Manage them from the CLI with `korgex mcp` (add/list/remove stdio **or** remote url+auth servers).
+korgex includes a native MCP (Model Context Protocol) client. Any MCP server in your `mcp.json` becomes part of the agent's tool surface. Manage them from the CLI with `korgex mcp` (add/list/remove stdio **or** remote url+auth servers), and `korgex mcp catalog` / `korgex mcp add <alias>` for one-command presets. One worth knowing: **`korgex mcp add mise`** wires in [mise](https://github.com/jdx/mise)'s own agent-facing server — the agent gets your project's tool versions, env vars, and runnable tasks (plus `run_task`), all verifiable through the ledger.
 
 ### korgex *is* an MCP server too
 
