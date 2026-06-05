@@ -127,12 +127,13 @@ def _parse_http_jsonrpc(body: str) -> dict:
 
 
 def _default_http_post(url: str, payload: dict, headers: dict, timeout) -> tuple:
-    """Real HTTP POST of a JSON-RPC message; returns (status_code, body_text)."""
+    """Real HTTP POST of a JSON-RPC message; returns (status_code, body_text, response_headers).
+    The headers carry `mcp-session-id` for streamable-HTTP servers that require it echoed."""
     import httpx
     h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
     h.update(headers or {})
     r = httpx.post(url, json=payload, headers=h, timeout=timeout)
-    return r.status_code, r.text
+    return r.status_code, r.text, dict(r.headers)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -157,6 +158,10 @@ class MCPClient:
         self._process: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         self._request_id = 0
+        # Streamable-HTTP session id: many remote MCP servers (Context7 et al.) issue
+        # an `mcp-session-id` on initialize and REQUIRE it echoed on every later request,
+        # or tools/list comes back empty. Captured from the response, resent on requests.
+        self._session_id: Optional[str] = None
         self._connected = False
         self._capabilities: dict = {}
         self._tools: list[MCPTool] = []
@@ -356,12 +361,24 @@ class MCPClient:
         payload = {"jsonrpc": "2.0", "id": req_id, "method": method}
         if params:
             payload["params"] = params
+        headers = dict(self.config.headers or {})
+        if self._session_id:                       # echo a streamable-HTTP session id
+            headers["Mcp-Session-Id"] = self._session_id
         post = self._http_post or _default_http_post
         try:
-            status, body = post(self.config.url, payload, self.config.headers,
-                                 timeout or self.config.timeout)
+            res = post(self.config.url, payload, headers, timeout or self.config.timeout)
         except Exception as e:
             return {"error": f"http transport error: {type(e).__name__}: {e}"}
+        # Posts return (status, body) or (status, body, response_headers). Capture a
+        # server-issued mcp-session-id (case-insensitive) to echo on subsequent requests.
+        if isinstance(res, tuple) and len(res) >= 3:
+            status, body, resp_headers = res[0], res[1], res[2] or {}
+            for k, v in resp_headers.items():
+                if isinstance(k, str) and k.lower() == "mcp-session-id" and v:
+                    self._session_id = v
+                    break
+        else:
+            status, body = res
         if status and status >= 400:
             return {"error": f"http {status}"}
         return _parse_http_jsonrpc(body)

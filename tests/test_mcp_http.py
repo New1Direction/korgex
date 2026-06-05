@@ -30,6 +30,35 @@ def make_http_post(tools=None, call_result=None):
     return post, calls
 
 
+def test_http_client_echoes_the_mcp_session_id():
+    # Streamable-HTTP servers (Context7 et al.) issue an `mcp-session-id` on initialize
+    # and REQUIRE it echoed on every later request, or tools/list comes back empty.
+    # Found live: korgex connected to Context7 but discovered 0 tools without this.
+    calls = []
+
+    def post(url, payload, headers, timeout):
+        m, rid = payload.get("method"), payload.get("id")
+        calls.append((m, dict(headers)))
+        if m == "initialize":
+            res = {"capabilities": {"tools": {}}}
+        elif m == "tools/list":
+            res = {"tools": [{"name": "doc", "description": "d", "inputSchema": {}}]}
+        else:
+            res = {}
+        body = json.dumps({"jsonrpc": "2.0", "id": rid, "result": res})
+        # the server hands out the session id ONLY on initialize (case-insensitive)
+        resp_headers = {"mcp-session-id": "sess-xyz"} if m == "initialize" else {}
+        return 200, body, resp_headers
+
+    c = MCPClient(MCPServerConfig(name="r", transport="http", url="https://x"), http_post=post)
+    assert c.connect()["status"] == "connected"
+    tools = c.discover_tools()
+    assert [t.name for t in tools] == ["doc"]            # tools actually came back
+    by_method = dict(calls)
+    assert "Mcp-Session-Id" not in by_method["initialize"]   # none issued yet
+    assert by_method["tools/list"]["Mcp-Session-Id"] == "sess-xyz"  # echoed after
+
+
 def test_http_client_connects_and_discovers_tools():
     post, calls = make_http_post(tools=[{"name": "search", "description": "d", "inputSchema": {}}])
     cfg = MCPServerConfig(name="remote", transport="http", url="https://mcp.x/api",
