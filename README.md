@@ -269,6 +269,7 @@ Beyond the core file/shell/search loop, korgex ships several deeper systems. The
 ## Safety & sandboxing
 
 - **Destructive-command guard** (on by default; `KORGEX_COMMAND_GUARD`). A whitelist-first, quote/comment-aware floor over `Bash` (and the CodeAct bridge) that refuses obviously destructive commands; a block is a tamper-evident `command_guard.block` event in the ledger.
+- **Egress / exfil guard** (on by default in flag mode; `KORGEX_EGRESS=off|flag|redact|block`). Shape-based inspection of data leaving the box via outbound tools (`WebFetch`/`WebSearch`/`BusSend`/`browser_navigate`/MCP/network `Bash`): detects secret shapes (reusing the ledger redactor's patterns) and large encoded blobs. `flag` warns + records an `egress.flag` verdict but never alters or blocks (additive); `redact` masks the secret in the outbound payload before it leaves; `block` refuses. Every detection is a tamper-evident ledger verdict carrying the finding's *shape* only — the raw secret is redacted from the record, so the shareable ledger never becomes the exfil channel. Opt-in destination control via `KORGEX_EGRESS_ALLOW`/`KORGEX_EGRESS_DENY` (comma-separated hosts).
 - **Bash sandbox** (`KORGEX_SANDBOX=modal|docker|direct|auto`). Controls isolation for shell execution.
 - **CodeAct OS isolation** (`KORGEX_CODEACT_ISOLATION=1`, Linux/bubblewrap) for the code kernel.
 - **Edit confirmation.** Diffs for `Edit`/`Write` on critical files prompt `[y/N]` in the TUI; the edit policy is configurable via `KORGEX_EDIT_POLICY`.
