@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Zed setup docs: the `agent_servers` config was missing `"type": "custom"`.** Current Zed requires a `type` discriminator on each external agent; without it Zed rejects the whole `agent_servers` block ("missing field `type`") and korgex never appears in the Agent Panel — so "New korgex Thread" did nothing. README now shows the correct block (incl. `env: {}` and a note to use the full binary path if korgex isn't on Zed's PATH). Found driving korgex in a real Zed install.
+
 ## [0.32.0] — 2026-06-04
 
 ### Added
