@@ -58,6 +58,11 @@ PRESETS = {
         "description": "Headless-browser automation — navigate, click, screenshot (no auth)",
         "command": "npx", "args": ["-y", "@modelcontextprotocol/server-puppeteer"], "category": "web",
     },
+    "chrome-devtools": {
+        "description": "Chrome DevTools (official) — drive a local Chrome: navigate, inspect the "
+                       "DOM, performance traces, network + console, screenshots (no auth; needs Node + Chrome)",
+        "command": "npx", "args": ["-y", "chrome-devtools-mcp@latest"], "category": "web",
+    },
     "everything": {
         "description": "Reference server — many demo tools/prompts/resources (great for trying MCP)",
         "command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything"], "category": "demo",
@@ -84,6 +89,13 @@ PRESETS = {
         "command": "npx", "args": ["-y", "@modelcontextprotocol/server-slack"],
         "env": {"SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}", "SLACK_TEAM_ID": "${SLACK_TEAM_ID}"},
         "needs": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"], "category": "comms",
+    },
+    "firecrawl": {
+        "description": "Firecrawl — web scraping/crawling to clean markdown, plus search + "
+                       "structured extraction",
+        "command": "npx", "args": ["-y", "firecrawl-mcp"],
+        "env": {"FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"}, "needs": ["FIRECRAWL_API_KEY"],
+        "category": "web",
     },
     "brave-search": {
         "description": "Web + local search via the Brave Search API",

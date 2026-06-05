@@ -30,6 +30,21 @@ def test_context7_preset_is_the_hosted_remote_server():
     assert row["transport"] == "http"   # remote (url) preset
 
 
+def test_chrome_devtools_preset_is_no_auth_stdio():
+    cfg = resolve("chrome-devtools")
+    assert cfg == {"command": "npx", "args": ["-y", "chrome-devtools-mcp@latest"]}
+    row = next(r for r in entries() if r["alias"] == "chrome-devtools")
+    assert row["transport"] == "stdio" and row["needs"] == []
+
+
+def test_firecrawl_preset_carries_the_api_key():
+    cfg = resolve("firecrawl")
+    assert cfg["command"] == "npx" and "firecrawl-mcp" in cfg["args"]
+    assert cfg["env"] == {"FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"}
+    row = next(r for r in entries() if r["alias"] == "firecrawl")
+    assert "FIRECRAWL_API_KEY" in row["needs"]
+
+
 def test_resolve_fills_path_placeholder_for_filesystem():
     cfg = resolve("filesystem", path_value="/home/u/proj")
     assert "/home/u/proj" in cfg["args"]
