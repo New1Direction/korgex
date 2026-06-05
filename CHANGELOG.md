@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **ACP: live streaming + tool-call activity (`korgex acp` in an editor).** The Agent Client Protocol agent (0.24.0) was correct but thin — it sent one `agent_message_chunk` *after* the whole turn, with no visible tool activity. It now streams as the loop runs: each tool fires a `tool_call` / `tool_call_update` (with an ACP `ToolKind` and a human title) and each round's narration fires an `agent_message_chunk`, so an editor like **Zed** shows read/edit/run cards and live reply text instead of one opaque blob. Wired through korgex's existing plugin lifecycle (new `on_assistant_text` hook + `pre_tool`/`post_tool`), so the core agent loop is untouched and the bridge stays fully unit-tested (`src/acp.py::register_streaming` / `make_live_run_turn`). Also: `embeddedContext` capability is now advertised true and `session/prompt` accepts `resource_link` + embedded `resource` blocks (editor `@file` mentions / pasted context), not just plain text. README documents the Zed `agent_servers` config. Still deliberate follow-ups: `session/request_permission`, mid-turn `session/cancel`, `session/load`, and wiring the client's `mcpServers`.
+
 ## [0.25.0] — 2026-06-04
 
 ### Added

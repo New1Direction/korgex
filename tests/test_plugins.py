@@ -65,4 +65,14 @@ def test_count_reports_registered_plugins():
 
 
 def test_valid_hooks_cover_the_tool_lifecycle():
-    assert {"on_user_prompt", "pre_tool", "post_tool", "on_stop"} <= VALID_HOOKS
+    assert {"on_user_prompt", "pre_tool", "post_tool", "on_stop",
+            "on_assistant_text"} <= VALID_HOOKS
+
+
+def test_on_assistant_text_hook_is_registrable():
+    # The ACP streaming bridge registers this to stream per-round narration.
+    reg = PluginRegistry()
+    seen = []
+    reg.register("on_assistant_text", lambda p: seen.append(p["text"]))
+    reg.invoke("on_assistant_text", {"text": "narrating"})
+    assert seen == ["narrating"]
