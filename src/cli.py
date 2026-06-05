@@ -1350,22 +1350,10 @@ def cmd_acp():
     client/editor (Zed et al.) can drive it. JSON-RPC 2.0 on stdin/stdout; each prompt turn
     bridges to korgex's agent loop. The agent's own stdout is redirected to stderr so it
     can't corrupt the JSON-RPC channel."""
-    import contextlib
     from src import acp as ACP
+    from src.agent import KorgexAgent
 
-    def run_turn(prompt_text, session):
-        try:
-            from src.agent import KorgexAgent
-            with contextlib.redirect_stdout(sys.stderr):   # keep stdout = the JSON-RPC channel
-                agent = KorgexAgent(interactive=False)
-                if session.get("cwd"):
-                    agent.repo_root = session["cwd"]
-                result = agent.run_task(prompt_text) or {}
-            return {"text": result.get("result", ""),
-                    "stop_reason": "end_turn" if result.get("success", True) else "refusal"}
-        except Exception as e:
-            return {"text": f"korgex error: {e}", "stop_reason": "refusal"}
-
+    run_turn = ACP.make_live_run_turn(lambda: KorgexAgent(interactive=False))
     ACP.serve(ACP.AcpAgent(run_turn=run_turn))
     return 0
 

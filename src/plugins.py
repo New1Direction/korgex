@@ -21,7 +21,10 @@ import os
 from typing import Callable
 
 # The in-process lifecycle points plugins may register on.
-VALID_HOOKS = frozenset({"on_user_prompt", "pre_tool", "post_tool", "on_stop"})
+# `on_assistant_text` fires once per loop round with the model's narration/answer
+# text (the ACP bridge streams it to the editor as it's produced).
+VALID_HOOKS = frozenset({"on_user_prompt", "pre_tool", "post_tool", "on_stop",
+                         "on_assistant_text"})
 
 
 class PluginRegistry:

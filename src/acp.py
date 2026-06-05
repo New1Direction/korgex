@@ -14,12 +14,17 @@ Implemented clean-room from the open spec (agentclientprotocol.com):
 
 `AcpAgent` is transport-agnostic and dependency-injected (`run_turn` does the real work,
 `send` emits notifications) so the protocol layer is fully unit-testable. `serve()` wires it
-to stdio. The bridge to the live agent loop, tool-call streaming, `session/request_permission`,
-and the fs/terminal client methods are deliberate follow-ups; end-to-end validation needs a
-real ACP client.
+to stdio.
+
+Live streaming: during a turn the bridge registers korgex's plugin lifecycle
+(`register_streaming`) so each tool fires a `tool_call`/`tool_call_update` and each round's
+narration fires an `agent_message_chunk` — the editor shows activity + streamed text as the
+loop runs, not one blob after it. `session/request_permission`, real mid-turn `session/cancel`,
+`session/load`, and wiring the client's `mcpServers` are deliberate follow-ups.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 
@@ -48,9 +53,32 @@ def notification(method: str, params: dict) -> dict:
 
 
 def prompt_text(blocks) -> str:
-    """Join the text from a session/prompt content-block array (text blocks only)."""
-    return "\n".join(b.get("text", "") for b in (blocks or [])
-                     if isinstance(b, dict) and b.get("type") == "text").strip()
+    """Join a session/prompt content-block array into one text prompt.
+
+    Pulls plain ``text`` blocks, ``resource_link`` blocks (surfaced as an ``@name``
+    reference, matching korgex's @-mention convention) and embedded ``resource``
+    blocks (their inline text, wrapped in a ``<context>`` marker). Unprocessable
+    blocks (image, audio) are skipped. This is what lets an editor hand korgex
+    @-file mentions and pasted context, not just a plain string."""
+    parts: list = []
+    for b in blocks or []:
+        if not isinstance(b, dict):
+            continue
+        kind = b.get("type")
+        if kind == "text":
+            parts.append(b.get("text", ""))
+        elif kind == "resource_link":
+            ref = b.get("name") or b.get("uri") or ""
+            if ref:
+                parts.append(f"@{ref}")
+        elif kind == "resource":
+            res = b.get("resource") or {}
+            txt = res.get("text")
+            if txt:
+                uri = res.get("uri") or ""
+                head = f"<context {uri}>" if uri else "<context>"
+                parts.append(f"{head}\n{txt}\n</context>")
+    return "\n".join(p for p in parts if p).strip()
 
 
 class AcpAgent:
@@ -99,7 +127,9 @@ class AcpAgent:
             "protocolVersion": params.get("protocolVersion", PROTOCOL_VERSION),
             "agentCapabilities": {
                 "loadSession": False,
-                "promptCapabilities": {"audio": False, "embeddedContext": False, "image": False},
+                # embeddedContext: we inline resource/resource_link blocks into the
+                # prompt (see prompt_text). image/audio: korgex can't process these.
+                "promptCapabilities": {"audio": False, "embeddedContext": True, "image": False},
                 "mcpCapabilities": {"http": True, "sse": False},
             },
             "authMethods": [],  # korgex uses BYO-key/config, not an ACP auth handshake
@@ -119,6 +149,9 @@ class AcpAgent:
         if session is None:
             raise AcpError(-32602, f"unknown session: {sid}")
         session["cancelled"] = False
+        # Session-scoped emit: the turn (and any plugins it registers) streams
+        # agent_message_chunk / tool_call updates back to THIS session as it works.
+        session["_emit"] = self._emitter(sid)
         text = prompt_text(params.get("prompt"))
 
         out = (self.run_turn or _noop_turn)(text, session) or {}
@@ -141,10 +174,149 @@ class AcpAgent:
         if session is not None:
             session["cancelled"] = True
 
+    def _emitter(self, sid: str):
+        """A session-scoped `emit(update)` that wraps an update dict in a
+        `session/update` notification for THIS session and sends it."""
+        def emit(update: dict) -> None:
+            if self.send:
+                self.send(notification("session/update",
+                                       {"sessionId": sid, "update": update}))
+        return emit
+
+
+# ── ACP session/update builders (tool-call lifecycle + text) ────────────────────
+
+_TOOL_KINDS = {
+    "Read": "read",
+    "Edit": "edit", "Write": "edit",
+    "Bash": "execute",
+    "Grep": "search", "Glob": "search", "list_files": "search",
+    "WebFetch": "fetch", "WebSearch": "fetch",
+    "delete_file": "delete",
+}
+
+
+def tool_kind(name) -> str:
+    """Map a korgex tool name to an ACP ToolKind (read|edit|execute|search|fetch|
+    delete|other) so the editor can pick an icon/affordance for the activity card."""
+    return _TOOL_KINDS.get(name or "", "other")
+
+
+def _tool_title(call: dict) -> str:
+    """A short human label for the tool-call card: ``Read: src/a.py`` etc."""
+    name = call.get("name") or "tool"
+    args = call.get("args") or {}
+    detail = (args.get("file_path") or args.get("path") or args.get("command")
+              or args.get("pattern") or args.get("query") or args.get("url") or "")
+    detail = str(detail)
+    if len(detail) > 80:
+        detail = detail[:77] + "..."
+    return f"{name}: {detail}" if detail else str(name)
+
+
+def _result_summary(result, limit: int = 2000) -> str:
+    """A compact text summary of a tool result for the tool_call_update content."""
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        s = result
+    elif isinstance(result, dict):
+        s = (result.get("error") or result.get("output") or result.get("content")
+             or result.get("result") or result.get("text") or "")
+        if not isinstance(s, str):
+            s = json.dumps(result, default=str)
+    else:
+        s = str(result)
+    return s[:limit]
+
+
+def tool_call_begin(call: dict) -> dict:
+    """ACP `tool_call` update (status in_progress) — the editor shows an activity card."""
+    return {
+        "sessionUpdate": "tool_call",
+        "toolCallId": str(call.get("id") or ""),
+        "title": _tool_title(call),
+        "kind": tool_kind(call.get("name")),
+        "status": "in_progress",
+    }
+
+
+def tool_call_end(call: dict, result) -> dict:
+    """ACP `tool_call_update` (completed|failed) with a compact text content summary."""
+    failed = isinstance(result, dict) and bool(result.get("error"))
+    upd = {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": str(call.get("id") or ""),
+        "status": "failed" if failed else "completed",
+    }
+    summary = _result_summary(result)
+    if summary:
+        upd["content"] = [{"type": "content",
+                           "content": {"type": "text", "text": summary}}]
+    return upd
+
+
+def assistant_text_chunk(text) -> dict:
+    """ACP `agent_message_chunk` update carrying a piece of the model's reply text."""
+    return {"sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": text}}
+
+
+def register_streaming(plugins, emit) -> None:
+    """Wire korgex's plugin lifecycle to ACP `session/update` emits: each tool fires
+    a `tool_call` (begin) then `tool_call_update` (end), and each round's narration
+    fires an `agent_message_chunk`. `emit(update)` sends one update for the session.
+    Used by the live `korgex acp` bridge so an editor sees tool activity + streamed
+    text instead of one opaque blob after the turn."""
+    plugins.register("pre_tool", lambda call: emit(tool_call_begin(call or {})))
+    plugins.register(
+        "post_tool",
+        lambda p: emit(tool_call_end((p or {}).get("call") or {}, (p or {}).get("result"))),
+    )
+
+    def _on_text(p) -> None:
+        text = (p or {}).get("text")
+        if text:
+            emit(assistant_text_chunk(text))
+
+    plugins.register("on_assistant_text", _on_text)
+
 
 def _noop_turn(text: str, session: dict) -> dict:
     """Default runner when none is injected — echoes, so a bare server is still well-formed."""
     return {"text": "", "stop_reason": "end_turn"}
+
+
+def make_live_run_turn(agent_factory):
+    """Build the live `run_turn` for `korgex acp`.
+
+    Per turn: construct an agent via ``agent_factory()``, point it at the session's
+    cwd, register ACP streaming on its plugin lifecycle, run the task (its stdout
+    redirected to stderr so it can't corrupt the JSON-RPC channel), and return
+    ``{text, stop_reason}``. Returns ``text=""`` when the reply was already streamed
+    as ``agent_message_chunk``s, so the protocol layer doesn't duplicate it. Any
+    exception becomes a `refusal` with the error text (never crashes the loop)."""
+    def run_turn(prompt: str, session: dict) -> dict:
+        try:
+            emit = session.get("_emit")
+            streamed: list = []
+            with contextlib.redirect_stdout(sys.stderr):
+                agent = agent_factory()
+                if session.get("cwd"):
+                    agent.repo_root = session["cwd"]
+                if emit:
+                    def _emit(update: dict) -> None:
+                        if update.get("sessionUpdate") == "agent_message_chunk":
+                            streamed.append(update)
+                        emit(update)
+                    register_streaming(agent.plugins, _emit)
+                result = agent.run_task(prompt) or {}
+            ok = result.get("success", True)
+            text = "" if (streamed and ok) else result.get("result", "")
+            return {"text": text, "stop_reason": "end_turn" if ok else "refusal"}
+        except Exception as e:  # noqa: BLE001 — never let a turn crash the ACP loop
+            return {"text": f"korgex error: {e}", "stop_reason": "refusal"}
+    return run_turn
 
 
 # ── stdio transport (newline-delimited JSON-RPC) ────────────────────────────────

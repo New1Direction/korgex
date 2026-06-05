@@ -1086,6 +1086,12 @@ class KorgexAgent:
                 # and preserves the v0.3.1 shape for those events.
                 round_text = self._extract_final_text(response)
 
+                # Stream this round's narration/answer to any observer (the ACP
+                # bridge turns it into an editor-visible agent_message_chunk). No-op
+                # when nothing registered — REPL/headless are unaffected.
+                if round_text:
+                    self.plugins.invoke("on_assistant_text", {"text": round_text})
+
                 # Emit one llm_inference event per completed round-trip.
                 # Parallel tool calls in this batch all use llm_seq as triggered_by
                 # (they are siblings, not a chain — see agent_event_spec.md §2).

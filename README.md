@@ -323,9 +323,24 @@ Any non-subcommand argument is treated as a prompt: `korgex "create hello.txt wi
 | `korgex mcp-server` | Run the korg-ledger MCP server (JSON-RPC over stdio) — verify/audit/import for any MCP host. |
 | `korgex diag <path>` | Report language-server diagnostics (errors/types) for a file — best-effort. |
 | **Dashboard / editor** | |
+| `korgex acp` | Run korgex as an [Agent Client Protocol](https://agentclientprotocol.com) agent over stdio, so an ACP editor (Zed et al.) can drive it — streams tool-call activity + reply text live. |
 | `korgex serve` · `dashboard` | Start the FastAPI dashboard (`:8090`) with/without opening the VS Code sidecar. |
 | `korgex status` · `stop` | Report / terminate the background backend. |
 | `korgex install-extension` | Install the compiled `.vsix` into your local VS Code. |
+
+### Drive korgex from your editor (ACP)
+
+korgex speaks the open **Agent Client Protocol** as an *agent*, so an ACP-capable editor can drive it directly — one verifiable, cross-vendor agent in your editor's agent panel. In **Zed**, add korgex as an external agent in `settings.json`:
+
+```json
+{
+  "agent_servers": {
+    "korgex": { "command": "korgex", "args": ["acp"] }
+  }
+}
+```
+
+Then pick **korgex** from the Agent Panel's *New Thread* menu. As it works, the editor shows live `tool_call` activity (read/edit/run/search cards) and streams the reply text — backed by the same tamper-evident ledger, so the whole session stays provable with `korgex verify`. (Editor handles a prompt turn per message; embedded `@file` context and pasted resources are accepted.)
 
 ---
 
