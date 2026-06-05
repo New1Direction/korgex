@@ -135,9 +135,11 @@ def test_maybe_compact_no_cache_degrades_to_size_only(tmp_path, monkeypatch):
 
 def test_maybe_compact_freezes_cached_prefix_verbatim(tmp_path, monkeypatch):
     # With the cache covering the first few turns, those leading turns must survive
-    # VERBATIM (never summarized) — rewriting them is what busts the cache.
+    # VERBATIM (never summarized) — rewriting them is what busts the cache. Limit is
+    # set so the transcript is over the trigger but UNDER the hard ceiling (the freeze
+    # protection only applies under the ceiling; over it, correctness forces a rewrite).
     from src.agent import KorgexAgent
-    monkeypatch.setenv("KORGEX_CONTEXT_LIMIT", "1000")
+    monkeypatch.setenv("KORGEX_CONTEXT_LIMIT", "5000")
     a = KorgexAgent(repo_root=str(tmp_path), interactive=False)
     # distinct, small leading turns + a fat tail so savings stay high (gate passes)
     messages = [{"role": "system", "content": "SYS"}]
@@ -169,8 +171,10 @@ def test_maybe_compact_freezes_cached_prefix_verbatim(tmp_path, monkeypatch):
 def test_maybe_compact_gate_skips_when_cache_cheaper(tmp_path, monkeypatch):
     # Big cached prefix + low projected savings → busting the cache costs more than
     # it saves. _maybe_compact must SKIP (return messages unchanged) and record why.
+    # Limit set so the transcript is over the trigger but UNDER the hard ceiling — the
+    # cost gate only applies there (over the ceiling, compaction is mandatory).
     from src.agent import KorgexAgent
-    monkeypatch.setenv("KORGEX_CONTEXT_LIMIT", "1000")
+    monkeypatch.setenv("KORGEX_CONTEXT_LIMIT", "5000")
     monkeypatch.setenv("KORGEX_MIN_CACHED_TOKENS", "100")
     a = KorgexAgent(repo_root=str(tmp_path), interactive=False, model="claude-3-5-sonnet")
     assert a.provider == "anthropic"  # discount 0.9 — hard to beat
@@ -189,6 +193,28 @@ def test_maybe_compact_gate_skips_when_cache_cheaper(tmp_path, monkeypatch):
     # a skip is recorded with a reason so trace/verify can show the decision
     skip = [e for e in led.events if e["tool_name"] == "compaction"]
     assert skip and skip[-1]["result"]["decision_reason"] == "cache_cheaper"
+
+
+def test_maybe_compact_forces_over_hard_limit_despite_cache(tmp_path, monkeypatch):
+    # THE BUG from real use (ACP turn over gpt-4o's 128k): a huge Retrieve put the
+    # transcript way over the context window, but the cache-cheaper gate SKIPPED
+    # compaction → the next call 400'd. Over the hard ceiling, fitting the window
+    # beats every cache saving — compaction MUST fire (and the frozen prefix relaxes).
+    from src.agent import KorgexAgent
+    monkeypatch.setenv("KORGEX_CONTEXT_LIMIT", "1000")        # transcript ~4000 = 4x over
+    a = KorgexAgent(repo_root=str(tmp_path), interactive=False, model="claude-3-5-sonnet")
+    messages = _big_openai_transcript(n=8, fat=400)
+    from src import compaction as _CP
+    nearly_all = _CP.estimate_tokens(messages[:-1])          # cache would make the gate skip
+    a._last_cache = {"cache_read": nearly_all, "cache_creation": 0, "prompt_tokens": nearly_all}
+    _stub_summarizer(a, monkeypatch)
+
+    led = _Led()
+    out = a._maybe_compact(messages, led, prompt_seq=1)
+    assert len(out) < len(messages)                          # COMPACTED, not skipped
+    ev = next(e for e in led.events if e["tool_name"] == "compaction")
+    assert ev["result"]["decision_reason"] == "compacted"
+    assert ev["result"]["tokens_after"] < ev["result"]["tokens_before"]
 
 
 def test_maybe_compact_ledger_event_has_cache_fields(tmp_path, monkeypatch):
