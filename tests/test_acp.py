@@ -244,3 +244,129 @@ def test_live_run_turn_error_becomes_a_refusal_chunk():
     assert resp["result"]["stopReason"] == "refusal"
     chunks = [m["params"]["update"] for m in sent if m.get("method") == "session/update"]
     assert any("kaboom" in u.get("content", {}).get("text", "") for u in chunks)
+
+
+# ── slice 2: session/request_permission round-trip ──────────────────────────────
+
+def test_permission_options_offer_allow_allow_always_reject():
+    opts = acp.permission_options()
+    kinds = {o["kind"] for o in opts}
+    assert kinds == {"allow_once", "allow_always", "reject_once"}
+    assert all(o.get("optionId") and o.get("name") for o in opts)
+
+
+def test_permission_params_shape():
+    p = acp.permission_params("sid-1", {"toolCallId": "tc", "title": "Edit a.py", "kind": "edit"})
+    assert p["sessionId"] == "sid-1"
+    assert p["toolCall"]["toolCallId"] == "tc"
+    assert isinstance(p["options"], list) and p["options"]
+
+
+def test_interpret_permission_outcomes():
+    sel = lambda oid: {"outcome": {"outcome": "selected", "optionId": oid}}
+    assert acp.interpret_permission(sel("allow_once")) == {"allowed": True, "always": False}
+    assert acp.interpret_permission(sel("allow_always")) == {"allowed": True, "always": True}
+    assert acp.interpret_permission(sel("reject_once")) == {"allowed": False, "always": False}
+    # cancelled / missing / malformed all fail safe to denied
+    assert acp.interpret_permission({"outcome": {"outcome": "cancelled"}})["allowed"] is False
+    assert acp.interpret_permission(None)["allowed"] is False
+    assert acp.interpret_permission({})["allowed"] is False
+
+
+def test_make_confirmer_calls_requester_and_handles_always():
+    calls = {"always": 0}
+    # requester(tool_call) -> {allowed, always}
+    confirm_allow = acp.make_confirmer(lambda tc: {"allowed": True, "always": False})
+    assert confirm_allow("src/a.py") is True
+
+    confirm_always = acp.make_confirmer(lambda tc: {"allowed": True, "always": True},
+                                        on_always=lambda: calls.__setitem__("always", calls["always"] + 1))
+    assert confirm_always("src/b.py") is True
+    assert calls["always"] == 1                      # the "don't ask again" hook fired
+
+    confirm_reject = acp.make_confirmer(lambda tc: {"allowed": False, "always": False})
+    assert confirm_reject("src/c.py") is False
+
+
+def test_session_prompt_wires_a_permission_requester_that_calls_the_client():
+    asked = []
+
+    def fake_request(method, params):
+        asked.append((method, params))
+        return {"outcome": {"outcome": "selected", "optionId": "allow_once"}}
+
+    captured = {}
+
+    def run_turn(text, sess):
+        captured["dec"] = sess["_request_permission"]({"toolCallId": "x", "title": "Edit y", "kind": "edit"})
+        return {"text": "", "stop_reason": "end_turn"}
+
+    a = acp.AcpAgent(run_turn=run_turn, send=lambda m: None, request=fake_request)
+    sid = a.handle(_req(1, "session/new", {}))["result"]["sessionId"]
+    a.handle(_req(2, "session/prompt", {"sessionId": sid, "prompt": [{"type": "text", "text": "go"}]}))
+    assert asked and asked[0][0] == "session/request_permission"
+    assert asked[0][1]["sessionId"] == sid
+    assert captured["dec"] == {"allowed": True, "always": False}
+
+
+def test_serve_supports_a_blocking_outbound_permission_request():
+    # End-to-end over the stdio transport: a turn asks the client for permission;
+    # serve() must write the request AND read the response inline, then finish the turn.
+    def run_turn(text, session):
+        dec = session["_request_permission"]({"toolCallId": "t", "title": "Edit a.py", "kind": "edit"})
+        return {"text": f"allowed={dec['allowed']}", "stop_reason": "end_turn"}
+
+    instream = io.StringIO(
+        json.dumps(_req(1, "session/new", {"cwd": "/r"})) + "\n"
+        + json.dumps(_req(2, "session/prompt",
+                          {"sessionId": "korgex-1", "prompt": [{"type": "text", "text": "edit it"}]})) + "\n"
+        # the client's permission RESPONSE (id must match the agent's outbound request id)
+        + json.dumps({"jsonrpc": "2.0", "id": "korgex-req-1",
+                      "result": {"outcome": {"outcome": "selected", "optionId": "allow_once"}}}) + "\n")
+    out = io.StringIO()
+    acp.serve(acp.AcpAgent(run_turn=run_turn), instream=instream, outstream=out)
+    msgs = [json.loads(x) for x in out.getvalue().splitlines() if x.strip()]
+    # the agent sent an outbound session/request_permission request...
+    reqs = [m for m in msgs if m.get("method") == "session/request_permission"]
+    assert reqs and reqs[0]["id"] == "korgex-req-1"
+    # ...and the turn saw the granted decision (streamed back as a chunk)
+    chunks = [m for m in msgs if m.get("method") == "session/update"]
+    assert any("allowed=True" in m["params"]["update"]["content"]["text"] for m in chunks)
+
+
+class _ConfirmAgent:
+    """An agent whose gated edit consults `_edit_confirmer` — the seam the bridge
+    routes to session/request_permission."""
+    def __init__(self):
+        self.plugins = PluginRegistry()
+        self.repo_root = None
+        self.edit_policy = "ask"
+        self._edit_confirmer = None
+
+    def run_task(self, prompt):
+        allowed = self._edit_confirmer("src/x.py") if self._edit_confirmer else False
+        return {"success": True, "result": f"edit allowed={allowed}"}
+
+
+def test_live_run_turn_routes_edit_gate_to_client_permission():
+    sent = []
+    rt = acp.make_live_run_turn(lambda: _ConfirmAgent())
+    a = acp.AcpAgent(
+        run_turn=rt, send=sent.append,
+        request=lambda method, params: {"outcome": {"outcome": "selected", "optionId": "allow_once"}})
+    sid = a.handle(_req(1, "session/new", {}))["result"]["sessionId"]
+    a.handle(_req(2, "session/prompt", {"sessionId": sid, "prompt": [{"type": "text", "text": "edit it"}]}))
+    chunks = [m["params"]["update"] for m in sent if m.get("method") == "session/update"]
+    assert any("edit allowed=True" in u.get("content", {}).get("text", "") for u in chunks)
+
+
+def test_live_run_turn_denied_edit_is_not_allowed():
+    sent = []
+    rt = acp.make_live_run_turn(lambda: _ConfirmAgent())
+    a = acp.AcpAgent(
+        run_turn=rt, send=sent.append,
+        request=lambda method, params: {"outcome": {"outcome": "cancelled"}})
+    sid = a.handle(_req(1, "session/new", {}))["result"]["sessionId"]
+    a.handle(_req(2, "session/prompt", {"sessionId": sid, "prompt": [{"type": "text", "text": "edit it"}]}))
+    chunks = [m["params"]["update"] for m in sent if m.get("method") == "session/update"]
+    assert any("edit allowed=False" in u.get("content", {}).get("text", "") for u in chunks)
