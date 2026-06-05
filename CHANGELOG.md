@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-06-04
+
 ### Added
 - **Skills: install / search / adopt / export — a bidirectional skill library.** korgex skills are the Anthropic Agent-Skills format (`SKILL.md`) — the *same* format published across public GitHub and indexed by [skills.sh](https://skills.sh), so the whole ecosystem is consumable with no adapter. New `src/skill_install.py` + CLI:
   - `korgex skills install <ref>` — install from a local dir, a git URL, or an `owner/repo[@skill]` skills.sh shorthand (which resolves to the GitHub repo). Skills land as `trust: installed` with a `source:` provenance stamp in their frontmatter.
