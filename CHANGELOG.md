@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-06-04
+
 ### Fixed
 - **Compaction now respects the hard context ceiling (a real failure found dogfooding korgex over ACP).** A turn that pulled a huge `Retrieve` blob into context (≈343k tokens) hit gpt-4o's 128k limit and **400'd** — because the cache-aware compaction gate *skipped* compacting (`decision_reason: cache_cheaper`) and the frozen-prefix logic had marked the whole transcript uncompactable. Both protections optimize *cost* (don't bust a warm cache needlessly) but were overriding *correctness*. Now: when the transcript exceeds the model's context window, compaction is **mandatory** — the cache-cost gate is bypassed and the frozen prefix is relaxed, so it actually reduces the context instead of guaranteeing a context-length error. Below the ceiling the cache protections are unchanged.
 
