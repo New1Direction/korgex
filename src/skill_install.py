@@ -181,6 +181,83 @@ def adopt(src_dir: str, dest_root: str) -> list:
             for d in find_skill_dirs(src)]
 
 
+# ── check / update git-sourced skills ───────────────────────────────────────────
+
+def installed_source(skill_md_path: str):
+    """The ``source:`` provenance stamp on an installed SKILL.md, or None."""
+    try:
+        meta, _ = _parse_frontmatter(open(skill_md_path, encoding="utf-8").read())
+    except OSError:
+        return None
+    return (meta or {}).get("source")
+
+
+def is_updatable(source) -> bool:
+    """True only for a git/registry source we can re-fetch. A ``local:``/``adopt:``
+    install has no re-fetchable upstream, so it's never "updatable"."""
+    s = source or ""
+    return s.startswith("http") or s.startswith("git@") or s.endswith(".git")
+
+
+def _fresh_body_for(root: str, name: str):
+    """The body of the freshly-fetched skill matching ``name`` under ``root``, or None."""
+    for d in find_skill_dirs(root):
+        meta, body = _parse_frontmatter(open(_skill_md(d), encoding="utf-8").read())
+        nm = (meta or {}).get("name") or os.path.basename(d.rstrip("/"))
+        if nm == name:
+            return body
+    return None
+
+
+def check(names, store_dir: str, *, clone=None) -> list:
+    """Dry-run: does each installed skill have an upstream change? Returns
+    ``[(name, status)]`` with status ``update-available`` | ``current`` |
+    ``not-updatable`` | ``unknown``. Re-fetches the source and compares the body."""
+    out = []
+    for name in names:
+        md = os.path.join(store_dir, _safe_name(name), "SKILL.md")
+        if not os.path.isfile(md):
+            out.append((name, "unknown"))
+            continue
+        source = installed_source(md)
+        if not is_updatable(source):
+            out.append((name, "not-updatable"))
+            continue
+        try:
+            kind, r = resolve_ref(source)
+            git_url, subpath = registry_to_git(r) if kind == "registry" else (r, None)
+            fresh_root = (clone or _git_clone)(git_url, subpath)
+            installed_body = _parse_frontmatter(open(md, encoding="utf-8").read())[1]
+            fresh_body = _fresh_body_for(fresh_root, name)
+            if fresh_body is None:
+                status = "unknown"
+            else:
+                status = "current" if fresh_body == installed_body else "update-available"
+        except Exception:
+            status = "unknown"
+        out.append((name, status))
+    return out
+
+
+def update(names, store_dir: str, *, clone=None) -> list:
+    """Re-install each named git-sourced skill from its recorded ``source:`` (fetches
+    latest). Returns ``[(name, status)]`` with status ``updated`` | ``not-updatable``
+    | ``unknown``."""
+    out = []
+    for name in names:
+        md = os.path.join(store_dir, _safe_name(name), "SKILL.md")
+        if not os.path.isfile(md):
+            out.append((name, "unknown"))
+            continue
+        source = installed_source(md)
+        if not is_updatable(source):
+            out.append((name, "not-updatable"))
+            continue
+        install(source, store_dir, clone=clone, source_label=source)
+        out.append((name, "updated"))
+    return out
+
+
 # ── export: push korgex skills out to other agents ──────────────────────────────
 
 # Project-relative skills dirs for the common agents (matches their on-disk layout).
