@@ -1559,20 +1559,53 @@ def tool_remote_sign_tip(url: str, tip_hex: str, context=None):
                "sha256-verified.", [
     ToolParam("ref", "STRING", "The sha256:.. content handle from a compressed result.", required=True),
 ])
-def tool_retrieve_blob(ref: str, context: dict = None):
+def tool_retrieve_blob(ref: str, context: dict = None, offset: int = 0, limit: int = None):
     """Read the exact sealed bytes for a content-ref from the ledger blob store,
     re-verifying the sha256. The full original is content-addressed + hash-chained,
     so this round-trips byte-for-byte. On a missing blob or integrity mismatch,
-    return a clear typed error (read_blob raises; we surface it to the model)."""
+    return a clear typed error (read_blob raises; we surface it to the model).
+
+    CAPPED so a single Retrieve can't blow the context window (the footgun behind a
+    real ACP context overflow — a 1.3 MB blob would otherwise land in one turn):
+    returns at most ``KORGEX_RETRIEVE_MAX_CHARS`` (default 100000) chars starting at
+    ``offset``. When the blob is larger, the result is ``{truncated: true,
+    next_offset: N}`` — call Retrieve again with ``offset=N`` to page through the rest.
+    """
     from src import korg_ledger
     try:
         data = korg_ledger.read_blob(ref)
     except ValueError as e:
         return {"error": str(e), "ref": ref}
     digest = ref[len("sha256:"):] if ref.startswith("sha256:") else ref
-    return {
+    text = data.decode("utf-8", "replace")
+    total = len(text)
+    try:
+        cap = max(1, int(os.environ.get("KORGEX_RETRIEVE_MAX_CHARS", "100000")))
+    except (TypeError, ValueError):
+        cap = 100000
+    try:
+        off = max(0, int(offset))
+    except (TypeError, ValueError):
+        off = 0
+    try:
+        want = cap if limit is None else max(1, int(limit))
+    except (TypeError, ValueError):
+        want = cap
+    want = min(want, cap)                 # HARD cap — never return more than the ceiling at once
+    chunk = text[off:off + want]
+    end = off + len(chunk)
+    out = {
         "verified": True,
         "sha256": digest,
-        "size_bytes": len(data),
-        "content": data.decode("utf-8", "replace"),
+        "size_bytes": len(data),          # full blob size (bytes)
+        "total_chars": total,
+        "offset": off,
+        "returned_chars": len(chunk),
+        "content": chunk,
     }
+    if end < total:
+        out["truncated"] = True
+        out["next_offset"] = end
+        out["hint"] = (f"showing chars {off}-{end} of {total}; "
+                       f"call Retrieve(ref, offset={end}) for the next chunk")
+    return out

@@ -603,10 +603,19 @@ register_user_tool("Retrieve",
     "tamper-evident ledger blob store and replaced in your view with a short "
     "summary. Pass that ref here to get the EXACT bytes back, sha256-verified. "
     "Use it the moment you need a detail the compact view dropped (a specific "
-    "line, value, or section). Returns {verified, sha256, size_bytes, content}.", [
+    "line, value, or section). Returns {verified, sha256, size_bytes, content}. "
+    "Large blobs are returned in CAPPED chunks so they can't blow your context: when "
+    "the result is {truncated: true, next_offset: N}, call Retrieve again with "
+    "offset=N to page through the rest.", [
     {"name": "ref", "type": "string",
      "description": "The sha256:.. handle from a compressed tool result (the \"_ref\" field).",
      "required": True},
+    {"name": "offset", "type": "integer",
+     "description": "Char offset to start from when paging a large blob (default 0; use next_offset).",
+     "required": False},
+    {"name": "limit", "type": "integer",
+     "description": "Max chars to return this call (capped server-side; default is the safe cap).",
+     "required": False},
 ], handler_name="retrieve_blob", exposure="direct")
 
 
