@@ -14,6 +14,14 @@ def test_resolve_unknown_is_none():
     assert resolve("does-not-exist") is None
 
 
+def test_mise_preset_resolves_to_the_stdio_server():
+    # `mise mcp` is mise's own agent-facing MCP server (tools/env/tasks + run_task).
+    cfg = resolve("mise")
+    assert cfg == {"command": "mise", "args": ["mcp"]}
+    row = next(r for r in entries() if r["alias"] == "mise")
+    assert row["transport"] == "stdio" and "mise installed" in row["needs"]
+
+
 def test_resolve_fills_path_placeholder_for_filesystem():
     cfg = resolve("filesystem", path_value="/home/u/proj")
     assert "/home/u/proj" in cfg["args"]

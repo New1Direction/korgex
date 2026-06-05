@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `korgex skills export <name|all> [claude|cursor|codex|opencode|<dir>]` — push a korgex skill *out* to another agent's skill dir. The differentiated direction: korgex **generates** skills (the self-learning curator), so its learned skills become usable by other agents — no other tool syncs skills it produced itself.
 
   Network (git clone, the skills.sh HTTP) is injected, so the logic is fully unit-tested offline. korgex keeps its edge (trust tiers + self-learning curator + verifiable ledger); this adds the bidirectional discovery/distribution it was missing.
+- **MCP catalog: `mise` preset (`korgex mcp add mise`).** [mise](https://github.com/jdx/mise) ships its own agent-facing MCP server (`mise mcp`), so this one-command preset wires the agent into a project's resolved tool versions, env vars, and runnable tasks — plus a `run_task` tool to run the repo's real build/test/lint instead of guessing commands. Every call goes through korgex's verifiable ledger like any other tool.
 
 ### Fixed
 - **`korgex skills <subcommand>` was rejected by the CLI parser.** The `skills` subparser had no positional argument, so `korgex skills log` (and now install/search/adopt) errored with "unrecognized arguments" before the handler ran. Added the positional so the subcommands dispatch.
