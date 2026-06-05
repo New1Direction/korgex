@@ -20,8 +20,19 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import urllib.request
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from src.config import Config
 
 OLLAMA_BASE_URL = "http://localhost:11434"
+
+# omlx (https://github.com/jundot/omlx, Apache-2.0) is an Apple-Silicon MLX inference
+# server that speaks the OpenAI AND Anthropic APIs, with tiered KV caching tuned for
+# coding agents. korgex doesn't reimplement any of that — it just points at a running
+# omlx as an OpenAI-compatible endpoint. Default server port is 8000.
+OMLX_BASE_URL = "http://localhost:8000/v1"
 
 
 def llmfit_available() -> bool:
@@ -104,6 +115,57 @@ def set_local_model(cfg, model: str, base_url: str = OLLAMA_BASE_URL):
     if not any((p or {}).get("type") == "ollama" for p in cfg.providers):
         cfg.providers.append({"type": "ollama", "base_url": base_url})
     return cfg
+
+
+def clean_omlx_model(name: str) -> str:
+    """Return the bare omlx model id (the name omlx's `/v1/models` reports, e.g.
+    ``mlx-community/Llama-3.2-3B-Instruct-4bit``). Drops a stray ``omlx/`` a user might
+    type — unlike Ollama, omlx needs NO prefix: the id goes on the wire verbatim."""
+    n = (name or "").strip()
+    if n.startswith("omlx/"):
+        n = n[len("omlx/"):]
+    return n
+
+
+def set_omlx_model(cfg: "Config", model: str, base_url: str = OMLX_BASE_URL) -> "Config":
+    """Point korgex at a LOCAL omlx-served model. Returns a NEW Config (immutable):
+    upserts a named ``omlx`` OpenAI-compatible provider bound to ``base_url`` + the
+    chosen model, and selects it as active so the agent resolves there with no flags.
+    No new provider TYPE and no wire-prefix — omlx is just an OpenAI endpoint, so the
+    model id is sent as-is. Idempotent: re-running replaces the ``omlx`` entry."""
+    from src import config as _C
+    cfg = _C.upsert_provider(cfg, "omlx", base_url=base_url,
+                             model=clean_omlx_model(model), type="openai")
+    return _C.set_active(cfg, "omlx")
+
+
+def _http_get(url: str, timeout: float = 1.5) -> str:
+    """GET ``url`` and return the body text. ``url`` is the user-chosen omlx endpoint
+    (``--omlx-url``/default localhost) — same trust model as ``KORGEX_API_URL``: an
+    explicit operator choice, so a LAN omlx box is allowed, not just loopback."""
+    with urllib.request.urlopen(url, timeout=timeout) as r:  # noqa: S310 (operator-chosen endpoint)
+        return r.read().decode("utf-8")
+
+
+def detect_omlx(base_url: str = OMLX_BASE_URL,
+                fetch: "Callable[[str], str] | None" = None,
+                timeout: float = 1.5) -> "list[str] | None":
+    """Probe a running omlx via its OpenAI-compatible ``/v1/models``. Returns the list
+    of served model ids — ``[]`` when omlx is up but has nothing loaded — or ``None``
+    when omlx isn't reachable / isn't speaking the expected shape. ``fetch`` is an
+    injectable ``callable(url) -> json-text`` for tests; defaults to a urllib GET with
+    ``timeout``. Degrades to ``None`` on the expected I/O / decode failures (a real
+    programming error still propagates)."""
+    fetch = fetch or (lambda u: _http_get(u, timeout))
+    url = base_url.rstrip("/") + "/models"
+    try:
+        doc = json.loads(fetch(url))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
+    data = (doc or {}).get("data")
+    if not isinstance(data, list):
+        return None
+    return [m.get("id") for m in data if isinstance(m, dict) and m.get("id")]
 
 
 def format_advice(recs: list, system: dict) -> str:

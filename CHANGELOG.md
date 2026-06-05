@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`korgex local --omlx` — wire a local Apple-Silicon [omlx](https://github.com/jundot/omlx) MLX server as your model.** omlx is an Apache-2.0 inference server (OpenAI- *and* Anthropic-compatible, continuous batching + tiered hot/cold KV cache, tuned for coding agents). `korgex local --omlx` lists the models a running omlx is serving (probed via its OpenAI-compatible `/v1/models`); `--omlx --use <model-id>` wires it as a named, active `openai`-type provider pointed at the local endpoint (`--omlx-url` overrides the default `http://localhost:8000/v1`). korgex adds **no** inference code and **no** new provider type — the model id is sent on the wire verbatim, so it routes through the existing OpenAI-compatible transport and stays fully ledger-provable. Not reachable → a helpful message, never a crash.
+
 ### Fixed
 - **Zed setup docs: the `agent_servers` config was missing `"type": "custom"`.** Current Zed requires a `type` discriminator on each external agent; without it Zed rejects the whole `agent_servers` block ("missing field `type`") and korgex never appears in the Agent Panel — so "New korgex Thread" did nothing. README now shows the correct block (incl. `env: {}` and a note to use the full binary path if korgex isn't on Zed's PATH). Found driving korgex in a real Zed install.
 
