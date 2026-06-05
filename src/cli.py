@@ -117,6 +117,12 @@ def cmd_skills():
             if "skills" in argv else [])
     if rest and rest[0].lower() == "log":
         return _cmd_skills_log(rest[1] if len(rest) > 1 else None)
+    if rest and rest[0].lower() == "install":
+        return _cmd_skills_install(rest[1:])
+    if rest and rest[0].lower() == "search":
+        return _cmd_skills_search(rest[1:])
+    if rest and rest[0].lower() == "adopt":
+        return _cmd_skills_adopt(rest[1:])
 
     from src.skills import load_skills, default_skill_roots
     # Pass cwd so project-local .korgex/skills are listed too, not just
@@ -125,6 +131,68 @@ def cmd_skills():
     for name in skill_registry.names():
         skill = skill_registry.get(name)
         print(f"{skill.name}: {skill.description}")
+    return 0
+
+
+def _user_skills_dir() -> str:
+    return os.path.join(os.path.expanduser("~"), ".korgex", "skills")
+
+
+def _cmd_skills_install(args):
+    """`korgex skills install <ref>` — install skills from a local dir, a git URL, or an
+    ``owner/repo[@skill]`` skills.sh shorthand, as trust:installed under ~/.korgex/skills."""
+    from src import skill_install as SI
+    if not args:
+        print("usage: korgex skills install <ref>")
+        print("  <ref> = ./path | /abs | a git URL | owner/repo[@skill] (skills.sh)")
+        return 2
+    try:
+        names = SI.install(args[0], _user_skills_dir())
+    except Exception as e:
+        print(f"  install failed: {e}")
+        return 1
+    if not names:
+        print(f"  no SKILL.md found at {args[0]}")
+        return 1
+    for n in names:
+        print(f"  ✓ installed: {n}  (trust: installed)")
+    print(f"  {len(names)} skill(s) → ~/.korgex/skills  ·  list them with: korgex skills")
+    return 0
+
+
+def _cmd_skills_search(args):
+    """`korgex skills search <query>` — search the open skills.sh catalog (public GitHub
+    Agent-Skills repos). Install a hit with `korgex skills install <source>@<skillId>`."""
+    from src import skill_install as SI
+    if not args:
+        print("usage: korgex skills search <query>")
+        return 2
+    results = SI.search(" ".join(args))
+    if not results:
+        print("  no results (or skills.sh unreachable)")
+        return 0
+    for r in results:
+        installs = f"{r['installs']:,}" if r["installs"] else "?"
+        ref = f"{r['source']}@{r['skillId']}" if r["skillId"] else r["source"]
+        print(f"  {ref}  · {installs} installs · {r['name']}")
+    print("  install one with: korgex skills install <source>@<skillId>")
+    return 0
+
+
+def _cmd_skills_adopt(args):
+    """`korgex skills adopt <dir>` — pull skills already on disk (e.g. ~/.claude/skills)
+    into korgex's store as trust:installed, no re-download."""
+    from src import skill_install as SI
+    if not args:
+        print("usage: korgex skills adopt <dir>   (e.g. ~/.claude/skills)")
+        return 2
+    names = SI.adopt(args[0], _user_skills_dir())
+    if not names:
+        print(f"  no SKILL.md found under {args[0]}")
+        return 1
+    for n in names:
+        print(f"  ✓ adopted: {n}")
+    print(f"  {len(names)} skill(s) → ~/.korgex/skills")
     return 0
 
 
@@ -1552,6 +1620,9 @@ def _build_subcommand_parser():
         elif name == "mcp":
             sp.add_argument("args", nargs="*",
                             help="<list|add|remove> … (e.g. add <name> --url <url> | --command <cmd>)")
+        elif name == "skills":
+            sp.add_argument("args", nargs="*",
+                            help="(none=list) | log | install <ref> | search <query> | adopt <dir>")
         elif name == "local":
             sp.add_argument("--use", metavar="OLLAMA_TAG",
                             help="set this Ollama model as the default (e.g. qwen2.5-coder:7b)")
