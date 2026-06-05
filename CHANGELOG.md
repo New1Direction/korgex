@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **MCP catalog: `openapi-to-mcp` preset.** [`bbonnin/openapi-to-mcp`](https://github.com/bbonnin/openapi-to-mcp) auto-generates MCP tools from *any* OpenAPI/Swagger spec — point it at an API's spec and the agent gets typed tools for every endpoint, no manual wiring. Unlike the npx presets this one is self-run: it's a Java/Spring server with no published binary, so you build the jar (`mvn package`) and run it (`java -jar openapi-mcp-server.jar --openapi.location=<spec> --openapi.base-url=<api>`), then korgex connects over HTTP on `:8000`. The preset carries the URL + the full build/run instructions in its catalog description (and `korgex mcp catalog` shows the "needs the jar running" caveat).
+
 ## [0.30.0] — 2026-06-04
 
 ### Added

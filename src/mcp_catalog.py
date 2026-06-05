@@ -122,6 +122,15 @@ PRESETS = {
         "description": "Mixpanel — product analytics queries (remote, OAuth)",
         "url": "https://mcp.mixpanel.com/mcp", "needs": ["OAuth"], "category": "analytics",
     },
+    # ── self-run (you start the server, korgex connects) ──────────────────────
+    "openapi-to-mcp": {
+        "description": "Auto-generate MCP tools from ANY OpenAPI/Swagger spec (bbonnin/"
+                       "openapi-to-mcp, Java/Spring). Build the jar (mvn package — no published "
+                       "binary) and run it: java -jar openapi-mcp-server.jar --openapi.location="
+                       "<spec> --openapi.base-url=<api>; then korgex connects on :8000.",
+        "url": "http://localhost:8000/mcp",
+        "needs": ["the openapi-to-mcp jar running on :8000"], "category": "dev",
+    },
 }
 
 _CONFIG_KEYS = ("command", "args", "env", "url", "headers")
