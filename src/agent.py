@@ -2037,32 +2037,44 @@ class KorgexAgent:
         limit = _CP.context_window_for(self.model)
         if not _CP.should_compact(messages, limit):
             return messages
+        before = _CP.estimate_tokens(messages)
+        # HARD CEILING: when the transcript already exceeds the model's context window,
+        # compaction is MANDATORY — fitting the window beats every cache-cost saving,
+        # since skipping would guarantee a context-length error on the next call. Above
+        # the limit we also RELAX the frozen (cached) prefix: busting the cache is far
+        # better than a hard failure, and if the whole transcript is "frozen" there'd
+        # otherwise be nothing left to compact. (A single huge Retrieve can put us here.)
+        over_hard_limit = before > limit
+
         # OpenAI-shaped history leads with a system message to preserve as head;
         # Anthropic carries system out-of-band, so head is empty.
         head = messages[:1] if (messages and messages[0].get("role") == "system") else []
-
-        # FROZEN PREFIX: how many leading turns the provider has cached. Extend the
-        # head to cover them so compaction never rewrites the cached prefix.
         cache_read = self._last_cache.get("cache_read", 0)
         cache_creation = self._last_cache.get("cache_creation", 0)
-        frozen = _cc.update_frozen_prefix(
-            messages, cache_read, lambda m: _CP.estimate_tokens(m))
-        head_len = max(len(head), frozen)
+        # FROZEN PREFIX: how many leading turns the provider has cached — extend the
+        # head to cover them so compaction never rewrites the cached prefix. Skipped
+        # when over the hard limit (correctness > keeping the cache warm).
+        if over_hard_limit:
+            frozen = 0
+            head_len = len(head)
+        else:
+            frozen = _cc.update_frozen_prefix(
+                messages, cache_read, lambda m: _CP.estimate_tokens(m))
+            head_len = max(len(head), frozen)
         head = messages[:head_len]
         history = messages[head_len:]
-        before = _CP.estimate_tokens(messages)
         recent_budget = int(limit * 0.25)  # keep ~a quarter of the window as raw recent turns
 
-        # COST-MODEL GATE (only when a cache exists): estimate the savings from a dry
-        # rebuild (a tiny placeholder summary stands in for the real one — the recent
-        # budget dominates the size) and skip if busting the cache costs more than it
-        # saves. Computed BEFORE the expensive summary call so we never pay for a
-        # summary we'd discard.
+        # COST-MODEL GATE (only when a cache exists AND we're under the hard ceiling):
+        # estimate the savings from a dry rebuild (a tiny placeholder summary stands in
+        # for the real one — the recent budget dominates the size) and skip if busting
+        # the cache costs more than it saves. Computed BEFORE the expensive summary call
+        # so we never pay for a summary we'd discard.
         recent = _CP._recent_within_budget(history, recent_budget)
         projected = _CP.estimate_tokens(list(head) + recent) + 50  # +~summary
         reclaimed = max(0, before - projected)  # tokens compaction would reclaim
         savings_fraction = reclaimed / before if before else 0.0  # recorded on the event
-        if cache_read > 0:
+        if cache_read > 0 and not over_hard_limit:
             min_cached = self._min_cached_tokens()
             if not _cc.should_force_compaction(
                     reclaimed, cache_read,
