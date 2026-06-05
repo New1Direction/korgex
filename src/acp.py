@@ -19,7 +19,12 @@ to stdio.
 Live streaming: during a turn the bridge registers korgex's plugin lifecycle
 (`register_streaming`) so each tool fires a `tool_call`/`tool_call_update` and each round's
 narration fires an `agent_message_chunk` — the editor shows activity + streamed text as the
-loop runs, not one blob after it. `session/request_permission`, real mid-turn `session/cancel`,
+loop runs, not one blob after it.
+
+Permission: when korgex can't auto-allow an edit (a sensitive path, or `KORGEX_EDIT_POLICY=ask`),
+its edit gate calls back to the client with `session/request_permission` (a BLOCKING agent→client
+request the stdio transport services inline) and honors the choice — "allow once", "allow (don't
+ask again)" relaxes the policy for the session, or "reject". Real mid-turn `session/cancel`,
 `session/load`, and wiring the client's `mcpServers` are deliberate follow-ups.
 """
 from __future__ import annotations
@@ -88,9 +93,13 @@ class AcpAgent:
     (production: a closure on KorgexAgent.run_task). `send(message)` emits an agent→client
     JSON-RPC message (notification). Both injected so this is testable without a client."""
 
-    def __init__(self, *, run_turn=None, send=None):
+    def __init__(self, *, run_turn=None, send=None, request=None):
         self.run_turn = run_turn
         self.send = send
+        # request(method, params) -> result: a BLOCKING agent→client call (e.g.
+        # session/request_permission). serve() supplies one that writes the request
+        # and reads its response inline; None means no client to ask (deny-safe).
+        self.request = request
         self.sessions: dict = {}
         self._n = 0
 
@@ -152,6 +161,9 @@ class AcpAgent:
         # Session-scoped emit: the turn (and any plugins it registers) streams
         # agent_message_chunk / tool_call updates back to THIS session as it works.
         session["_emit"] = self._emitter(sid)
+        # Session-scoped permission requester: the turn asks the client to approve a
+        # gated action (an edit it can't auto-allow) and gets back {allowed, always}.
+        session["_request_permission"] = lambda tc: self._request_permission(sid, tc)
         text = prompt_text(params.get("prompt"))
 
         out = (self.run_turn or _noop_turn)(text, session) or {}
@@ -182,6 +194,15 @@ class AcpAgent:
                 self.send(notification("session/update",
                                        {"sessionId": sid, "update": update}))
         return emit
+
+    def _request_permission(self, sid: str, tool_call: dict) -> dict:
+        """Ask the client to approve `tool_call` for this session; return the decision
+        ``{allowed, always}``. With no client request channel, fail safe to denied."""
+        if not self.request:
+            return {"allowed": False, "always": False}
+        res = self.request("session/request_permission",
+                           permission_params(sid, tool_call))
+        return interpret_permission(res)
 
 
 # ── ACP session/update builders (tool-call lifecycle + text) ────────────────────
@@ -282,6 +303,55 @@ def register_streaming(plugins, emit) -> None:
     plugins.register("on_assistant_text", _on_text)
 
 
+# ── permission round-trip (agent→client session/request_permission) ─────────────
+
+_ALLOW_OPTION_IDS = ("allow_once", "allow_always")
+
+
+def permission_options() -> list:
+    """The approval choices offered to the client: allow once, allow for the rest of
+    the session ("don't ask again"), or reject. `kind` uses ACP's snake_case enum."""
+    return [
+        {"optionId": "allow_once", "name": "Allow", "kind": "allow_once"},
+        {"optionId": "allow_always", "name": "Allow (don't ask again)", "kind": "allow_always"},
+        {"optionId": "reject_once", "name": "Reject", "kind": "reject_once"},
+    ]
+
+
+def permission_params(session_id: str, tool_call: dict, options=None) -> dict:
+    """Params for a `session/request_permission` request: the session, the tool call
+    awaiting approval, and the options the client may pick from."""
+    return {
+        "sessionId": session_id,
+        "toolCall": tool_call,
+        "options": options if options is not None else permission_options(),
+    }
+
+
+def interpret_permission(response) -> dict:
+    """Map a `session/request_permission` response to ``{allowed, always}``. Only an
+    explicit selection of an allow option proceeds; cancelled / missing / malformed
+    all fail safe to denied."""
+    outcome = (response or {}).get("outcome") if isinstance(response, dict) else None
+    if isinstance(outcome, dict) and outcome.get("outcome") == "selected":
+        oid = outcome.get("optionId")
+        return {"allowed": oid in _ALLOW_OPTION_IDS, "always": oid == "allow_always"}
+    return {"allowed": False, "always": False}
+
+
+def make_confirmer(requester, *, on_always=None):
+    """Build a ``confirm(path) -> bool`` for korgex's edit gate from a session-bound
+    ``requester(tool_call) -> {allowed, always}``. On an "allow always" decision it
+    fires ``on_always`` (so the bridge can stop re-asking this session) and allows."""
+    def confirm(path: str) -> bool:
+        tool_call = {"toolCallId": f"edit:{path}", "title": f"Edit {path}", "kind": "edit"}
+        decision = requester(tool_call) or {}
+        if decision.get("always") and on_always:
+            on_always()
+        return bool(decision.get("allowed"))
+    return confirm
+
+
 def _noop_turn(text: str, session: dict) -> dict:
     """Default runner when none is injected — echoes, so a bare server is still well-formed."""
     return {"text": "", "stop_reason": "end_turn"}
@@ -310,6 +380,16 @@ def make_live_run_turn(agent_factory):
                             streamed.append(update)
                         emit(update)
                     register_streaming(agent.plugins, _emit)
+                # Route the agent's edit-approval gate to the editor: when korgex
+                # can't auto-allow an edit (sensitive path, or KORGEX_EDIT_POLICY=ask),
+                # it asks the client via session/request_permission instead of its own
+                # prompt. "Allow (don't ask again)" relaxes the policy for the session.
+                requester = session.get("_request_permission")
+                if requester is not None and hasattr(agent, "_edit_confirmer"):
+                    agent._edit_confirmer = make_confirmer(
+                        requester,
+                        on_always=lambda: setattr(agent, "edit_policy", "free"),
+                    )
                 result = agent.run_task(prompt) or {}
             ok = result.get("success", True)
             text = "" if (streamed and ok) else result.get("result", "")
@@ -338,10 +418,41 @@ def write_message(stream, obj: dict) -> None:
 
 def serve(agent: AcpAgent, instream=None, outstream=None) -> None:
     """Run the ACP agent loop over stdio until EOF, dispatching each message and writing any
-    response. Notifications (e.g. session/update) are emitted via the agent's `send`."""
+    response. Notifications (e.g. session/update) are emitted via the agent's `send`.
+
+    The agent can also make a BLOCKING outbound request (e.g. session/request_permission):
+    `agent.request` writes the request and reads the client's response inline, handling any
+    messages that arrive in the meantime (a session/cancel notification, say) so a mid-turn
+    permission prompt doesn't deadlock the loop."""
     instream = instream if instream is not None else sys.stdin
     outstream = outstream if outstream is not None else sys.stdout
     agent.send = lambda m: write_message(outstream, m)
+    _req_id = {"n": 0}
+
+    def request_client(method: str, params: dict):
+        """Send an agent→client request and block for its response, servicing any
+        intervening messages. Returns the result (None on error/EOF — deny-safe)."""
+        _req_id["n"] += 1
+        rid = f"korgex-req-{_req_id['n']}"  # string id won't collide with client ints
+        write_message(outstream, {"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+        while True:
+            try:
+                reply = read_message(instream)
+            except (ValueError, json.JSONDecodeError):
+                continue
+            if reply is None:
+                return None  # EOF before the response → treat as no answer
+            if isinstance(reply, dict) and reply.get("id") == rid \
+                    and ("result" in reply or "error" in reply):
+                return reply.get("result")
+            # A message that isn't our response — dispatch it (e.g. session/cancel)
+            # so state stays consistent while we wait.
+            other = agent.handle(reply)
+            if other is not None:
+                write_message(outstream, other)
+
+    agent.request = request_client
+
     while True:
         try:
             msg = read_message(instream)
