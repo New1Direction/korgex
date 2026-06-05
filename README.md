@@ -304,7 +304,7 @@ Any non-subcommand argument is treated as a prompt: `korgex "create hello.txt wi
 |---|---|
 | `korgex setup` | Connect model providers (any of them) — saves keys + a default model to `~/.korgex/config.json`. |
 | `korgex init` | Scaffold a starter `AGENTS.md` for the repo (detects stack + test/build commands; never clobbers). |
-| `korgex skills` | List skills; `install <ref>` / `search <query>` / `adopt <dir>` pull from the open [Agent-Skills catalog](https://skills.sh) (local dir, git URL, or `owner/repo[@skill]`) as `trust: installed`; `export <name\|all> [claude\|cursor\|codex\|<dir>]` pushes a korgex (incl. self-learned) skill out to another agent. |
+| `korgex skills` | List skills; `install <ref>` / `search <query>` / `adopt <dir>` pull from the open [Agent-Skills catalog](https://skills.sh) (local dir, git URL, or `owner/repo[@skill]`) as `trust: installed`; `check`/`update [name\|all]` refresh git-sourced skills; `export <name\|all> [claude\|cursor\|codex\|<dir>]` pushes a korgex (incl. self-learned) skill out to another agent. |
 | `korgex sessions` | List recent sessions in this repo's ledger (resume one with `korgex --resume`). |
 | `korgex commands` | List custom slash commands (built-in, project, user); invoke them in the REPL as `/<name>`. |
 | `korgex local` | Recommend (and optionally wire) a local model that fits this machine. |

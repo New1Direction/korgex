@@ -180,3 +180,66 @@ def test_export_skills_by_name_skips_unknown(tmp_path):
     assert names == {"one", "two"}                       # ghost (unknown) skipped
     assert os.path.isfile(os.path.join(str(target), "one", "SKILL.md"))
     assert os.path.isfile(os.path.join(str(target), "two", "SKILL.md"))
+
+
+# ── check / update git-sourced skills ───────────────────────────────────────────
+
+def test_is_updatable_only_for_git_sources():
+    assert SI.is_updatable("https://github.com/o/r.git") is True
+    assert SI.is_updatable("git@github.com:o/r.git") is True
+    assert SI.is_updatable("https://github.com/o/r") is True
+    assert SI.is_updatable("local:/some/path") is False      # local install — can't re-fetch
+    assert SI.is_updatable("adopt:~/.claude/skills") is False
+    assert SI.is_updatable(None) is False
+
+
+def test_installed_source_reads_the_stamp(tmp_path):
+    d = tmp_path / "s"
+    os.makedirs(d)
+    with open(d / "SKILL.md", "w") as f:
+        f.write("---\nname: s\ndescription: d\ntrust: installed\nsource: https://github.com/o/r.git\n---\n\nBody.\n")
+    assert SI.installed_source(str(d / "SKILL.md")) == "https://github.com/o/r.git"
+
+
+def _install_from_fake_remote(tmp_path, body="V1 body."):
+    """Install a git-sourced skill into a store via an injected clone; return store dir."""
+    remote = tmp_path / "remote"
+    os.makedirs(remote / "gitskill")
+    with open(remote / "gitskill" / "SKILL.md", "w") as f:
+        f.write(f"---\nname: gitskill\ndescription: d\n---\n\n{body}\n")
+    store = tmp_path / "store"
+    SI.install("owner/repo", str(store), clone=lambda url, sub: str(remote))
+    return str(store), str(remote)
+
+
+def test_check_reports_update_available_then_current(tmp_path):
+    store, remote = _install_from_fake_remote(tmp_path, body="V1 body.")
+    clone = lambda url, sub: remote
+    # nothing changed upstream yet → current
+    assert SI.check(["gitskill"], store, clone=clone) == [("gitskill", "current")]
+    # upstream body changes → update-available
+    with open(os.path.join(remote, "gitskill", "SKILL.md"), "w") as f:
+        f.write("---\nname: gitskill\ndescription: d\n---\n\nV2 body changed.\n")
+    assert SI.check(["gitskill"], store, clone=clone) == [("gitskill", "update-available")]
+
+
+def test_update_applies_the_upstream_change(tmp_path):
+    store, remote = _install_from_fake_remote(tmp_path, body="V1 body.")
+    with open(os.path.join(remote, "gitskill", "SKILL.md"), "w") as f:
+        f.write("---\nname: gitskill\ndescription: d\n---\n\nV2 body changed.\n")
+    result = SI.update(["gitskill"], store, clone=lambda url, sub: remote)
+    assert result == [("gitskill", "updated")]
+    body = open(os.path.join(store, "gitskill", "SKILL.md")).read()
+    assert "V2 body changed." in body
+    # still installed + still carries its source stamp
+    meta, _ = _parse_frontmatter(body)
+    assert meta["trust"] == "installed" and "github.com/owner/repo" in meta["source"]
+
+
+def test_check_and_update_skip_non_updatable_and_unknown(tmp_path):
+    store = tmp_path / "store"
+    _make_skill(store / "localone", "localone")  # no source stamp → not updatable
+    assert SI.check(["localone", "ghost"], str(store), clone=lambda u, s: "") == \
+        [("localone", "not-updatable"), ("ghost", "unknown")]
+    assert SI.update(["localone", "ghost"], str(store), clone=lambda u, s: "") == \
+        [("localone", "not-updatable"), ("ghost", "unknown")]

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Skills: `check` / `update` for git-sourced skills.** Building on the `source:` provenance stamp from install: `korgex skills check [<name>|all]` re-fetches a skill's git/registry source and **diffs the body** to report `update-available` / `current` (it modifies nothing); `korgex skills update [<name>|all]` re-installs to the latest from that source. Local- and adopt-installed skills (no re-fetchable upstream) are correctly reported `not-updatable`. Network (clone) is injected, so the change-detection is unit-tested offline.
+
 ## [0.27.0] — 2026-06-04
 
 ### Added

@@ -125,6 +125,10 @@ def cmd_skills():
         return _cmd_skills_adopt(rest[1:])
     if rest and rest[0].lower() == "export":
         return _cmd_skills_export(rest[1:])
+    if rest and rest[0].lower() == "check":
+        return _cmd_skills_check(rest[1:])
+    if rest and rest[0].lower() == "update":
+        return _cmd_skills_update(rest[1:])
 
     from src.skills import load_skills, default_skill_roots
     # Pass cwd so project-local .korgex/skills are listed too, not just
@@ -195,6 +199,45 @@ def _cmd_skills_adopt(args):
     for n in names:
         print(f"  ✓ adopted: {n}")
     print(f"  {len(names)} skill(s) → ~/.korgex/skills")
+    return 0
+
+
+def _skill_targets(args):
+    """Resolve a check/update target: an explicit name, or all installed user skills."""
+    from src.skills import load_skills
+    if args and args[0].lower() != "all":
+        return [args[0]]
+    return load_skills([_user_skills_dir()]).names()
+
+
+def _cmd_skills_check(args):
+    """`korgex skills check [<name>|all]` — report which git-sourced skills have an
+    upstream change (re-fetches + diffs; doesn't modify anything)."""
+    from src import skill_install as SI
+    names = _skill_targets(args)
+    if not names:
+        print("  no installed skills in ~/.korgex/skills")
+        return 1
+    rows = SI.check(names, _user_skills_dir())
+    for n, status in rows:
+        print(f"  {n}: {status}")
+    avail = [n for n, s in rows if s == "update-available"]
+    if avail:
+        tgt = avail[0] if len(avail) == 1 else "all"
+        print(f"  {len(avail)} update(s) available — apply with: korgex skills update {tgt}")
+    return 0
+
+
+def _cmd_skills_update(args):
+    """`korgex skills update [<name>|all]` — re-fetch git-sourced skills to latest."""
+    from src import skill_install as SI
+    names = _skill_targets(args)
+    if not names:
+        print("  no installed skills in ~/.korgex/skills")
+        return 1
+    rows = SI.update(names, _user_skills_dir())
+    for n, status in rows:
+        print(f"  {'✓' if status == 'updated' else '·'} {n}: {status}")
     return 0
 
 
@@ -1648,7 +1691,8 @@ def _build_subcommand_parser():
         elif name == "skills":
             sp.add_argument("args", nargs="*",
                             help="(none=list) | log | install <ref> | search <query> | "
-                                 "adopt <dir> | export <name|all> [target]")
+                                 "adopt <dir> | export <name|all> [target] | "
+                                 "check [name|all] | update [name|all]")
         elif name == "local":
             sp.add_argument("--use", metavar="OLLAMA_TAG",
                             help="set this Ollama model as the default (e.g. qwen2.5-coder:7b)")
