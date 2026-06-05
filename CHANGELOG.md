@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-06-04
+
 ### Added
 - **MCP catalog: `chrome-devtools` + `firecrawl` presets.** Two more one-command MCP servers: `korgex mcp add chrome-devtools` wires the official [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) (drive a local Chrome — navigate, inspect the DOM, performance traces, network + console, screenshots; no auth), and `korgex mcp add firecrawl` wires [Firecrawl](https://firecrawl.dev) (web scraping/crawling to clean markdown, search, structured extraction; set `FIRECRAWL_API_KEY`). (Two other repos requested as MCPs — `wshobson/agents` and `superset-sh/superset` — were deliberately *not* added: the former is a subagent/plugin marketplace and the latter a desktop agent-orchestrator, neither is a runnable MCP server.)
 
