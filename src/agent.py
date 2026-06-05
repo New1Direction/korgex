@@ -168,6 +168,10 @@ class KorgexAgent:
         # Cached mise project-task block (computed lazily, at most one `mise tasks ls`
         # subprocess per agent). None = not yet computed; "" = no mise tasks here.
         self._mise_block = None
+        # Optional cooperative-cancel callback: () -> bool. Checked at each round
+        # boundary; True stops the run cleanly. The ACP bridge wires this to a
+        # session/cancel flag so an editor's "stop" actually interrupts a turn.
+        self._should_cancel = None
         # Live task ledger — the agent's self-updating checklist. TaskCreate/TaskUpdate
         # drive it; its open items are fed back into the prompt each turn so the model
         # works through them instead of drifting or claiming done early.
@@ -1067,6 +1071,15 @@ class KorgexAgent:
         _rep_guard = _LG.RepetitionGuard()
         try:
             for i in range(max_iter):
+                # ── Cooperative cancel: if the client asked to stop (ACP
+                # session/cancel, set on another thread), end this run cleanly at
+                # the round boundary rather than starting another turn.
+                if self._should_cancel is not None and self._should_cancel():
+                    cancelled = {"success": False, "result": "(cancelled)",
+                                 "cancelled": True, "iterations": i, "root_seq": prompt_seq}
+                    self.plugins.invoke("on_stop", cancelled)
+                    return cancelled
+
                 # ── Auto-compaction: if the transcript is nearing the model's
                 # context window, have the model summarize the older turns and
                 # continue, so long runs don't die at the ceiling. Top-level only

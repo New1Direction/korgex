@@ -24,14 +24,20 @@ loop runs, not one blob after it.
 Permission: when korgex can't auto-allow an edit (a sensitive path, or `KORGEX_EDIT_POLICY=ask`),
 its edit gate calls back to the client with `session/request_permission` (a BLOCKING agent→client
 request the stdio transport services inline) and honors the choice — "allow once", "allow (don't
-ask again)" relaxes the policy for the session, or "reject". Real mid-turn `session/cancel`,
-`session/load`, and wiring the client's `mcpServers` are deliberate follow-ups.
+ask again)" relaxes the policy for the session, or "reject".
+
+Cancel: `serve()` reads stdin on a background thread, so a `session/cancel` arriving mid-turn
+flips the session's cancel flag immediately; the agent loop checks it between rounds and stops
+cleanly (an editor's "stop" actually interrupts). `session/load` and wiring the client's
+`mcpServers` are the remaining deliberate follow-ups.
 """
 from __future__ import annotations
 
 import contextlib
 import json
+import queue
 import sys
+import threading
 
 PROTOCOL_VERSION = 1
 _STOP_REASONS = ("end_turn", "max_tokens", "cancelled", "refusal")
@@ -418,6 +424,10 @@ def make_live_run_turn(agent_factory):
                         requester,
                         on_always=lambda: setattr(agent, "edit_policy", "free"),
                     )
+                # Cooperative cancel: the agent loop checks this between rounds, so a
+                # session/cancel (flipped by the transport's reader thread) stops the turn.
+                if hasattr(agent, "_should_cancel"):
+                    agent._should_cancel = lambda: bool(session.get("cancelled"))
                 result = agent.run_task(prompt) or {}
             ok = result.get("success", True)
             text = "" if (streamed and ok) else result.get("result", "")
@@ -445,36 +455,54 @@ def write_message(stream, obj: dict) -> None:
 
 
 def serve(agent: AcpAgent, instream=None, outstream=None) -> None:
-    """Run the ACP agent loop over stdio until EOF, dispatching each message and writing any
-    response. Notifications (e.g. session/update) are emitted via the agent's `send`.
+    """Run the ACP agent loop over stdio until EOF.
 
-    The agent can also make a BLOCKING outbound request (e.g. session/request_permission):
-    `agent.request` writes the request and reads the client's response inline, handling any
-    messages that arrive in the meantime (a session/cancel notification, say) so a mid-turn
-    permission prompt doesn't deadlock the loop."""
+    A **background reader thread** owns stdin: a `session/cancel` notification is handled
+    the moment it arrives (it just flips the session's cancel flag, which a running turn
+    checks between rounds — so an editor's "stop" actually interrupts mid-turn); every
+    other message is put on a queue the main thread dispatches serially. The agent can
+    also make a BLOCKING outbound request (`agent.request`, e.g. session/request_permission)
+    — it consumes from the same queue, so it sees the client's response even though the
+    reader thread is the only one touching stdin."""
     instream = instream if instream is not None else sys.stdin
     outstream = outstream if outstream is not None else sys.stdout
     agent.send = lambda m: write_message(outstream, m)
+    inbox: queue.Queue = queue.Queue()
+
+    def reader() -> None:
+        while True:
+            try:
+                msg = read_message(instream)
+            except (ValueError, json.JSONDecodeError):
+                continue  # skip a malformed line rather than kill the reader
+            if msg is None:
+                inbox.put(None)  # EOF sentinel
+                return
+            # session/cancel is handled INLINE here (not queued) so an in-flight turn
+            # on the main thread sees the flag immediately. It's a no-response
+            # notification, so dispatching it off-thread only flips a bool (GIL-safe).
+            if isinstance(msg, dict) and msg.get("method") == "session/cancel" and "id" not in msg:
+                agent.handle(msg)
+                continue
+            inbox.put(msg)
+
+    threading.Thread(target=reader, daemon=True).start()
     _req_id = {"n": 0}
 
     def request_client(method: str, params: dict):
         """Send an agent→client request and block for its response, servicing any
-        intervening messages. Returns the result (None on error/EOF — deny-safe)."""
+        intervening (non-cancel) messages from the queue. None on EOF — deny-safe."""
         _req_id["n"] += 1
         rid = f"korgex-req-{_req_id['n']}"  # string id won't collide with client ints
         write_message(outstream, {"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
         while True:
-            try:
-                reply = read_message(instream)
-            except (ValueError, json.JSONDecodeError):
-                continue
+            reply = inbox.get()
             if reply is None:
-                return None  # EOF before the response → treat as no answer
+                inbox.put(None)  # re-post EOF so the main loop also unblocks + exits
+                return None
             if isinstance(reply, dict) and reply.get("id") == rid \
                     and ("result" in reply or "error" in reply):
                 return reply.get("result")
-            # A message that isn't our response — dispatch it (e.g. session/cancel)
-            # so state stays consistent while we wait.
             other = agent.handle(reply)
             if other is not None:
                 write_message(outstream, other)
@@ -482,10 +510,7 @@ def serve(agent: AcpAgent, instream=None, outstream=None) -> None:
     agent.request = request_client
 
     while True:
-        try:
-            msg = read_message(instream)
-        except (ValueError, json.JSONDecodeError):
-            continue  # skip a malformed line rather than crash the loop
+        msg = inbox.get()
         if msg is None:
             break
         resp = agent.handle(msg)
