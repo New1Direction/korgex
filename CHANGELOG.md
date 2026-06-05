@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Remote (streamable-HTTP) MCP servers now actually expose their tools (found live-testing the new presets).** korgex's HTTP MCP client completed the `initialize` handshake with a remote server but discovered **zero tools** from it — because streamable-HTTP servers (Context7 and a growing number of hosted MCPs) issue an `mcp-session-id` on initialize and **require it echoed** as `Mcp-Session-Id` on every subsequent request; without it, `tools/list` comes back empty. The client now captures that session id from the response headers and resends it. Verified live: connecting to the `context7` preset went from **0 tools → its real `resolve-library-id` / `query-docs` tools**. (stdio MCP servers were unaffected.)
+
 ### Added
 - **MCP catalog: `openapi-to-mcp` preset.** [`bbonnin/openapi-to-mcp`](https://github.com/bbonnin/openapi-to-mcp) auto-generates MCP tools from *any* OpenAPI/Swagger spec — point it at an API's spec and the agent gets typed tools for every endpoint, no manual wiring. Unlike the npx presets this one is self-run: it's a Java/Spring server with no published binary, so you build the jar (`mvn package`) and run it (`java -jar openapi-mcp-server.jar --openapi.location=<spec> --openapi.base-url=<api>`), then korgex connects over HTTP on `:8000`. The preset carries the URL + the full build/run instructions in its catalog description (and `korgex mcp catalog` shows the "needs the jar running" caveat).
 
