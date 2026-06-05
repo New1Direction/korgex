@@ -251,15 +251,43 @@ def _result_summary(result, limit: int = 2000) -> str:
     return s[:limit]
 
 
+def tool_call_diff(call: dict):
+    """An ACP `diff` content block previewing an edit, or None for non-edit tools.
+    Built from the call args alone (no filesystem read): an `Edit` shows its
+    old_string→new_string fragments; a `Write` shows the new file content (old side
+    empty). The editor renders this as an inline diff on the tool-call card."""
+    name = call.get("name")
+    args = call.get("args") or {}
+    path = args.get("file_path")
+    if not path:
+        return None
+    if name == "Edit":
+        old, new = args.get("old_string"), args.get("new_string")
+        if old is None or new is None:
+            return None
+        return {"type": "diff", "path": path, "oldText": old, "newText": new}
+    if name == "Write":
+        content = args.get("content")
+        if content is None:
+            return None
+        return {"type": "diff", "path": path, "oldText": "", "newText": content}
+    return None
+
+
 def tool_call_begin(call: dict) -> dict:
-    """ACP `tool_call` update (status in_progress) — the editor shows an activity card."""
-    return {
+    """ACP `tool_call` update (status in_progress) — the editor shows an activity card,
+    with an inline diff preview for edits."""
+    upd = {
         "sessionUpdate": "tool_call",
         "toolCallId": str(call.get("id") or ""),
         "title": _tool_title(call),
         "kind": tool_kind(call.get("name")),
         "status": "in_progress",
     }
+    diff = tool_call_diff(call)
+    if diff is not None:
+        upd["content"] = [diff]
+    return upd
 
 
 def tool_call_end(call: dict, result) -> dict:

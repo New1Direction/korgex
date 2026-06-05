@@ -140,6 +140,30 @@ def test_tool_call_begin_builds_an_in_progress_tool_call():
     assert upd["kind"] == "read"
     assert upd["status"] == "in_progress"
     assert "a.py" in upd["title"]      # human-readable label from the args
+    assert "content" not in upd        # a read carries no diff
+
+
+def test_tool_call_diff_for_edit_and_write():
+    edit = acp.tool_call_diff({"name": "Edit",
+                               "args": {"file_path": "src/a.py", "old_string": "foo", "new_string": "bar"}})
+    assert edit == {"type": "diff", "path": "src/a.py", "oldText": "foo", "newText": "bar"}
+    write = acp.tool_call_diff({"name": "Write",
+                                "args": {"file_path": "src/new.py", "content": "x = 1\n"}})
+    assert write == {"type": "diff", "path": "src/new.py", "oldText": "", "newText": "x = 1\n"}
+
+
+def test_tool_call_diff_none_for_non_edits_or_missing_args():
+    assert acp.tool_call_diff({"name": "Read", "args": {"file_path": "a.py"}}) is None
+    assert acp.tool_call_diff({"name": "Bash", "args": {"command": "ls"}}) is None
+    assert acp.tool_call_diff({"name": "Edit", "args": {"file_path": "a.py"}}) is None  # no old/new
+    assert acp.tool_call_diff({"name": "Edit", "args": {}}) is None                     # no path
+
+
+def test_tool_call_begin_includes_a_diff_for_edits():
+    upd = acp.tool_call_begin({"id": "e1", "name": "Edit",
+                               "args": {"file_path": "a.py", "old_string": "x", "new_string": "y"}})
+    assert upd["kind"] == "edit"
+    assert upd["content"] == [{"type": "diff", "path": "a.py", "oldText": "x", "newText": "y"}]
 
 
 def test_tool_call_end_completed_and_failed():

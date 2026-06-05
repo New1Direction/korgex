@@ -340,7 +340,7 @@ korgex speaks the open **Agent Client Protocol** as an *agent*, so an ACP-capabl
 }
 ```
 
-Then pick **korgex** from the Agent Panel's *New Thread* menu. As it works, the editor shows live `tool_call` activity (read/edit/run/search cards) and streams the reply text — backed by the same tamper-evident ledger, so the whole session stays provable with `korgex verify`. (Editor handles a prompt turn per message; embedded `@file` context and pasted resources are accepted.)
+Then pick **korgex** from the Agent Panel's *New Thread* menu. As it works, the editor shows live `tool_call` activity (read/edit/run/search cards, with an inline diff preview for edits) and streams the reply text — backed by the same tamper-evident ledger, so the whole session stays provable with `korgex verify`. (Editor handles a prompt turn per message; embedded `@file` context and pasted resources are accepted.)
 
 By default korgex acts freely. To have the **editor approve edits** (a `session/request_permission` prompt with *Allow / Allow-don't-ask-again / Reject*), run it with `KORGEX_EDIT_POLICY=ask`:
 
