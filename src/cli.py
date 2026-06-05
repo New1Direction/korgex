@@ -123,6 +123,8 @@ def cmd_skills():
         return _cmd_skills_search(rest[1:])
     if rest and rest[0].lower() == "adopt":
         return _cmd_skills_adopt(rest[1:])
+    if rest and rest[0].lower() == "export":
+        return _cmd_skills_export(rest[1:])
 
     from src.skills import load_skills, default_skill_roots
     # Pass cwd so project-local .korgex/skills are listed too, not just
@@ -193,6 +195,29 @@ def _cmd_skills_adopt(args):
     for n in names:
         print(f"  ✓ adopted: {n}")
     print(f"  {len(names)} skill(s) → ~/.korgex/skills")
+    return 0
+
+
+def _cmd_skills_export(args):
+    """`korgex skills export <name|all> [claude|cursor|codex|opencode|<dir>]` — push a
+    korgex skill (incl. self-learned ones) out to another agent's skill dir."""
+    from src import skill_install as SI
+    from src.skills import load_skills, default_skill_roots
+    if not args:
+        print("usage: korgex skills export <name|all> [claude|cursor|codex|opencode|<dir>]")
+        return 2
+    target = args[1] if len(args) > 1 else "claude"
+    target_dir = SI.resolve_export_target(target, os.getcwd())
+    reg = load_skills(default_skill_roots(os.getcwd()))
+    names = reg.names() if args[0].lower() == "all" else [args[0]]
+    done = SI.export_skills(names, target_dir, reg)
+    if not done:
+        avail = ", ".join(reg.names()) or "none"
+        print(f"  nothing exported (unknown skill? available: {avail})")
+        return 1
+    for n, dest in done:
+        print(f"  ✓ exported {n} → {dest}")
+    print(f"  {len(done)} skill(s) → {target_dir}")
     return 0
 
 
@@ -1622,7 +1647,8 @@ def _build_subcommand_parser():
                             help="<list|add|remove> … (e.g. add <name> --url <url> | --command <cmd>)")
         elif name == "skills":
             sp.add_argument("args", nargs="*",
-                            help="(none=list) | log | install <ref> | search <query> | adopt <dir>")
+                            help="(none=list) | log | install <ref> | search <query> | "
+                                 "adopt <dir> | export <name|all> [target]")
         elif name == "local":
             sp.add_argument("--use", metavar="OLLAMA_TAG",
                             help="set this Ollama model as the default (e.g. qwen2.5-coder:7b)")

@@ -8,12 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Skills: install / search / adopt from the open catalog.** korgex skills are the Anthropic Agent-Skills format (`SKILL.md`) — the *same* format published across public GitHub and indexed by [skills.sh](https://skills.sh), so the whole ecosystem is consumable with no adapter. New `src/skill_install.py` + CLI:
+- **Skills: install / search / adopt / export — a bidirectional skill library.** korgex skills are the Anthropic Agent-Skills format (`SKILL.md`) — the *same* format published across public GitHub and indexed by [skills.sh](https://skills.sh), so the whole ecosystem is consumable with no adapter. New `src/skill_install.py` + CLI:
   - `korgex skills install <ref>` — install from a local dir, a git URL, or an `owner/repo[@skill]` skills.sh shorthand (which resolves to the GitHub repo). Skills land as `trust: installed` with a `source:` provenance stamp in their frontmatter.
   - `korgex skills search <query>` — search the skills.sh catalog (public repos + install counts); install a hit with `korgex skills install <source>@<skillId>`.
   - `korgex skills adopt <dir>` — pull skills already on disk (e.g. `~/.claude/skills`) into korgex's store, no re-download. Tolerates the legacy lowercase `skill.md` marker.
+  - `korgex skills export <name|all> [claude|cursor|codex|opencode|<dir>]` — push a korgex skill *out* to another agent's skill dir. The differentiated direction: korgex **generates** skills (the self-learning curator), so its learned skills become usable by other agents — no other tool syncs skills it produced itself.
 
-  Network (git clone, the skills.sh HTTP) is injected, so the logic is fully unit-tested offline. korgex keeps its edge (trust tiers + self-learning curator + verifiable ledger); this adds discovery/distribution on top.
+  Network (git clone, the skills.sh HTTP) is injected, so the logic is fully unit-tested offline. korgex keeps its edge (trust tiers + self-learning curator + verifiable ledger); this adds the bidirectional discovery/distribution it was missing.
 
 ### Fixed
 - **`korgex skills <subcommand>` was rejected by the CLI parser.** The `skills` subparser had no positional argument, so `korgex skills log` (and now install/search/adopt) errored with "unrecognized arguments" before the handler ran. Added the positional so the subcommands dispatch.

@@ -145,3 +145,38 @@ def test_search_parses_skillssh_results():
 def test_search_tolerates_garbage_response():
     assert SI.search("x", http_get=lambda url: "not json") == []
     assert SI.search("x", http_get=lambda url: json.dumps({"nope": 1})) == []
+
+
+# ── export: push korgex skills out to other agents (.claude / .cursor / …) ───────
+
+def test_resolve_export_target_known_agents_and_paths(tmp_path):
+    proj = str(tmp_path)
+    assert SI.resolve_export_target("claude", proj) == os.path.join(proj, ".claude", "skills")
+    assert SI.resolve_export_target("cursor", proj) == os.path.join(proj, ".cursor", "skills")
+    assert SI.resolve_export_target("codex", proj) == os.path.join(proj, ".codex", "skills")
+    # an unknown target is treated as a literal directory (with ~ expansion)
+    assert SI.resolve_export_target("/tmp/x", proj) == "/tmp/x"
+    assert SI.resolve_export_target("~/y", proj) == os.path.expanduser("~/y")
+
+
+def test_export_skill_copies_dir(tmp_path):
+    src = tmp_path / "src" / "myskill"
+    _make_skill(src, "myskill")
+    target = tmp_path / "out"
+    dest = SI.export_skill(str(src), str(target), "myskill")
+    assert os.path.isfile(os.path.join(dest, "SKILL.md"))
+    assert dest == os.path.join(str(target), "myskill")
+
+
+def test_export_skills_by_name_skips_unknown(tmp_path):
+    # build a korgex store with two skills, load it, export them by name
+    store = tmp_path / "store"
+    _make_skill(store / "one", "one")
+    _make_skill(store / "two", "two")
+    reg = load_skills([str(store)])
+    target = tmp_path / "out"
+    done = SI.export_skills(["one", "two", "ghost"], str(target), reg)
+    names = {n for n, _ in done}
+    assert names == {"one", "two"}                       # ghost (unknown) skipped
+    assert os.path.isfile(os.path.join(str(target), "one", "SKILL.md"))
+    assert os.path.isfile(os.path.join(str(target), "two", "SKILL.md"))
