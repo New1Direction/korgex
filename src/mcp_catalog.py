@@ -27,6 +27,11 @@ PRESETS = {
                        "tasks (and run_task); mise ships this MCP server for agents",
         "command": "mise", "args": ["mcp"], "needs": ["mise installed"], "category": "dev",
     },
+    "context7": {
+        "description": "Context7 (Upstash) — up-to-date docs + code examples for any library/"
+                       "framework, fetched on demand (hosted; anonymous, API key optional)",
+        "url": "https://mcp.context7.com/mcp", "category": "dev",
+    },
     "time": {
         "description": "Current time + timezone conversion (no auth)",
         "command": "uvx", "args": ["mcp-server-time"], "category": "utility",

@@ -22,6 +22,14 @@ def test_mise_preset_resolves_to_the_stdio_server():
     assert row["transport"] == "stdio" and "mise installed" in row["needs"]
 
 
+def test_context7_preset_is_the_hosted_remote_server():
+    # Context7 (Upstash) — up-to-date library docs over its hosted MCP endpoint.
+    cfg = resolve("context7")
+    assert cfg == {"url": "https://mcp.context7.com/mcp"}
+    row = next(r for r in entries() if r["alias"] == "context7")
+    assert row["transport"] == "http"   # remote (url) preset
+
+
 def test_resolve_fills_path_placeholder_for_filesystem():
     cfg = resolve("filesystem", path_value="/home/u/proj")
     assert "/home/u/proj" in cfg["args"]
