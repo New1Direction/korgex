@@ -430,8 +430,6 @@ class KorgexAgent:
         """
         try:
             from src.mcp_config import load_servers
-            from src.mcp_router import get_router
-            from src.tool_abstraction import register_mcp_tool
         except Exception as e:
             print(f"[mcp] client unavailable: {e}", file=sys.stderr)
             return 0
@@ -451,14 +449,27 @@ class KorgexAgent:
         except Exception:
             pass
 
-        # Route every server through the namespaced router: tools register as
-        # `server__tool`, so two servers exposing the same tool name no longer
-        # shadow each other. One server failing to boot leaves the rest up.
+        return self.connect_mcp_configs(configs)
+
+    def connect_mcp_configs(self, configs: dict) -> int:
+        """Connect a set of MCP server configs ``{name: {command/args/env | url/headers}}``
+        through the namespaced router and register their tools. Used by `_load_mcp_servers`
+        (config files) and by the ACP bridge (servers an editor forwards via session/new).
+        One server failing to boot leaves the rest up. Returns the tool count."""
+        if not configs:
+            return 0
+        try:
+            from src.mcp_router import get_router
+            from src.tool_abstraction import register_mcp_tool
+        except Exception as e:
+            print(f"[mcp] client unavailable: {e}", file=sys.stderr)
+            return 0
+        # Tools register as `server__tool`, so two servers exposing the same tool
+        # name no longer shadow each other.
         router = get_router()
         report = router.connect_all(configs)
         for name, err in report.get("failed", {}).items():
             print(f"[mcp] skipping {name}: {err}", file=sys.stderr)
-
         registered = 0
         for tool in router.discover_tools():
             register_mcp_tool(tool)

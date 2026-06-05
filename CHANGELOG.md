@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **ACP: `session/load` (resume) + forward the client's `mcpServers`** — completes korgex's ACP client-capability surface. `loadSession` is now advertised true: `session/load` re-attaches to a prior session by id and the bridge **seeds the first turn with the transcript rebuilt from the repo's ledger** (continuity across editor restarts — korgex's existing resume machinery, now reachable over ACP). And the MCP servers an editor configures and forwards (on `session/new`/`session/load`) are translated to korgex's config shape and **connected into the agent's tool surface** (via a new reusable `KorgexAgent.connect_mcp_configs`). With this, the ACP editor surface is feature-complete: streaming, tool-call activity + diffs, edit approvals, mid-turn cancel, session resume, and forwarded MCP.
+
 ## [0.28.0] — 2026-06-04
 
 ### Added

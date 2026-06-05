@@ -28,13 +28,18 @@ ask again)" relaxes the policy for the session, or "reject".
 
 Cancel: `serve()` reads stdin on a background thread, so a `session/cancel` arriving mid-turn
 flips the session's cancel flag immediately; the agent loop checks it between rounds and stops
-cleanly (an editor's "stop" actually interrupts). `session/load` and wiring the client's
-`mcpServers` are the remaining deliberate follow-ups.
+cleanly (an editor's "stop" actually interrupts).
+
+Resume + MCP: `session/load` re-attaches to a prior session by id and the bridge seeds the
+first turn with the transcript rebuilt from the repo's ledger (continuity across restarts).
+An editor's configured `mcpServers` (forwarded on session/new or session/load) are translated
+and connected into the agent's tool surface.
 """
 from __future__ import annotations
 
 import contextlib
 import json
+import os
 import queue
 import sys
 import threading
@@ -122,6 +127,8 @@ class AcpAgent:
                 result = self._initialize(params)
             elif method == "session/new":
                 result = self._session_new(params)
+            elif method == "session/load":
+                result = self._session_load(params)
             elif method == "session/prompt":
                 result = self._session_prompt(params)
             elif method == "session/cancel":
@@ -141,7 +148,7 @@ class AcpAgent:
         return {
             "protocolVersion": params.get("protocolVersion", PROTOCOL_VERSION),
             "agentCapabilities": {
-                "loadSession": False,
+                "loadSession": True,
                 # embeddedContext: we inline resource/resource_link blocks into the
                 # prompt (see prompt_text). image/audio: korgex can't process these.
                 "promptCapabilities": {"audio": False, "embeddedContext": True, "image": False},
@@ -157,6 +164,18 @@ class AcpAgent:
                               "mcpServers": params.get("mcpServers") or [],
                               "cancelled": False}
         return {"sessionId": sid}
+
+    def _session_load(self, params: dict) -> dict:
+        """Re-attach to a prior session by id. We register it under the client's id and
+        mark it `resumed` — the bridge then seeds the first turn with the prior
+        transcript reconstructed from the repo's ledger (continuity across restarts)."""
+        sid = params.get("sessionId")
+        if not sid:
+            raise AcpError(-32602, "session/load requires a sessionId")
+        self.sessions[sid] = {"cwd": params.get("cwd"),
+                              "mcpServers": params.get("mcpServers") or [],
+                              "cancelled": False, "resumed": True}
+        return {}
 
     def _session_prompt(self, params: dict) -> dict:
         sid = params.get("sessionId")
@@ -391,7 +410,48 @@ def _noop_turn(text: str, session: dict) -> dict:
     return {"text": "", "stop_reason": "end_turn"}
 
 
-def make_live_run_turn(agent_factory):
+def mcp_servers_to_config(acp_servers) -> dict:
+    """Translate ACP `session/new`/`session/load` ``mcpServers`` into korgex's config
+    shape ``{name: {command,args,env | url,headers}}`` — so an editor's configured MCP
+    servers become part of the agent's tool surface. Entries without a name are dropped."""
+    out: dict = {}
+    for s in acp_servers or []:
+        if not isinstance(s, dict):
+            continue
+        name = s.get("name")
+        if not name:
+            continue
+        if s.get("url"):
+            cfg = {"url": s["url"]}
+            if s.get("headers"):
+                cfg["headers"] = s["headers"]
+        else:
+            cfg = {"command": s.get("command")}
+            if s.get("args"):
+                cfg["args"] = s["args"]
+            if s.get("env"):
+                cfg["env"] = s["env"]
+        out[name] = cfg
+    return out
+
+
+def _resume_context_for(cwd):
+    """Build a resume preamble from a repo's ledger journal, or None. Used for
+    session/load so a reloaded session continues with its prior transcript."""
+    if not cwd:
+        return None
+    journal = os.environ.get("KORG_JOURNAL_PATH") or os.path.join(cwd, ".korg", "journal.jsonl")
+    if not os.path.isfile(journal):
+        return None
+    try:
+        from src import resume as _R
+        ctx = _R.build_resume_context(journal)
+        return _R.resume_preamble(ctx) if ctx else None
+    except Exception:
+        return None
+
+
+def make_live_run_turn(agent_factory, *, resume_builder=None):
     """Build the live `run_turn` for `korgex acp`.
 
     Per turn: construct an agent via ``agent_factory()``, point it at the session's
@@ -428,7 +488,27 @@ def make_live_run_turn(agent_factory):
                 # session/cancel (flipped by the transport's reader thread) stops the turn.
                 if hasattr(agent, "_should_cancel"):
                     agent._should_cancel = lambda: bool(session.get("cancelled"))
-                result = agent.run_task(prompt) or {}
+                # Forward the editor's configured MCP servers into the agent's tool
+                # surface (the agent doesn't auto-load mcp.json in ACP mode).
+                servers = session.get("mcpServers")
+                if servers and hasattr(agent, "connect_mcp_configs"):
+                    try:
+                        agent.connect_mcp_configs(mcp_servers_to_config(servers))
+                    except Exception:
+                        pass
+                # Resume a loaded session: seed the FIRST turn with the prior transcript
+                # rebuilt from the repo's ledger. Built once per session.
+                resume_ctx = None
+                if session.get("resumed") and not session.get("_resume_built"):
+                    session["_resume_built"] = True
+                    try:
+                        resume_ctx = (resume_builder or _resume_context_for)(session.get("cwd"))
+                    except Exception:
+                        resume_ctx = None
+                if resume_ctx:
+                    result = agent.run_task(prompt, resume_context=resume_ctx) or {}
+                else:
+                    result = agent.run_task(prompt) or {}
             ok = result.get("success", True)
             text = "" if (streamed and ok) else result.get("result", "")
             return {"text": text, "stop_reason": "end_turn" if ok else "refusal"}
