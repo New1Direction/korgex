@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-06-04
+
 ### Added
 - **Built-in skill: `react-doctor`.** A bundled skill that has the agent run [react-doctor](https://github.com/millionco/react-doctor) — a deterministic React linter ("your agent writes bad React, this catches it") — on React/JSX changes and fix what it flags (state/effects, performance, architecture, security, a11y) before calling the work done. It's a CLI/LSP tool, not an MCP server, so a skill (run on your diff) is the right integration.
 
