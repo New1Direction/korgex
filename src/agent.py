@@ -77,6 +77,18 @@ def _new_codeact_id() -> str:
     return uuid.uuid4().hex
 
 
+def codeact_unconfined_warning(platform: str) -> str:
+    """The one-time heads-up shown when CodeAct runs without OS isolation: the kernel
+    executes model-authored Python UNCONFINED (same trust as Bash; raw stdlib bypasses
+    the command + egress guards). The hint is platform-aware — isolation is only
+    available on Linux + bubblewrap, so elsewhere there is no opt-in to point at."""
+    hint = ("set KORGEX_CODEACT_ISOLATION=1 to sandbox it (Linux + bubblewrap)"
+            if platform.startswith("linux")
+            else f"OS isolation is unavailable on {platform}")
+    return ("⚠ korgex CodeAct: model-authored Python runs UNCONFINED — same trust as "
+            f"Bash; raw stdlib bypasses the command + egress guards ({hint}).")
+
+
 from src.agent_resolve import (  # resolution helpers, extracted to keep agent.py focused
     _looks_anthropic, _OAUTH_BASE_URLS, _oauth_provider_for, _oauth_token_and_base,
     _READONLY_SUBAGENT_TOOLS, _MODEL_ALIASES, subagent_tools, _resolve_params, _resolve_model,
@@ -1726,6 +1738,16 @@ class KorgexAgent:
         if os.environ.get("KORGEX_CODEACT_ENABLE", "off").strip().lower() \
                 not in ("1", "true", "yes", "on"):
             return {"error": "CodeAct disabled (set KORGEX_CODEACT_ENABLE=1 to enable)"}
+
+        # One-time heads-up: without OS isolation the kernel runs model-authored
+        # Python UNCONFINED — same trust as Bash, and raw stdlib bypasses the command
+        # + egress guards. (isolation-requested-but-unavailable already fails closed in
+        # the kernel, so the only unconfined path is "isolation not requested".) Warn,
+        # don't block: CodeAct is opt-in and we never silently remove ability.
+        from src.codeact.sandbox import isolation_requested as _iso_requested
+        if not _iso_requested() and not getattr(self, "_codeact_unconfined_warned", False):
+            self._codeact_unconfined_warned = True
+            sys.stderr.write(codeact_unconfined_warning(sys.platform) + "\n")
 
         # 1. Anchor the code action so children nest under it. record_user_prompt is
         #    synchronous on every client; guard the (shouldn't-happen) None so we
