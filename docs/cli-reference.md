@@ -37,7 +37,7 @@ korgex --quiet "list all functions exported from src/utils.py"
 | `--mcp` | Load MCP servers from `mcp.json` at startup and expose their tools to the agent. |
 | `--quiet` / `-q` | Disable the streaming TUI. Only the final result prints. Use in pipes, scripts, and CI. |
 | `--version` / `-V` | Print the korgex version and exit. |
-| `--resume` | Not yet implemented. Exits with code 2 rather than silently starting fresh, so scripts fail loudly. |
+| `--resume` | Resume the last session: replays the prior session's prompts, replies, and tool calls from the verifiable journal back into context. List sessions with `korgex sessions`. |
 
 ---
 
