@@ -14,11 +14,13 @@ Two backends, the SAME two guarantees (no network · write only the workspace):
     and ``(deny file-write*)`` everywhere except the workspace + the per-user temp dir.
 
 Design choices:
-  - OFF by default (``KORGEX_CODEACT_ISOLATION``). It changes execution semantics, so
-    it's strictly opt-in.
-  - FAIL-CLOSED: when isolation is REQUESTED but the platform's sandbox tool isn't
-    present, the kernel refuses to start rather than run unconfined (the caller
-    surfaces a clear error). Never a silent downgrade.
+  - AUTO by default (``KORGEX_CODEACT_ISOLATION`` unset): sandbox when a backend is
+    available, else run unconfined + warn — so CodeAct stays usable everywhere while
+    being secure where it can be. (CodeAct itself is still opt-in via
+    ``KORGEX_CODEACT_ENABLE``; see ``isolation_mode()`` for ``required``/``off``.)
+  - FAIL-CLOSED: in ``required`` mode, when the platform's sandbox tool isn't present
+    the kernel refuses to start rather than run unconfined (the caller surfaces a
+    clear error). Never a silent downgrade.
   - DECLARATIVE + auditable by reading (the bwrap flag set / the SBPL profile), and
     live-validated on each OS. A zero-external-dep Landlock/seccomp backend is a
     future option.
@@ -33,11 +35,43 @@ import sys
 import tempfile
 
 _ON = ("1", "true", "yes", "on", "strict")
+_OFF = ("0", "false", "no", "off")
+
+
+def isolation_mode() -> str:
+    """How CodeAct OS isolation resolves, from ``KORGEX_CODEACT_ISOLATION``:
+
+      - ``required`` (``1``/``on``/``strict``/…): sandbox, or FAIL CLOSED if no backend.
+      - ``off`` (``0``/``off``/…): never sandbox — run unconfined (the agent warns).
+      - ``auto`` (UNSET / ``auto`` / anything else): sandbox IFF a backend is available
+        (Linux bwrap · macOS Seatbelt); otherwise run unconfined + warn.
+
+    ``auto`` is the DEFAULT: secure where we can be, without breaking platforms that
+    have no sandbox backend (e.g. Windows). It does NOT change the CodeAct opt-in —
+    ``KORGEX_CODEACT_ENABLE`` is still required to run code at all."""
+    v = os.environ.get("KORGEX_CODEACT_ISOLATION", "").strip().lower()
+    if v in _ON:
+        return "required"
+    if v in _OFF:
+        return "off"
+    return "auto"
 
 
 def isolation_requested() -> bool:
-    """True iff the user opted into sandboxed CodeAct (KORGEX_CODEACT_ISOLATION)."""
-    return os.environ.get("KORGEX_CODEACT_ISOLATION", "off").strip().lower() in _ON
+    """Back-compat: True iff isolation is explicitly REQUIRED (the fail-closed mode)."""
+    return isolation_mode() == "required"
+
+
+def would_run_unconfined() -> bool:
+    """True iff a kernel started now would run WITHOUT a sandbox: isolation ``off``, or
+    ``auto`` with no available backend. (``required`` never runs unconfined — it
+    sandboxes or fails closed.) The agent uses this to decide whether to warn."""
+    mode = isolation_mode()
+    if mode == "off":
+        return True
+    if mode == "required":
+        return False
+    return not available()[0]
 
 
 def available() -> tuple[bool, str]:

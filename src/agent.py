@@ -1741,13 +1741,13 @@ class KorgexAgent:
                 not in ("1", "true", "yes", "on"):
             return {"error": "CodeAct disabled (set KORGEX_CODEACT_ENABLE=1 to enable)"}
 
-        # One-time heads-up: without OS isolation the kernel runs model-authored
-        # Python UNCONFINED — same trust as Bash, and raw stdlib bypasses the command
-        # + egress guards. (isolation-requested-but-unavailable already fails closed in
-        # the kernel, so the only unconfined path is "isolation not requested".) Warn,
+        # One-time heads-up ONLY when the kernel will actually run UNCONFINED — i.e.
+        # isolation is off, or 'auto' with no backend on this platform (the default
+        # 'auto' sandboxes on Linux/macOS, so that common path stays quiet). Unconfined
+        # = same trust as Bash; raw stdlib bypasses the command + egress guards. Warn,
         # don't block: CodeAct is opt-in and we never silently remove ability.
-        from src.codeact.sandbox import isolation_requested as _iso_requested
-        if not _iso_requested() and not getattr(self, "_codeact_unconfined_warned", False):
+        from src.codeact.sandbox import would_run_unconfined as _unconfined
+        if _unconfined() and not getattr(self, "_codeact_unconfined_warned", False):
             self._codeact_unconfined_warned = True
             sys.stderr.write(codeact_unconfined_warning(sys.platform) + "\n")
 

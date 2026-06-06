@@ -101,16 +101,20 @@ class KernelHandle:
         env["PYTHONPATH"] = (
             install_root + os.pathsep + existing if existing else install_root)
         cmd = [self._python, "-u", "-m", "src.codeact.kernel_main"]
-        # OPT-IN OS isolation. FAIL CLOSED: if isolation was requested but isn't
-        # available (non-Linux, or no bwrap), refuse to start rather than run model
-        # code unconfined — the caller turns this into a clear error dict.
+        # OS isolation. Default 'auto': sandbox when a backend is available (Linux
+        # bwrap / macOS Seatbelt), else run unconfined (the agent warns). 'required'
+        # FAILS CLOSED if no backend — refuse to start rather than run model code
+        # unconfined (the caller turns the error into a clear dict). 'off' never wraps.
         self._isolated = False
-        if _sandbox.isolation_requested():
+        mode = _sandbox.isolation_mode()
+        if mode != "off":
             ok, why = _sandbox.available()
-            if not ok:
-                raise RuntimeError(f"CodeAct isolation requested but unavailable: {why}")
-            cmd = _sandbox.wrap_command(cmd, self.repo_root, install_root)
-            self._isolated = True
+            if ok:
+                cmd = _sandbox.wrap_command(cmd, self.repo_root, install_root)
+                self._isolated = True
+            elif mode == "required":
+                raise RuntimeError(f"CodeAct isolation required but unavailable: {why}")
+            # else: auto + no backend → run unconfined (the agent surfaces the warning)
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
