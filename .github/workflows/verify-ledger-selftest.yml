@@ -1,0 +1,44 @@
+name: verify-ledger self-test
+
+# Proves the verify-ledger action on GitHub CI: an intact ledger passes the gate, and
+# a tampered one fails it (and we assert the failure). Uses the committed frozen
+# korg-ledger@v1 conformance vectors as fixtures.
+
+on:
+  push:
+    paths:
+      - ".github/actions/verify-ledger/**"
+      - ".github/workflows/verify-ledger-selftest.yml"
+  pull_request:
+    paths:
+      - ".github/actions/verify-ledger/**"
+      - ".github/workflows/verify-ledger-selftest.yml"
+  workflow_dispatch:
+
+jobs:
+  intact-passes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: an intact ledger verifies (gate passes)
+        uses: ./.github/actions/verify-ledger
+        with:
+          path: spec/korg-ledger-v1/vectors/basic-intact.jsonl
+
+  tampered-fails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: a tampered ledger is rejected (gate is expected to fail)
+        id: verify
+        continue-on-error: true
+        uses: ./.github/actions/verify-ledger
+        with:
+          path: spec/korg-ledger-v1/vectors/tampered-content.jsonl
+      - name: assert the gate failed
+        run: |
+          if [ "${{ steps.verify.outcome }}" != "failure" ]; then
+            echo "::error::tampered ledger should have FAILED the gate, but did not"
+            exit 1
+          fi
+          echo "✓ tampered ledger correctly rejected by the gate"
