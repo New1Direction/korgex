@@ -80,11 +80,13 @@ def _new_codeact_id() -> str:
 def codeact_unconfined_warning(platform: str) -> str:
     """The one-time heads-up shown when CodeAct runs without OS isolation: the kernel
     executes model-authored Python UNCONFINED (same trust as Bash; raw stdlib bypasses
-    the command + egress guards). The hint is platform-aware — isolation is only
-    available on Linux + bubblewrap, so elsewhere there is no opt-in to point at."""
-    hint = ("set KORGEX_CODEACT_ISOLATION=1 to sandbox it (Linux + bubblewrap)"
-            if platform.startswith("linux")
-            else f"OS isolation is unavailable on {platform}")
+    the command + egress guards). The hint is platform-aware — OS isolation is
+    available on Linux (bubblewrap) and macOS (Seatbelt), so on those we point at the
+    opt-in; elsewhere there is no backend to point at."""
+    if platform.startswith("linux") or platform == "darwin":
+        hint = "set KORGEX_CODEACT_ISOLATION=1 to sandbox it"
+    else:
+        hint = f"OS isolation is unavailable on {platform}"
     return ("⚠ korgex CodeAct: model-authored Python runs UNCONFINED — same trust as "
             f"Bash; raw stdlib bypasses the command + egress guards ({hint}).")
 
