@@ -255,7 +255,7 @@ The agent sees **23 high-level, model-facing tools** (Claude-Code style), each w
 
 Beyond the core file/shell/search loop, korgex ships several deeper systems. The riskier ones are **opt-in and off by default** (a single env var), and every one of them records to the verifiable ledger.
 
-- **CodeAct — code as the action space** (`KORGEX_CODEACT_ENABLE=1`). A persistent, fuel-metered Python kernel where the model writes code that calls tools as functions — denser than one-tool-call-per-turn. The nested execution trace is recorded to the ledger; optional OS-level isolation via bubblewrap on Linux (`KORGEX_CODEACT_ISOLATION=1`).
+- **CodeAct — code as the action space** (`KORGEX_CODEACT_ENABLE=1`). A persistent, fuel-metered Python kernel where the model writes code that calls tools as functions — denser than one-tool-call-per-turn. The nested execution trace is recorded to the ledger. When enabled, the kernel is **OS-sandboxed by default** where a backend exists — bubblewrap on Linux, Seatbelt on macOS — confining it to no-network + write-only-workspace (`KORGEX_CODEACT_ISOLATION=auto`/`required`/`off`).
 - **Multi-agent orchestration** (`KORGEX_PARALLEL_AGENTS`, plus the `Orchestrate` tool). Run a DAG of sub-agents concurrently — ledger-native and verifiable, with hard one-level nesting and each sub-run chained under its parent.
 - **Auditable network capture** (`KORGEX_NETCAPTURE_ENABLE=1`). Run an app/script you wrote under a local CA-signing capture proxy and get a structured, redacted trace of every HTTP(S) exchange. Process-scoped, capture-only, secrets masked before they're recorded.
 - **Verifiable browser** (`KORGEX_BROWSER_STEALTH`, `KORGEX_BROWSER_EVAL`). CDP-driven snapshot→act browser automation, ledger-recorded; opt-in stealth.
@@ -271,7 +271,7 @@ Beyond the core file/shell/search loop, korgex ships several deeper systems. The
 - **Destructive-command guard** (on by default; `KORGEX_COMMAND_GUARD`). A whitelist-first, quote/comment-aware floor over `Bash` (and the CodeAct bridge) that refuses obviously destructive commands; a block is a tamper-evident `command_guard.block` event in the ledger.
 - **Egress / exfil guard** (on by default in flag mode; `KORGEX_EGRESS=off|flag|redact|block`). Shape-based inspection of data leaving the box via outbound tools (`WebFetch`/`WebSearch`/`BusSend`/`browser_navigate`/MCP/network `Bash`): detects secret shapes (reusing the ledger redactor's patterns) and large encoded blobs. `flag` warns + records an `egress.flag` verdict but never alters or blocks (additive); `redact` masks the secret in the outbound payload before it leaves; `block` refuses. Every detection is a tamper-evident ledger verdict carrying the finding's *shape* only — the raw secret is redacted from the record, so the shareable ledger never becomes the exfil channel. Opt-in destination control via `KORGEX_EGRESS_ALLOW`/`KORGEX_EGRESS_DENY` (comma-separated hosts).
 - **Bash sandbox** (`KORGEX_SANDBOX=modal|docker|direct|auto`). Controls isolation for shell execution.
-- **CodeAct OS isolation** (`KORGEX_CODEACT_ISOLATION=1`, Linux/bubblewrap) for the code kernel.
+- **CodeAct OS isolation** — sandbox-by-default (Linux/bubblewrap · macOS/Seatbelt) for the code kernel; `KORGEX_CODEACT_ISOLATION=required` to fail closed, `=off` to disable.
 - **Edit confirmation.** Diffs for `Edit`/`Write` on critical files prompt `[y/N]` in the TUI; the edit policy is configurable via `KORGEX_EDIT_POLICY`.
 - **Opt-in by default for anything powerful.** CodeAct, NetCapture, remote signing, and browser stealth are all off until you turn them on.
 
@@ -373,7 +373,7 @@ By default korgex acts freely. To have the **editor approve edits** (a `session/
 | Variable | Purpose |
 |---|---|
 | `KORGEX_LEAN_CONTEXT` · `KORGEX_LEAN_CONTEXT_TOKENS` | Inject lean, *verified* ledger context relevant to the prompt instead of carrying full history (budget default 800) — lets a smaller/self-hosted model run the loop. |
-| `KORGEX_CODEACT_ENABLE` · `KORGEX_CODEACT_ISOLATION` | Enable the CodeAct code-kernel; OS isolation (Linux/bubblewrap). |
+| `KORGEX_CODEACT_ENABLE` · `KORGEX_CODEACT_ISOLATION` | Enable the CodeAct code-kernel; OS isolation `auto` (default — sandbox where available: Linux/bubblewrap, macOS/Seatbelt) · `required` (fail closed) · `off`. |
 | `KORGEX_NETCAPTURE_ENABLE` | Enable the auditable HTTP(S) capture tool. |
 | `KORGEX_PARALLEL_AGENTS` | Concurrency for multi-agent orchestration. |
 | `KORGEX_REMOTE_SIGNER_TOKEN` · `_ALLOWED_HOSTS` · `_PUBKEY` · `_REQUIRE_HTTPS` | Remote-signer auth, host allowlist, pinned key, https enforcement. |

@@ -192,3 +192,68 @@ def test_unconfined_warning_points_at_the_opt_in_where_isolation_exists():
     other = codeact_unconfined_warning("win32")
     assert "unavailable on win32" in other
     assert "KORGEX_CODEACT_ISOLATION=1" not in other
+
+
+# ── isolation MODE: required / off / auto (auto = the secure-by-default) ──────
+
+def test_isolation_mode_parsing(monkeypatch):
+    for v in ("1", "true", "yes", "on", "strict"):
+        monkeypatch.setenv("KORGEX_CODEACT_ISOLATION", v)
+        assert S.isolation_mode() == "required", v
+    for v in ("0", "false", "no", "off"):
+        monkeypatch.setenv("KORGEX_CODEACT_ISOLATION", v)
+        assert S.isolation_mode() == "off", v
+    monkeypatch.delenv("KORGEX_CODEACT_ISOLATION", raising=False)
+    assert S.isolation_mode() == "auto"                 # UNSET → auto (the default)
+    monkeypatch.setenv("KORGEX_CODEACT_ISOLATION", "auto")
+    assert S.isolation_mode() == "auto"
+
+
+def test_would_run_unconfined_matrix(monkeypatch):
+    # off → always unconfined
+    monkeypatch.setenv("KORGEX_CODEACT_ISOLATION", "off")
+    assert S.would_run_unconfined() is True
+    # required → never unconfined (sandboxes or fails closed)
+    monkeypatch.setenv("KORGEX_CODEACT_ISOLATION", "on")
+    assert S.would_run_unconfined() is False
+    # auto → unconfined ONLY when no backend is available
+    monkeypatch.delenv("KORGEX_CODEACT_ISOLATION", raising=False)
+    monkeypatch.setattr(S, "available", lambda: (True, "x"))
+    assert S.would_run_unconfined() is False            # auto + backend → sandboxed
+    monkeypatch.setattr(S, "available", lambda: (False, "none"))
+    assert S.would_run_unconfined() is True             # auto + no backend → unconfined
+
+
+def test_kernel_auto_runs_unconfined_without_a_backend(tmp_path, monkeypatch):
+    # auto + no sandbox backend must NOT fail closed — CodeAct stays usable, just
+    # unconfined (the agent warns). Only 'required' fails closed.
+    monkeypatch.delenv("KORGEX_CODEACT_ISOLATION", raising=False)   # auto
+    monkeypatch.setattr(S.sys, "platform", "win32")                 # no backend
+    from src.codeact import KernelHandle
+    k = KernelHandle(repo_root=str(tmp_path))
+    try:
+        r = k.exec("print(6 * 7)", {"wall_ms": 8000, "max_output": 65536}, lambda n, a: {})
+        assert "error" not in r, r
+        assert "42" in r.get("stdout", "")
+        assert k._isolated is False                                 # ran unconfined
+    finally:
+        k.reset()
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not shutil.which("sandbox-exec"),
+                    reason="auto-isolation end-to-end check needs darwin + sandbox-exec")
+def test_kernel_auto_isolates_by_default_on_macos(tmp_path, monkeypatch):
+    # The point of the follow-on: with isolation UNSET (auto), enabling CodeAct on a
+    # box WITH a backend sandboxes by default — no env needed.
+    monkeypatch.delenv("KORGEX_CODEACT_ISOLATION", raising=False)
+    from src.codeact import KernelHandle
+    k = KernelHandle(repo_root=str(tmp_path))
+    try:
+        r = k.exec("print('ok')", {"wall_ms": 8000, "max_output": 65536}, lambda n, a: {})
+        assert "error" not in r and k._isolated is True            # auto → sandboxed
+        net = k.exec("import socket\ntry:\n socket.create_connection(('1.1.1.1',80),3); print('NET')\n"
+                     "except Exception as e: print('blocked')",
+                     {"wall_ms": 8000, "max_output": 65536}, lambda n, a: {})
+        assert "blocked" in net.get("stdout", "")                  # network denied by default
+    finally:
+        k.reset()
