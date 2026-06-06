@@ -1,0 +1,46 @@
+name: "Verify korg ledger"
+description: "Verify a korgex receipt or ledger journal in CI (hash-chain + causal DAG + Ed25519 signature). Fails the job if verification fails — zero trust in the tool that produced it."
+branding:
+  icon: "shield"
+  color: "green"
+
+inputs:
+  path:
+    description: "Path or glob to a korg receipt (*.korgreceipt.json) or journal (.korg/journal.json, *.jsonl). Supports ** recursive globs."
+    required: false
+    default: ".korg/journal.json"
+  pubkey:
+    description: "Optional hex pubkey to PIN the expected signer — a green check then proves authorship against a key you trust, not just the one the receipt carries."
+    required: false
+    default: ""
+  verifier:
+    description: "Which implementation to run: 'cargo' (korg-verify from crates.io, default) or 'npx' (@korgg/ledger-verify, the JS impl)."
+    required: false
+    default: "cargo"
+  fail-on-invalid:
+    description: "Fail the job when verification fails (the gate). Set false to report-only."
+    required: false
+    default: "true"
+  summary:
+    description: "Write a verdict table to the GitHub step summary."
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Cache korg-verify
+      if: ${{ inputs.verifier == 'cargo' }}
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/bin/korg-verify
+        key: korg-verify-bin-${{ runner.os }}
+    - name: Verify korg ledger
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_PUBKEY: ${{ inputs.pubkey }}
+        INPUT_VERIFIER: ${{ inputs.verifier }}
+        INPUT_FAIL_ON_INVALID: ${{ inputs.fail-on-invalid }}
+        INPUT_SUMMARY: ${{ inputs.summary }}
+      run: python3 "$GITHUB_ACTION_PATH/verify_ledger.py"
