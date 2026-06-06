@@ -224,6 +224,15 @@ korgex receipt --claim "shipped /healthz + passing test" --sign --html receipt.h
 korgex receipt verify receipt.korgreceipt.json   # ✓ VALID / ✗ INVALID (CI-gateable)
 ```
 
+**Gate it in CI.** Drop the [`verify-ledger`](.github/actions/verify-ledger) GitHub Action into any repo to fail the build if an agent's ledger or receipt doesn't verify — zero trust in the tool that produced it:
+
+```yaml
+- uses: New1Direction/korgex/.github/actions/verify-ledger@main
+  with:
+    path: ".korg/journal.json"            # or "**/*.korgreceipt.json"
+    pubkey: ${{ vars.KORG_SIGNER_PUBKEY }}  # optional: pin the signer
+```
+
 See [Self-Coding Bench](docs/self-coding-bench.md) for live reliability data across models.
 
 ---
