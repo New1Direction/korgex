@@ -94,3 +94,24 @@ def test_kernel_spawn_fails_closed_when_isolation_unavailable(tmp_path, monkeypa
         assert "isolation" in r["error"].lower()
     finally:
         k.reset()
+
+
+# ── the one-time "running UNCONFINED" heads-up (agent-side) ──────────────────
+# When CodeAct is enabled but OS isolation is not in effect, the kernel runs
+# model-authored Python with the same trust as Bash and raw stdlib bypasses the
+# command + egress guards. The agent warns once (never blocks — opt-in stays).
+from src.agent import codeact_unconfined_warning
+
+
+def test_unconfined_warning_names_the_real_risk():
+    msg = codeact_unconfined_warning("linux")
+    assert "UNCONFINED" in msg
+    assert "command" in msg and "egress" in msg  # the guards it bypasses
+
+
+def test_unconfined_warning_hint_is_platform_aware():
+    # Linux has an opt-in to point at; macOS/others do not (isolation is Linux-only).
+    assert "KORGEX_CODEACT_ISOLATION=1" in codeact_unconfined_warning("linux")
+    mac = codeact_unconfined_warning("darwin")
+    assert "unavailable on darwin" in mac
+    assert "KORGEX_CODEACT_ISOLATION=1" not in mac
