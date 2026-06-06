@@ -122,7 +122,7 @@ def get_callables() -> list[Callable]:
                     "resume": {
                         "type": "boolean",
                         "default": False,
-                        "description": "Resume the last session (not yet implemented).",
+                        "description": "Resume the last session — replay the verifiable journal back into context.",
                     },
                 },
                 "required": ["prompt"],
