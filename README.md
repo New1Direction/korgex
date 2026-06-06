@@ -6,7 +6,7 @@
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/v/korgex?color=3fb950&label=pypi" alt="PyPI version"></a>
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/pyversions/korgex?color=2dd4bf" alt="Python versions"></a>
   <a href="https://github.com/New1Direction/korgex/actions/workflows/tests.yml"><img src="https://github.com/New1Direction/korgex/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/tests-1%2C263%20passing-3fb950" alt="tests">
+  <img src="https://img.shields.io/badge/tests-1%2C571%20passing-3fb950" alt="tests">
   <a href="https://registry.modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-registry-2dd4bf" alt="MCP registry"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
@@ -532,7 +532,7 @@ korgex/
 │   └── ...
 ├── docs/                     # CLI reference, comparison, getting-started, tools-reference, …
 ├── spec/korg-ledger-v1/      # the ledger spec (SPEC.md, EVENTS.md)
-├── tests/                    # ~1,263 tests
+├── tests/                    # ~1,571 tests
 ├── .github/workflows/        # Linux CI (3.10–3.13) + PyPI publisher (OIDC)
 ├── pyproject.toml
 └── README.md
