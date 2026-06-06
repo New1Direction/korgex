@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-06-06
+
+### Added
+- **CodeAct is sandboxed by default** (when `KORGEX_CODEACT_ENABLE` is on). Code the model runs in the persistent kernel previously executed at the **same trust as `Bash`** — raw stdlib bypassed `command_guard`/`egress_guard`, which only gate the bridge. `KORGEX_CODEACT_ISOLATION` now resolves three ways: `auto` (default — sandbox if an OS backend exists, else run unconfined and **warn once**), `required` (sandbox or **fail closed**), `off`. So in-kernel code can't reach the network or write outside the workspace by default on Linux and macOS, while the capability is preserved where no backend exists. CodeAct itself stays opt-in (default off). (#99, #101)
+- **macOS sandbox backend (Seatbelt / `sandbox-exec`).** Mirrors the Linux bubblewrap guarantees — no network, writes confined to the workspace + temp — via a generated SBPL profile (`(allow default)` → `(deny network*)` + `(deny file-write*)` re-opened for the workspace, paths realpath-canonicalized for macOS's `/tmp`,`/var` → `/private`). `wrap_command()` is now a platform dispatcher: bubblewrap on Linux, Seatbelt on macOS. Live-validated on macOS 26 — real network and outside-workspace writes denied while the kernel runs. (#100)
+- **`verify-ledger` GitHub Action — verify what your agent actually did, as a CI gate.** `uses: New1Direction/korgex/.github/actions/verify-ledger@main` recomputes a receipt/journal's hash-chain + causal DAG + Ed25519 signature and **fails the build on tamper**, with zero trust in the tool that produced the ledger. It runs any of the three independent `korg-ledger@v1` verifiers (Rust `korg-verify` from crates.io, JS `npx @korgg/ledger-verify`, or a pinned binary). Self-tested on real CI: an intact ledger passes the gate, a tampered one fails it. (#102, #103)
+
+### Fixed
+- **Stale self-descriptions corrected.** `--resume` is implemented (it replays the verifiable journal back into context) but three places still claimed it wasn't, and the README test badge read 1,263 when the suite is 1,571. `introspect`, the README, and `docs/cli-reference.md` now match shipped reality. (#97, #98)
+
 ## [0.34.0] — 2026-06-05
 
 ### Added
