@@ -1,0 +1,7 @@
+# Render outputs are reproducible from the tapes + crt.sh, and the video
+# flavor may contain third-party footage — keep the recipe, not the renders.
+*.mp4
+*.gif
+*.png
+clip.*
+raw*.mp4
