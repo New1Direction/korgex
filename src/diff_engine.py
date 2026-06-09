@@ -110,11 +110,7 @@ class DiffEngine:
             content_normalized = re.sub(r'\s+', ' ', modified)
             
             if search_normalized in content_normalized:
-                # Find the actual location and replace
-                idx = content_normalized.index(search_normalized)
-                # Map back to original content
-                actual_start = len(modified[:idx])  # approximate
-                # Try to find by line proximity
+                # Find the actual location by line proximity
                 search_lines = search_part.split('\n')
                 for i, line in enumerate(modified.split('\n')):
                     if search_lines[0].strip() in line:
@@ -189,7 +185,7 @@ class DiffEngine:
 
 
 # Tool registration
-from src.tool_base import register_tool, ToolParam
+from src.tool_base import register_tool, ToolParam  # noqa: E402 (registered after the module's functions)
 
 
 def apply_patch(filepath: str, patch_path: str) -> dict:

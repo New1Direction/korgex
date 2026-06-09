@@ -144,8 +144,6 @@ class ModalSandbox(SandboxBase):
             import subprocess
             import os
             
-            results = {"stdout": "", "stderr": "", "exit_code": 0}
-            
             if repo_url:
                 repo_name = repo_url.split("/")[-1].replace(".git", "")
                 os.chdir(tempfile.mkdtemp())

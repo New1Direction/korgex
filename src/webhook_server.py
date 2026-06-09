@@ -105,13 +105,12 @@ def _process_webhook(event: str, data: dict):
         
         elif event == "pull_request" and data.get("action") in ("opened", "labeled"):
             pr = data.get("pull_request", {})
-            labels = [l.get("name", "").lower() for l in pr.get("labels", [])]
+            labels = [lbl.get("name", "").lower() for lbl in pr.get("labels", [])]
             
             if "korgex" in labels:
                 title = pr.get("title", "")
                 body = pr.get("body", "")
                 number = pr.get("number", "")
-                head_sha = pr.get("head", {}).get("sha", "")
                 
                 task = f"Review PR #{number}: {title}\n{body}"
                 _run_korgex(task, repo, clone_url)

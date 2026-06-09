@@ -1435,7 +1435,7 @@ def cmd_repl(resume=False):
 
 # ── Entry Point ──────────────────────────────────────────────────────────
 
-import argparse
+import argparse  # noqa: E402 (imported beside the entry point)
 
 # Map subcommand name → handler. Existing bodies untouched.
 def cmd_providers():

@@ -89,7 +89,7 @@ def codeact_unconfined_warning(platform: str) -> str:
             f"Bash; raw stdlib bypasses the command + egress guards ({hint}).")
 
 
-from src.agent_resolve import (  # resolution helpers, extracted to keep agent.py focused
+from src.agent_resolve import (  # noqa: E402 — extracted helpers, imported after defs to avoid a circular import
     _looks_anthropic, _oauth_provider_for, _oauth_token_and_base,
     _MODEL_ALIASES, subagent_tools, _resolve_params, _resolve_model,
 )
@@ -709,7 +709,8 @@ class KorgexAgent:
         ) as stream:
             for event in stream:
                 if on_first is not None:
-                    on_first(); on_first = None  # first event → clear the thinking spinner
+                    on_first()
+                    on_first = None  # first event → clear the thinking spinner
                 ev_type = getattr(event, "type", None)
                 if not ev_type:
                     continue
@@ -754,7 +755,8 @@ class KorgexAgent:
 
         for chunk in stream:
             if on_first is not None:
-                on_first(); on_first = None  # first chunk → clear the thinking spinner
+                on_first()
+                on_first = None  # first chunk → clear the thinking spinner
             if not chunk.choices:
                 usage = getattr(chunk, "usage", None) or usage  # usage-only final chunk
                 continue

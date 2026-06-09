@@ -447,7 +447,7 @@ def tool_search(query: str, limit: int = 5) -> dict:
 # Additionally, tools registered via register_mcp_tool() route through the
 # MCP server manager instead of an in-process handler.
 
-import inspect
+import inspect  # noqa: E402 (kept beside the MCP-tool registry it supports)
 
 # Track which tool names came from MCP servers (vs. native handlers)
 _MCP_TOOLS: set[str] = set()

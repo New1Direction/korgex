@@ -126,7 +126,6 @@ Don't narrate your internal deliberation. State results and decisions directly.
 """.strip())
 
     # Environment context
-    env_info = _get_environment_info(workdir)
     parts.append(f"""
 # Environment
 You have been invoked in the following environment:
