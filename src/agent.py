@@ -14,8 +14,6 @@ import json
 import os
 import sys
 import time
-from pathlib import Path
-from typing import Optional
 
 from src.tool_abstraction import USER_TOOLS, route_tool_call
 from src import tool_abstraction as _TA
@@ -92,8 +90,8 @@ def codeact_unconfined_warning(platform: str) -> str:
 
 
 from src.agent_resolve import (  # resolution helpers, extracted to keep agent.py focused
-    _looks_anthropic, _OAUTH_BASE_URLS, _oauth_provider_for, _oauth_token_and_base,
-    _READONLY_SUBAGENT_TOOLS, _MODEL_ALIASES, subagent_tools, _resolve_params, _resolve_model,
+    _looks_anthropic, _oauth_provider_for, _oauth_token_and_base,
+    _MODEL_ALIASES, subagent_tools, _resolve_params, _resolve_model,
 )
 
 

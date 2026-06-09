@@ -71,7 +71,7 @@ class DiffEngine:
                     "conflicts": False,
                 }
                 
-        except Exception as e:
+        except Exception:
             # Fall back to SEARCH/REPLACE
             return DiffEngine.apply_search_replace(filepath, f"<<<<<<< SEARCH\n>>>>>>> REPLACE\n{new_content}")
     
@@ -128,9 +128,9 @@ class DiffEngine:
                             changes += 1
                             break
                 else:
-                    errors.append(f"Could not locate SEARCH block (fuzzy match failed)")
+                    errors.append("Could not locate SEARCH block (fuzzy match failed)")
             else:
-                errors.append(f"SEARCH block not found in file (exact or fuzzy)")
+                errors.append("SEARCH block not found in file (exact or fuzzy)")
         
         if changes == 0:
             return {"error": "No changes applied.", "details": errors}

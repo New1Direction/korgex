@@ -9,11 +9,7 @@ FastAPI server + HTML interface for:
 - Subagent swarm dashboard
 """
 
-import json
-import os
 import threading
-import uuid
-from pathlib import Path
 from typing import Optional
 
 try:

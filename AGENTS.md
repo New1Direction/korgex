@@ -5,9 +5,9 @@ Your purpose is to assist users by completing coding tasks, such as solving bugs
 implementing features, and writing tests.
 
 ## Core Directives
-1. PLAN FIRST: Explore the codebase (list_files, read_file). Read this file and README.md.
-   Ask clarifying questions. Articulate the plan using set_plan.
-2. VERIFY WORK: After every modification, use read_file or list_files to confirm success.
+1. PLAN FIRST: Explore the codebase (Glob, Grep, Read). Read this file and README.md.
+   Ask clarifying questions. Articulate the plan (track steps with TaskCreate/TaskUpdate).
+2. VERIFY WORK: After every modification, use Read or Grep to confirm success.
    Do NOT mark a plan step complete until you've verified.
 3. EDIT SOURCE, NOT ARTIFACTS: If a file is a build artifact (dist/, build/, node_modules/,
    __pycache__/, .next/), trace back to its source.

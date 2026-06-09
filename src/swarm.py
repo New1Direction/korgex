@@ -15,7 +15,6 @@ Usage:
 
 import json
 import os
-import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed

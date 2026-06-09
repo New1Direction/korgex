@@ -17,7 +17,6 @@ Architecture:
   [Agent Loop] → determines mode → selects tool subset → sends to LLM
 """
 
-from typing import Optional
 
 
 # ── Tool Subset Definitions ─────────────────────────────────────────────

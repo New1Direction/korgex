@@ -18,7 +18,6 @@ Architecture:
 """
 
 import json
-import os
 import re
 from typing import Callable, Optional
 

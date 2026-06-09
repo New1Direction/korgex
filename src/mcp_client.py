@@ -25,13 +25,11 @@ Lifecycle: initialize → tools/list → tools/call (loop) → shutdown
 import json
 import os
 import subprocess
-import sys
 import threading
-import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 # Cap MCP server stderr capture so a chatty server can't grow memory unbounded.
 # 1000 lines is plenty for post-mortem diagnostics; oldest are dropped first.
@@ -209,7 +207,7 @@ class MCPClient:
                 text=True,
                 bufsize=1,  # Line-buffered
             )
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             return {"error": f"Command not found: {self.config.command}", "status": "failed"}
         except Exception as e:
             return {"error": f"Failed to spawn: {e}", "status": "failed"}
@@ -657,20 +655,20 @@ if __name__ == "__main__":
     print("=== MCP Client Module Test ===\n")
     
     # Verify all components load
-    print(f"  MCPClient class: ✓")
-    print(f"  MCPServerManager class: ✓")
-    print(f"  MCPTool dataclass: ✓")
-    print(f"  MCPServerConfig dataclass: ✓")
-    print(f"  make_request: ✓")
-    print(f"  parse_response: ✓")
-    print(f"  load_mcp_config: ✓")
+    print("  MCPClient class: ✓")
+    print("  MCPServerManager class: ✓")
+    print("  MCPTool dataclass: ✓")
+    print("  MCPServerConfig dataclass: ✓")
+    print("  make_request: ✓")
+    print("  parse_response: ✓")
+    print("  load_mcp_config: ✓")
     
     # Test JSON-RPC message format
     req = make_request("initialize", {"protocolVersion": "2025-03-26"})
     parsed = json.loads(req)
     assert parsed["jsonrpc"] == "2.0"
     assert parsed["method"] == "initialize"
-    print(f"\n  ✓ JSON-RPC 2.0 message format verified")
+    print("\n  ✓ JSON-RPC 2.0 message format verified")
     
     # Test config loading
     test_config = """{
@@ -692,5 +690,5 @@ if __name__ == "__main__":
     assert configs["github"].command == "npx"
     assert configs["github"].args == ["-y", "@modelcontextprotocol/server-github"]
     os.unlink(tmp_path)
-    print(f"  ✓ MCP config parsing verified")
+    print("  ✓ MCP config parsing verified")
     print(f"\n  Ready: {len(configs)} servers from config")

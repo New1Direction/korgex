@@ -13,12 +13,10 @@ Usage:
 """
 
 import os
-import json
 import subprocess
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Optional
 
 
 class SandboxBase:
@@ -143,7 +141,8 @@ class ModalSandbox(SandboxBase):
         
         @self.app.function(image=image, timeout=600)
         def run_in_cloud(cmd: str, repo_url: str = None):
-            import subprocess, os, tempfile
+            import subprocess
+            import os
             
             results = {"stdout": "", "stderr": "", "exit_code": 0}
             

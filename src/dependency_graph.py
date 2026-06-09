@@ -20,7 +20,7 @@ Architecture:
 import os
 import ast
 from pathlib import Path
-from typing import Dict, List, Set, Optional, Any
+from typing import Dict, List, Set, Optional
 
 
 class DependencyAnalyzer:

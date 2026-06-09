@@ -14,7 +14,6 @@ Block 3 changes each turn and is not cached.
 import os
 import platform
 import subprocess
-from pathlib import Path
 
 
 def build_system_prompt(memory_text: str = "", workdir: str = None,
