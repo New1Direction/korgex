@@ -298,15 +298,15 @@ def cmd_default():
     subprocess.Popen([code, str(ext_path)])
 
     print()
-    print(f"  ┌─────────────────────────────────────────────┐")
-    print(f"  │  Korgex is live                           │")
-    print(f"  │                                             │")
+    print("  ┌─────────────────────────────────────────────┐")
+    print("  │  Korgex is live                           │")
+    print("  │                                             │")
     print(f"  │  Dashboard  → http://localhost:{DASHBOARD_PORT:<4}           │")
-    print(f"  │  VS Code    → Press F5 in the new window    │")
-    print(f"  │  Commands   → Cmd+Shift+P → 'Korgex:'     │")
-    print(f"  │                                             │")
-    print(f"  │  korgex stop   to shut down               │")
-    print(f"  └─────────────────────────────────────────────┘")
+    print("  │  VS Code    → Press F5 in the new window    │")
+    print("  │  Commands   → Cmd+Shift+P → 'Korgex:'     │")
+    print("  │                                             │")
+    print("  │  korgex stop   to shut down               │")
+    print("  └─────────────────────────────────────────────┘")
 
 
 def cmd_init():
@@ -335,7 +335,7 @@ def cmd_dashboard():
     """Start just the web dashboard."""
     _start_background_server()
     print(f"  Dashboard: http://localhost:{DASHBOARD_PORT}")
-    print(f"  Press Ctrl+C to stop.")
+    print("  Press Ctrl+C to stop.")
 
 
 def cmd_status():
@@ -346,7 +346,7 @@ def cmd_status():
         print(f"  Dashboard: http://localhost:{DASHBOARD_PORT}")
     else:
         print("  Korgex is not running.")
-        print(f"  Run `korgex` to start.")
+        print("  Run `korgex` to start.")
 
 
 def cmd_stop():
@@ -411,7 +411,7 @@ def cmd_verify():
 
     if not Path(path).exists():
         print(f"  No ledger journal at {path}")
-        print(f"  (set KORG_JOURNAL_PATH or pass: korgex verify <path>)")
+        print("  (set KORG_JOURNAL_PATH or pass: korgex verify <path>)")
         return 1
 
     n = len(load_journal_raw(path))  # real event count (array OR jsonl), not line count
@@ -1435,7 +1435,7 @@ def cmd_repl(resume=False):
 
 # ── Entry Point ──────────────────────────────────────────────────────────
 
-import argparse
+import argparse  # noqa: E402 (imported beside the entry point)
 
 # Map subcommand name → handler. Existing bodies untouched.
 def cmd_providers():

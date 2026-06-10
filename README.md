@@ -6,7 +6,7 @@
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/v/korgex?color=3fb950&label=pypi" alt="PyPI version"></a>
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/pyversions/korgex?color=2dd4bf" alt="Python versions"></a>
   <a href="https://github.com/New1Direction/korgex/actions/workflows/tests.yml"><img src="https://github.com/New1Direction/korgex/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/tests-1%2C571%20passing-3fb950" alt="tests">
+  <img src="https://img.shields.io/badge/tests-1%2C586%20passing-3fb950" alt="tests">
   <a href="https://registry.modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-registry-2dd4bf" alt="MCP registry"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
@@ -541,7 +541,7 @@ korgex/
 │   └── ...
 ├── docs/                     # CLI reference, comparison, getting-started, tools-reference, …
 ├── spec/korg-ledger-v1/      # the ledger spec (SPEC.md, EVENTS.md)
-├── tests/                    # ~1,571 tests
+├── tests/                    # ~1,586 tests
 ├── .github/workflows/        # Linux CI (3.10–3.13) + PyPI publisher (OIDC)
 ├── pyproject.toml
 └── README.md
@@ -560,7 +560,7 @@ ruff check src/                                   # lint
 pytest -q                                         # the full suite
 ```
 
-The suite is **~1,285 tests** with no live LLM calls (everything is unit-tested) and runs on Linux CI across **Python 3.10, 3.11, 3.12, 3.13** on every push and PR. Major areas: the agent loop (routing, provider schemas, mode/model resolution, loop guards, the stall classifier, compaction), tools (fuzzy Edit, edit-freshness, background Bash, web), the verifiable ledger (hash-chain + causal DAG, redaction, the Ed25519 signed bus), CodeAct (kernel isolation, fuel, the tool bridge), MCP (namespaced multi-server router, OAuth refresh, full round-trip), prompt caching, skills (trust tiers, self-learning, the curator), and the REPL.
+The suite is **~1,586 tests** with no live LLM calls (everything is unit-tested) and runs on Linux CI across **Python 3.10, 3.11, 3.12, 3.13** on every push and PR. Major areas: the agent loop (routing, provider schemas, mode/model resolution, loop guards, the stall classifier, compaction), tools (fuzzy Edit, edit-freshness, background Bash, web), the verifiable ledger (hash-chain + causal DAG, redaction, the Ed25519 signed bus), CodeAct (kernel isolation, fuel, the tool bridge), MCP (namespaced multi-server router, OAuth refresh, full round-trip), prompt caching, skills (trust tiers, self-learning, the curator), and the REPL.
 
 ---
 
@@ -594,7 +594,8 @@ To build locally for inspection: `python -m build` then `python -m twine check d
 
 These exist today; PRs welcome.
 
-- **OpenAI streaming has fewer rendered events than Anthropic.** Anthropic emits thinking blocks and message-delta usage; OpenAI emits only text and tool-call chunks. Both render correctly, but the TUI is richer for Anthropic.- **Dashboard authentication is not implemented.** Don't expose port 8090 publicly without an auth-terminating reverse proxy in front.
+- **OpenAI streaming has fewer rendered events than Anthropic.** Anthropic emits thinking blocks and message-delta usage; OpenAI emits only text and tool-call chunks. Both render correctly, but the TUI is richer for Anthropic.
+- **Dashboard authentication is not implemented.** Don't expose port 8090 publicly without an auth-terminating reverse proxy in front.
 - **The VS Code sidecar is a legacy companion** to the dashboard; korgex's primary interface is the terminal REPL.
 
 ---

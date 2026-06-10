@@ -257,11 +257,11 @@ def _record_best_of_n(ledger, prompt, attempts, winner, parent_seq) -> int:
 def multi_modal_sweep(lenses, runner, base_prompt: str) -> list:
     """Run one understand-agent per lens CONCURRENTLY — each blind to the others.
 
-    Lenses are independent, so this is a genuine fan-out. `l=lens` binds the loop
+    Lenses are independent, so this is a genuine fan-out. `ln=lens` binds the loop
     var per-thunk (avoids late-binding closure capture).
     """
     thunks = [
-        (lambda l=lens: runner("understand", f"[{l} lens] Analyze for this task: {base_prompt}"))
+        (lambda ln=lens: runner("understand", f"[{ln} lens] Analyze for this task: {base_prompt}"))
         for lens in lenses
     ]
     return parallel(thunks)

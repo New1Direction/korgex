@@ -5,9 +5,7 @@ Wraps the GitHub REST API and gh CLI for full repository management.
 """
 
 import os
-import json
 import subprocess
-from typing import Optional
 
 GITHUB_TOKEN_ENV = "KORGEX_GITHUB_TOKEN"
 GITHUB_API = "https://api.github.com"

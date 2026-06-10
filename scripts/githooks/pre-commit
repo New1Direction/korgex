@@ -18,11 +18,11 @@ set -u
 # so bare "hermes"/"nousresearch" are intentionally absent; only the RE-specific
 # module `hermes_tools` is blocked. \bMITM\b (word-bounded) avoids the "comMITMent"
 # false positive; the trailing grep -v strips other benign substrings.
-PATTERN='mitmproxy|manual mitm|\bmitm\b|reverse[- ]?engineer|captured from (claude|the api|api\.)|claude max|mahoraga|\bjules\b|hermes_tools|kikkaskills|kabukiskills|intercepted from'
+PATTERN='mitmproxy|manual mitm|\bmitm\b|reverse[- ]?engineer|captured from (claude|the api|api\.)|claude max|mahoraga|\bjules\b|hermes_tools|kikkaskills|kabukiskills|intercepted from|ghidra|pyghidra'
 
 # 1) Sensitive file NAMES being added.
 bad_files=$(git diff --cached --name-only --diff-filter=A \
-  | grep -iE 'RE[_-]?FINDINGS|reverse.?eng|[-_]assessment[-_].*\.html$|_mitm' || true)
+  | grep -iE 'RE[_-]?FINDINGS|reverse.?eng|[-_]assessment[-_].*\.html$|_mitm|ghidra|\.gpr$' || true)
 
 # 2) Sensitive ADDED lines (only new content, not context). The guard's own files
 # legitimately contain these patterns (the definition + its docs), so exclude them.

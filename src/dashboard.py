@@ -9,15 +9,11 @@ FastAPI server + HTML interface for:
 - Subagent swarm dashboard
 """
 
-import json
-import os
 import threading
-import uuid
-from pathlib import Path
 from typing import Optional
 
 try:
-    from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.responses import HTMLResponse, JSONResponse
     import uvicorn
     FASTAPI_AVAILABLE = True
@@ -368,7 +364,7 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
 
 
 # Tool registration
-from src.tool_base import register_tool, ToolParam
+from src.tool_base import register_tool, ToolParam  # noqa: E402 (registered after the module's HTML/handlers)
 
 
 @register_tool("start_dashboard", "Starts the Korgex web steering dashboard.", [

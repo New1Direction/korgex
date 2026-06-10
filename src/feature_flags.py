@@ -7,9 +7,7 @@ beta headers sent with API requests, just like the anthropic-beta header.
 Flags also control runtime behavior: tool availability, model settings, etc.
 """
 
-import os
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 @dataclass

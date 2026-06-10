@@ -834,20 +834,13 @@ def tool_analyze_image(filepath: str, question: str = None, context: dict = None
 def tool_grok_imagine(prompt: str, aspect_ratio: str = "1:1", resolution: str = "1k",
                        n: int = 1, context: dict = None):
     """Generate images via xAI Grok Imagine API using grok-build OAuth."""
-    import base64, json as _json
+    import base64
     import httpx
 
     from src.model_router import GrokClient
 
     client = GrokClient()
     token = client._ensure_token()
-
-    # Map aspect ratio to width,height arrays
-    ar_map = {
-        "1:1": [1, 1], "3:2": [3, 2], "2:3": [2, 3],
-        "16:9": [16, 9], "9:16": [9, 16],
-    }
-    ar = ar_map.get(aspect_ratio, [1, 1])
 
     body = {
         "model": "grok-imagine-image",

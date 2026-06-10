@@ -66,3 +66,10 @@ def test_guard_blocks_reverse_engineering_and_mitm(tmp_path):
 
 def test_guard_blocks_re_findings_filename(tmp_path):
     assert _run_guard(tmp_path, "RE_FINDINGS.md", "anything\n") == 1
+
+
+def test_guard_blocks_ghidra_project_files(tmp_path):
+    # Ghidra / pyghidra-mcp RE output must not enter the public repo.
+    # Blocked by filename (.gpr) and by content ("ghidra").
+    assert _run_guard(tmp_path, "my_project.gpr", "binary\n") == 1
+    assert _run_guard(tmp_path, "notes.py", "# opened in ghidra to inspect the binary\n") == 1

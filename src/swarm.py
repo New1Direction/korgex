@@ -15,7 +15,6 @@ Usage:
 
 import json
 import os
-import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -258,7 +257,7 @@ class AgentSwarm:
 
 
 # Tool registration
-from src.tool_base import register_tool, ToolParam
+from src.tool_base import register_tool, ToolParam  # noqa: E402 (registered after the module's functions)
 
 
 @register_tool("swarm_analyze_pr", "Runs multiple specialist agents (test, security, refactor) in parallel on a PR.", [

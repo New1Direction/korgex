@@ -4,12 +4,9 @@ Korgex Multimodal Vision — Screenshot & UI analysis.
 Integrates with browser automation for visual testing and screenshot capture.
 """
 
-import os
-import json
 import base64
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 # Vision backends
 try:

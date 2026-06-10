@@ -14,7 +14,6 @@ Block 3 changes each turn and is not cached.
 import os
 import platform
 import subprocess
-from pathlib import Path
 
 
 def build_system_prompt(memory_text: str = "", workdir: str = None,
@@ -127,7 +126,6 @@ Don't narrate your internal deliberation. State results and decisions directly.
 """.strip())
 
     # Environment context
-    env_info = _get_environment_info(workdir)
     parts.append(f"""
 # Environment
 You have been invoked in the following environment:

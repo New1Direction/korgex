@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>korgex, explained — the AI coding helper that keeps the receipts</title>
+<meta name="description" content="korgex in plain English: an AI coding helper for your terminal that writes code, runs your tests, works with any AI, and keeps a tamper-evident record you can check.">
+<style>
+  :root{
+    --bg:#060B16; --surface:#0B1322; --surface-2:#0E1A2E; --line:#1B2A45; --line-2:#26395c;
+    --text:#DCEEFF; --muted:#92ABCC; --faint:#5E739A;
+    --cyan:#2DE2FF; --blue:#2D9BFF; --green:#4DFFA6; --yellow:#FFD23F; --magenta:#B48CFF; --steel:#5E82A8;
+    --measure:68ch; --r:16px;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,Helvetica,Arial,sans-serif;
+    --ease:cubic-bezier(.16,1,.3,1);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;color:var(--text);font-family:var(--sans);line-height:1.65;-webkit-font-smoothing:antialiased;
+    background:
+      radial-gradient(1100px 560px at 82% -8%, rgba(45,155,255,.13), transparent 60%),
+      radial-gradient(900px 520px at -8% 6%, rgba(180,140,255,.10), transparent 55%),
+      var(--bg);}
+  a{color:var(--cyan);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1000px;margin:0 auto;padding:clamp(1.1rem,2.4vw,2.4rem)}
+  .eyebrow{font-family:var(--mono);font-size:.74rem;letter-spacing:.24em;text-transform:uppercase;color:var(--faint)}
+
+  /* ── hero ── */
+  header.hero{padding:clamp(2rem,7vw,5rem) 0 clamp(1.5rem,4vw,3rem)}
+  .wordmark{font-family:var(--mono);font-weight:700;font-size:clamp(2.6rem,9vw,5.2rem);letter-spacing:-.02em;line-height:.95;margin:.5rem 0 .2rem;
+    background:linear-gradient(180deg,#F4FBFF 0%,#d3e6f9 28%,#8fadd1 50%,#557492 51%,#a6c6e6 74%,#eef6ff 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero h1{font-size:clamp(1.5rem,3.6vw,2.4rem);font-weight:600;line-height:1.18;letter-spacing:-.01em;margin:.4rem 0 .2rem;max-width:18ch}
+  .hero .lede{font-size:clamp(1.05rem,2.2vw,1.3rem);color:var(--muted);max-width:54ch;margin:.7rem 0 1.4rem}
+  .hero .lede strong{color:var(--text);font-weight:600}
+  .cta{display:flex;flex-wrap:wrap;gap:.7rem;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:.5rem;font-weight:600;font-size:.98rem;padding:.7rem 1.15rem;border-radius:12px;transition:transform .18s var(--ease),box-shadow .18s var(--ease),border-color .18s}
+  .btn.primary{color:#04121b;background:linear-gradient(180deg,#7ff0ff,#2DE2FF);box-shadow:0 12px 30px -12px rgba(45,226,255,.7)}
+  .btn.primary:hover{transform:translateY(-2px);text-decoration:none}
+  .btn.ghost{color:var(--text);border:1px solid var(--line-2);background:var(--surface)}
+  .btn.ghost:hover{border-color:var(--cyan);transform:translateY(-2px);text-decoration:none}
+  .hero-chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.3rem}
+  .chip{font-family:var(--mono);font-size:.72rem;color:var(--muted);border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:.3rem .6rem}
+
+  /* ── generic section ── */
+  section{padding:clamp(1.6rem,4vw,3rem) 0;border-top:1px solid var(--line)}
+  h2{font-size:clamp(1.5rem,3.4vw,2.1rem);letter-spacing:-.01em;line-height:1.18;margin:.1rem 0 .3rem}
+  .sub{color:var(--muted);max-width:var(--measure);margin:.2rem 0 1.2rem}
+  p{max-width:var(--measure)}
+  strong{color:#F4FBFF}
+  .plain{color:var(--magenta);font-style:normal;font-weight:600}
+
+  /* ── “big idea” chain ── */
+  .chain{display:flex;flex-wrap:wrap;align-items:stretch;gap:.5rem;margin:1.2rem 0 .4rem}
+  .node{flex:1 1 130px;min-width:120px;border:1px solid var(--line-2);background:var(--surface);border-radius:12px;padding:.7rem .8rem}
+  .node .t{font-family:var(--mono);font-size:.7rem;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+  .node .h{font-family:var(--mono);color:var(--cyan);font-size:.95rem;margin-top:.2rem}
+  .arrow{align-self:center;color:var(--steel);font-size:1.2rem}
+  .verdict{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:.9rem}
+  .verdict .v{flex:1 1 260px;border-radius:12px;padding:.7rem .9rem;border:1px solid var(--line-2);background:var(--surface);display:flex;gap:.6rem;align-items:flex-start}
+  .verdict .ok{border-color:rgba(77,255,166,.4)} .verdict .ok b{color:var(--green)}
+  .verdict .bad{border-color:rgba(255,85,102,.4)} .verdict .bad b{color:#FF5566}
+  .verdict .ic{font-size:1.1rem;line-height:1.4}
+
+  /* ── bento cards ── */
+  .bento{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.8rem;margin-top:.6rem}
+  .card{border:1px solid var(--line);background:linear-gradient(180deg,var(--surface),var(--surface-2));border-radius:var(--r);padding:1.1rem;transition:transform .18s var(--ease),border-color .18s}
+  .card:hover{transform:translateY(-3px);border-color:var(--line-2)}
+  .card .ic{font-size:1.5rem;line-height:1}
+  .card h3{font-size:1.05rem;margin:.6rem 0 .3rem}
+  .card p{color:var(--muted);font-size:.95rem;margin:0}
+
+  /* ── terminal ── */
+  .term{border:1px solid var(--line-2);border-radius:14px;overflow:hidden;background:#04080F;margin:.8rem 0;box-shadow:0 30px 60px -40px rgba(0,0,0,.9)}
+  .term .bar{display:flex;gap:.45rem;align-items:center;padding:.6rem .8rem;background:#0A1322;border-bottom:1px solid var(--line)}
+  .term .bar i{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .term .bar .r{background:#FF5F57}.term .bar .y{background:#FEBC2E}.term .bar .g{background:#28C840}
+  .term .bar span{margin-left:.5rem;font-family:var(--mono);font-size:.72rem;color:var(--faint)}
+  .term pre{margin:0;padding:1rem 1.1rem;overflow:auto;font-family:var(--mono);font-size:.86rem;line-height:1.7}
+  .term .p{color:var(--cyan)} .term .o{color:var(--muted)} .term .g{color:var(--green)} .term .d{color:var(--faint)}
+
+  /* ── steps ── */
+  .steps{display:grid;gap:.8rem;margin-top:.6rem}
+  .step{display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start}
+  .step .n{font-family:var(--mono);font-weight:700;color:#04121b;background:linear-gradient(180deg,#7ff0ff,#2DE2FF);width:2rem;height:2rem;border-radius:10px;display:grid;place-items:center}
+  .step .body{min-width:0}
+  .step h3{margin:.2rem 0 .3rem;font-size:1.05rem}
+  .step code, .inline{font-family:var(--mono);font-size:.85em;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:.08em .4em;color:#BFE0FF}
+  .step pre{margin:.4rem 0 0;background:#04080F;border:1px solid var(--line);border-radius:10px;padding:.7rem .9rem;overflow:auto;font-family:var(--mono);font-size:.84rem;color:#CDE6FF}
+
+  /* ── safety ── */
+  .safe{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:.8rem;margin-top:.6rem}
+  .safe .s{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:1rem}
+  .safe .s b{color:var(--text)} .safe .s p{color:var(--muted);font-size:.93rem;margin:.3rem 0 0}
+
+  footer{border-top:1px solid var(--line);padding:2rem 0 3rem;color:var(--faint);font-size:.9rem;margin-top:1rem}
+  footer a{color:var(--muted)} footer .links{display:flex;flex-wrap:wrap;gap:1.1rem;margin-bottom:.7rem}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn,.card{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="eyebrow">Plain-English guide</span>
+    <div class="wordmark">korgex</div>
+    <h1>The AI coding helper that keeps the receipts.</h1>
+    <p class="lede">Tell it what you want in everyday words — <em class="plain">“fix the failing test,” “add a sign-up page”</em> — and it reads your code, makes the change, runs your tests, and shows its work. <strong>Then it hands you a record you can actually check.</strong> Free, open-source, and it works with whatever AI you like.</p>
+    <div class="cta">
+      <a class="btn primary" href="#start">Try it in 60 seconds →</a>
+      <a class="btn ghost" href="#idea">What makes it different</a>
+    </div>
+    <div class="hero-chips">
+      <span class="chip">free &amp; open-source</span>
+      <span class="chip">works in your terminal</span>
+      <span class="chip">any AI: Claude · ChatGPT · Gemini · local</span>
+      <span class="chip">no lock-in</span>
+    </div>
+  </header>
+
+  <main>
+
+    <section id="what">
+      <h2>What is it, really?</h2>
+      <p class="sub">Think of a very capable junior developer who lives in your terminal.</p>
+      <p>You describe a job in plain language. korgex looks through your project, figures out a plan, edits the right files, runs the tests to check it worked, and tells you exactly what it did. You stay in control — it can ask before making big changes, and you can undo anything.</p>
+      <p>The twist that nothing else has: <strong>everything it does is written down in a way that can’t be quietly changed later.</strong> That’s the “receipts.”</p>
+    </section>
+
+    <section id="idea">
+      <h2>The big idea: AI you can <em class="plain">check</em>, not just trust</h2>
+      <p class="sub">Most AI tools ask you to take their word for it. korgex gives you proof.</p>
+      <p>As it works, korgex keeps a logbook. Every step — every file it read, every command it ran — is <strong>sealed to the step before it</strong>, like links in a chain. If anyone later changes, removes, or reorders even one entry, the chain visibly breaks and korgex points to exactly where.</p>
+
+      <div class="chain" aria-label="Each step is sealed to the one before it">
+        <div class="node"><div class="t">step 1</div><div class="h">your request</div></div>
+        <div class="arrow">→</div>
+        <div class="node"><div class="t">step 2</div><div class="h">read the code</div></div>
+        <div class="arrow">→</div>
+        <div class="node"><div class="t">step 3</div><div class="h">make the change</div></div>
+        <div class="arrow">→</div>
+        <div class="node"><div class="t">step 4</div><div class="h">run the tests</div></div>
+      </div>
+      <div class="verdict">
+        <div class="v ok"><span class="ic">✓</span><div><b>Nothing touched</b> — the record checks out, start to finish.</div></div>
+        <div class="v bad"><span class="ic">✗</span><div><b>Something changed</b> — the chain breaks and shows the exact spot.</div></div>
+      </div>
+      <p style="margin-top:1rem">Why care? Audits, compliance, debugging, or just peace of mind — you get honest, checkable proof of what the AI actually did, instead of hoping it behaved.</p>
+    </section>
+
+    <section id="can">
+      <h2>What it can do</h2>
+      <p class="sub">The everyday stuff, plus a few things no other coding assistant offers.</p>
+      <div class="bento">
+        <div class="card"><div class="ic">⌨️</div><h3>Writes &amp; fixes code</h3><p>Reads your project, makes the change, and edits the exact lines — not a wall of copy-paste.</p></div>
+        <div class="card"><div class="ic">✅</div><h3>Runs your tests</h3><p>It checks its own work by running your test suite, so you get changes that actually pass.</p></div>
+        <div class="card"><div class="ic">🔌</div><h3>Any AI you like</h3><p>Claude, ChatGPT, Gemini, Grok, or a private model on your own computer. Switch anytime — no lock-in.</p></div>
+        <div class="card"><div class="ic">🧾</div><h3>Keeps the receipts</h3><p>A tamper-evident record of every step you can verify later with one command.</p></div>
+        <div class="card"><div class="ic">🧩</div><h3>Plugs into your tools</h3><p>Connects to GitHub, your files, databases and more through open “MCP” connectors.</p></div>
+        <div class="card"><div class="ic">↩️</div><h3>Undo anything</h3><p>A rewind log lets you roll files back to before any step. Nothing is one-way.</p></div>
+      </div>
+    </section>
+
+    <section id="start">
+      <h2>Try it in 60 seconds</h2>
+      <p class="sub">If you can open a terminal, you can run korgex.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="n">1</div>
+          <div class="body">
+            <h3>Install it</h3>
+            <p>One line. (Needs Python 3.10 or newer.)</p>
+            <pre>pip install -U korgex</pre>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n">2</div>
+          <div class="body">
+            <h3>Connect an AI</h3>
+            <p>Run <code>korgex setup</code> and paste a key from whichever provider you use — or set one and go.</p>
+            <pre>export ANTHROPIC_API_KEY="…"     # or OPENAI_API_KEY, or a local model</pre>
+          </div>
+        </div>
+        <div class="step">
+          <div class="n">3</div>
+          <div class="body">
+            <h3>Ask for something — then check the receipt</h3>
+            <p>Describe the job in plain words. When it’s done, prove the run wasn’t altered.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="term" role="img" aria-label="Example korgex session adding a health-check endpoint, then verifying the record">
+        <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i><span>your terminal</span></div>
+<pre><span class="p">$ korgex</span> <span class="o">"add a /healthz endpoint that returns 200 with uptime"</span>
+<span class="d">➤ Read(routes.py)  ➤ Edit(routes.py)  ➤ Bash(pytest -q)</span>
+<span class="g">✓ Added GET /healthz returning {"status":"ok","uptime_seconds":…} — tests pass</span>
+
+<span class="p">$ korgex verify</span>
+<span class="g">✓ record intact — 7 steps, chain verified end-to-end</span></pre>
+      </div>
+    </section>
+
+    <section id="safe">
+      <h2>Is it safe to let it loose?</h2>
+      <p class="sub">It’s built cautious. The powerful stuff is off until you turn it on.</p>
+      <div class="safe">
+        <div class="s"><b>Asks before risky edits</b><p>Big or sensitive changes show you a diff and wait for your “yes.”</p></div>
+        <div class="s"><b>Blocks dangerous commands</b><p>A built-in guard refuses obviously destructive shell commands — and records that it did.</p></div>
+        <div class="s"><b>Runs code in a sandbox</b><p>When it executes code for you, it can be boxed off from your network and files.</p></div>
+        <div class="s"><b>Watches what leaves</b><p>An optional guard flags secrets or large data trying to leave your machine.</p></div>
+      </div>
+    </section>
+
+    <section id="why">
+      <h2>Why people choose it</h2>
+      <p>Two reasons, in plain terms. <strong>You’re never locked to one AI company</strong> — korgex speaks to all the major ones and to private models, so you can pick the best (or cheapest) for the job and switch whenever. And <strong>you can prove what happened</strong> — the checkable record means you don’t have to take an AI’s word for anything. As far as we know, no other coding assistant gives you that.</p>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="links">
+      <a href="https://github.com/New1Direction/korgex">GitHub</a>
+      <a href="https://pypi.org/project/korgex/">PyPI</a>
+      <a href="../README.md">Full README</a>
+      <a href="getting-started.md">Getting started</a>
+      <a href="cli-reference.md">CLI reference</a>
+    </div>
+    <p>korgex is free and open-source under the MIT license. This page is a plain-language overview — open it in any browser; it needs nothing installed.</p>
+  </footer>
+
+</div>
+</body>
+</html>

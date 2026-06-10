@@ -31,7 +31,6 @@ import os
 import re
 import yaml
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 MEMORY_DIR = None  # Set during init
@@ -284,7 +283,7 @@ def _remove_from_index(name: str):
     with open(index_path) as f:
         lines = f.readlines()
     
-    lines = [l for l in lines if f"]({name}.md)" not in l]
+    lines = [ln for ln in lines if f"]({name}.md)" not in ln]
     
     with open(index_path, "w") as f:
         f.writelines(lines)

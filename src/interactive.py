@@ -331,8 +331,7 @@ def should_confirm_edit(file_path: str, old_content: str,
     ]
     
     old_lines = len(old_content.splitlines())
-    new_lines = len(new_content.splitlines())
-    
+
     # Check if it's a critical file
     basename = os.path.basename(file_path)
     if any(crit in basename for crit in CRITICAL_FILES):

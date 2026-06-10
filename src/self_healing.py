@@ -18,7 +18,6 @@ Architecture:
 """
 
 import json
-import os
 import re
 from typing import Callable, Optional
 
@@ -212,7 +211,6 @@ class TDDHealer:
         temp_patch = ".korgex_heal.patch"
         
         # Write patch file to sandbox
-        escaped = patch.replace("'", "'\\''")
         self.sandbox.run(
             f"cat << 'KORGEOF' > {temp_patch}\n{patch}\nKORGEOF"
         )

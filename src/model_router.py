@@ -23,12 +23,10 @@ Prefix caching means the system prompt stays cached even when models change.
 import json
 import os
 import time
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Optional, Protocol
+from dataclasses import dataclass
+from typing import Optional, Protocol
 
 # For cost tracking and display
-from src.feature_flags import is_enabled
 
 
 def _to_epoch(value, ms: bool = False) -> float:
@@ -1519,5 +1517,5 @@ if __name__ == "__main__":
     p3 = router.get_current_params()
     
     assert p1["model"] == p3["model"], "Context lost during plan→execute→plan swap"
-    print(f"\n  ✓ Context preserved across plan→execute→plan swap")
+    print("\n  ✓ Context preserved across plan→execute→plan swap")
     print(f"  ✓ Model swap count: {router._swap_count}")

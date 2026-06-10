@@ -7,13 +7,9 @@ and a handler. The dispatch system routes tool calls to the right handler.
 Param types: STRING, BOOLEAN, ARRAY, OBJECT (a compact schema, not full JSON Schema).
 """
 
-import json
 import os
-import shlex
 import subprocess
-import tempfile
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Callable, Optional
 
 TOOL_REGISTRY = {}

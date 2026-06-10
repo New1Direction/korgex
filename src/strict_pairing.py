@@ -26,7 +26,6 @@ Key design (strict tool-result pairing):
 
 import hashlib
 import json
-import os
 import secrets
 import time
 from typing import Any, Optional

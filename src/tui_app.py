@@ -63,7 +63,6 @@ def run_app(repl) -> None:
     import shutil
 
     from prompt_toolkit.application import Application
-    from prompt_toolkit.application.current import get_app
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout import HSplit, Layout, Window
     from prompt_toolkit.layout.controls import FormattedTextControl

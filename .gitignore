@@ -4,6 +4,11 @@ RE_FINDINGS*.md
 *-assessment-*.html
 *reverse-engineering*
 *-RE-*.md
+# Ghidra / binary RE projects (pyghidra-mcp output) — must never enter the public tree
+pyghidra_mcp_projects/
+*ghidra*
+*.gpr
+*.rep
 
 # Python
 __pycache__/
@@ -37,7 +42,6 @@ secrets*
 *.swp
 *.swo
 *~
-.DS_Store
 
 # Seluj
 .seluj/
@@ -55,3 +59,9 @@ ecosystem_audit_*.html
 
 # playwright MCP test artifacts
 .playwright-mcp/
+
+# Cloudflare wrangler local state
+.wrangler/
+
+# uv lock (dev convenience; project builds via setuptools/pip from pyproject)
+uv.lock
