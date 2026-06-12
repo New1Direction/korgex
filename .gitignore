@@ -65,3 +65,7 @@ ecosystem_audit_*.html
 
 # uv lock (dev convenience; project builds via setuptools/pip from pyproject)
 uv.lock
+
+# Fumadocs docs site — its own deployed project (korgex-docs.pages.dev), kept out
+# of the korgex tree on purpose; deploy via wrangler from fumadocs-site/out
+fumadocs-site/
