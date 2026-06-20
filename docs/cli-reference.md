@@ -54,6 +54,10 @@ korgex --quiet "list all functions exported from src/utils.py"
 | `korgex stop` | Send SIGTERM (then SIGKILL) to the background backend. |
 | `korgex install-extension` | Install the compiled `.vsix` into your local VS Code. |
 | `korgex verify [journal]` | Verify the ledger hash-chain is intact (tamper-evidence proof); exits 0 if intact, 1 if tampered (and prints the offending `seq_id`). Defaults to `$KORG_JOURNAL_PATH` or `.korg/journal.jsonl`. |
+| `korgex near anchor [journal-or-receipt]` | Generate a privacy-preserving NEAR anchor payload for a ledger or signed receipt; prints a near-cli-js call example. |
+| `korgex omnigraph export [journal-or-receipt]` | Export a verified run into Omnigraph-loadable JSONL plus an optional `.pg` schema. |
+| `korgex omnigraph write [journal-or-receipt] --store graph.omni` | Export then load a verified run into an Omnigraph branch with `omnigraph load`. |
+| `korgex demo near-omnigraph` | Print or write the full Korgex → Omnigraph → NEAR demo workflow. |
 | `korgex drift` | Scan persistent memories for drift against their recorded source baselines; exits 0 if none drifted, 1 if drift is found. |
 
 ---
@@ -129,6 +133,17 @@ korgex --model anthropic/claude-sonnet-4.6 "refactor the parser"
 
 # Prove a recorded run's ledger was not altered (exit 0 = intact, 1 = tampered)
 korgex verify .korg/journal.jsonl
+
+# Mint a signed proof, then prepare a NEAR testnet anchor payload with hashes only
+korgex receipt .korg/journal.jsonl --sign --claim "fixed issue #123" --out .korg/receipts/issue-123.json
+korgex near anchor .korg/receipts/issue-123.json --account you.testnet --contract korgex-anchor.testnet
+
+# Export the same proof into an Omnigraph dev graph branch
+korgex omnigraph export .korg/receipts/issue-123.json --out .korg/omnigraph/issue-123.jsonl --schema-out .korg/omnigraph/korgex-dev.pg
+korgex omnigraph write .korg/receipts/issue-123.json --store devgraph.omni --branch agent/issue-123 --from main
+
+# Generate the full demo script
+korgex demo near-omnigraph --account YOU.testnet --contract korgex-anchor.YOU.testnet --write .korg/demos/near-omnigraph.sh
 
 # Scan persistent memories for drift against their source baselines
 korgex drift

@@ -48,6 +48,9 @@ secrets*
 *.log
 node_modules/
 
+# Rust examples/contracts
+target/
+
 # OS
 .DS_Store
 Thumbs.db

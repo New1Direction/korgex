@@ -759,6 +759,233 @@ def _receipt_share(file_path: str, *, out: str | None = None, publish: bool = Fa
     return 0
 
 
+def cmd_near():
+    """Create a privacy-preserving NEAR anchor payload for a Korgex journal or receipt."""
+    from src import near_anchor as NA
+
+    argv = sys.argv[1:]
+    toks = argv[argv.index("near") + 1:] if "near" in argv else []
+    if not toks or toks[0] in ("-h", "--help"):
+        print("  usage: korgex near anchor [journal-or-receipt] [--account you.testnet]")
+        print("         [--contract contract.testnet] [--network testnet] [--out anchor.json]")
+        print("         [--artifact-uri URI] [--memo TEXT] [--print-json]")
+        print("  creates a NEAR-ready proof payload; it never puts prompts/code/secrets on-chain")
+        return 0 if toks else 1
+
+    action, rest = toks[0], toks[1:]
+    if action != "anchor":
+        print(f"  unknown near action: {action} — use: anchor")
+        return 1
+
+    ap = argparse.ArgumentParser(prog="korgex near anchor")
+    ap.add_argument("path", nargs="?")
+    ap.add_argument("--account")
+    ap.add_argument("--contract")
+    ap.add_argument("--network", default="testnet")
+    ap.add_argument("--method", default=NA.DEFAULT_METHOD)
+    ap.add_argument("--artifact-uri")
+    ap.add_argument("--memo")
+    ap.add_argument("--out", "-o")
+    ap.add_argument("--repo", default=os.getcwd())
+    ap.add_argument("--near-bin", default="near")
+    ap.add_argument("--print-json", action="store_true")
+    try:
+        a = ap.parse_args(rest)
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 2
+
+    path = a.path or os.environ.get("KORG_JOURNAL_PATH") or str(Path(".korg") / "journal.jsonl")
+    if not Path(path).exists():
+        print(f"  No journal or receipt at {path}")
+        print("  mint one first: korgex receipt <journal> --sign")
+        return 1
+
+    try:
+        anchor = NA.build_anchor_from_path(
+            path,
+            account_id=a.account,
+            contract_id=a.contract,
+            network=a.network,
+            method_name=a.method,
+            artifact_uri=a.artifact_uri,
+            memo=a.memo,
+            repo=a.repo,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"  NEAR anchor failed: {exc}")
+        return 1
+
+    out = a.out or os.path.join(
+        ".korg", "near", f"anchor-{anchor['proof']['ledger_root'][:12]}.json"
+    )
+    try:
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump(anchor, fh, indent=2)
+    except OSError as exc:
+        print(f"  could not write {out}: {exc}")
+        return 1
+
+    print("  ✓ NEAR anchor payload ready")
+    print(f"    root:   {anchor['proof']['ledger_root']}")
+    print(f"    events: {anchor['proof']['event_count']}")
+    print(f"    file:   {out}")
+    print("    on-chain payload contains hashes only — prompts/code/tool outputs stay off-chain")
+    print("    near-cli-js example:")
+    print(f"      {NA.near_cli_js_command(anchor, near_bin=a.near_bin)}")
+    if a.print_json:
+        print(json.dumps(anchor, indent=2))
+    return 0
+
+
+def cmd_omnigraph():
+    """Export Korgex verifiable runs into Omnigraph dev-graph records, or load them."""
+    from src import omnigraph_export as OG
+
+    argv = sys.argv[1:]
+    toks = argv[argv.index("omnigraph") + 1:] if "omnigraph" in argv else []
+    if not toks or toks[0] in ("-h", "--help"):
+        print("  usage: korgex omnigraph export [journal-or-receipt] --out korgex.jsonl [--schema-out korgex.pg]")
+        print("         korgex omnigraph write  [journal-or-receipt] --store graph.omni [--branch agent/task] [--from main]")
+        print("  exports hashes + graph facts only; prompts/code/tool outputs stay out of Omnigraph")
+        return 0 if toks else 1
+
+    action, rest = toks[0], toks[1:]
+    if action == "export":
+        ap = argparse.ArgumentParser(prog="korgex omnigraph export")
+        ap.add_argument("path", nargs="?")
+        ap.add_argument("--out", "-o")
+        ap.add_argument("--schema-out")
+        try:
+            a = ap.parse_args(rest)
+        except SystemExit as exc:
+            return exc.code if isinstance(exc.code, int) else 2
+        path = a.path or os.environ.get("KORG_JOURNAL_PATH") or str(Path(".korg") / "journal.jsonl")
+        out = a.out or str(Path(".korg") / "omnigraph" / "korgex-export.jsonl")
+        if not Path(path).exists():
+            print(f"  No journal or receipt at {path}")
+            return 1
+        try:
+            summary = OG.export_records(path, out_path=out, schema_out=a.schema_out)
+        except (OSError, ValueError) as exc:
+            print(f"  Omnigraph export failed: {exc}")
+            return 1
+        print("  ✓ Omnigraph export ready")
+        print(f"    run:     {summary['run_id'][:16]}…")
+        print(f"    records: {summary['records']} ({summary['events']} events, {summary['files']} files)")
+        print(f"    jsonl:   {summary['out_path']}")
+        if summary.get("schema_out"):
+            print(f"    schema:  {summary['schema_out']}")
+        print("    load it with: omnigraph load --data <jsonl> --mode append --branch agent/task <graph.omni>")
+        return 0
+
+    if action == "write":
+        ap = argparse.ArgumentParser(prog="korgex omnigraph write")
+        ap.add_argument("path", nargs="?")
+        ap.add_argument("--store", required=True)
+        ap.add_argument("--branch", default="main")
+        ap.add_argument("--from", dest="base")
+        ap.add_argument("--mode", default="append", choices=["append", "merge", "overwrite"])
+        ap.add_argument("--tmp-out")
+        ap.add_argument("--schema-out")
+        ap.add_argument("--omnigraph-bin", default="omnigraph")
+        try:
+            a = ap.parse_args(rest)
+        except SystemExit as exc:
+            return exc.code if isinstance(exc.code, int) else 2
+        path = a.path or os.environ.get("KORG_JOURNAL_PATH") or str(Path(".korg") / "journal.jsonl")
+        if not Path(path).exists():
+            print(f"  No journal or receipt at {path}")
+            return 1
+        try:
+            summary = OG.write_to_omnigraph(
+                path,
+                store=a.store,
+                branch=a.branch,
+                base=a.base,
+                mode=a.mode,
+                tmp_out=a.tmp_out,
+                schema_out=a.schema_out,
+                omnigraph_bin=a.omnigraph_bin,
+            )
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(f"  Omnigraph write failed: {exc}")
+            return 1
+        print("  ✓ wrote Korgex run into Omnigraph")
+        print(f"    branch:  {a.branch}")
+        print(f"    records: {summary['records']} ({summary['events']} events, {summary['files']} files)")
+        print(f"    jsonl:   {summary['out_path']}")
+        return 0
+
+    print(f"  unknown omnigraph action: {action} — use: export | write")
+    return 1
+
+
+def cmd_demo():
+    """Print or write runnable product demos (currently: near-omnigraph)."""
+    from src import demo as DM
+
+    argv = sys.argv[1:]
+    toks = argv[argv.index("demo") + 1:] if "demo" in argv else []
+    if not toks or toks[0] in ("-h", "--help"):
+        print("  usage: korgex demo near-omnigraph [--write demo.sh]")
+        print("         [--account YOU.testnet] [--contract korgex-anchor.YOU.testnet]")
+        print("         [--store devgraph.omni] [--branch agent/demo] [--journal .korg/journal.jsonl]")
+        return 0 if toks else 1
+
+    name, rest = toks[0], toks[1:]
+    if name != "near-omnigraph":
+        print(f"  unknown demo: {name} — use: near-omnigraph")
+        return 1
+
+    defaults = DM.NearOmnigraphDemoOptions()
+    ap = argparse.ArgumentParser(prog="korgex demo near-omnigraph")
+    ap.add_argument("--write", "-o")
+    ap.add_argument("--journal", default=defaults.journal)
+    ap.add_argument("--receipt", default=defaults.receipt)
+    ap.add_argument("--no-html", action="store_true")
+    ap.add_argument("--omnigraph-jsonl", default=defaults.omnigraph_jsonl)
+    ap.add_argument("--omnigraph-schema", default=defaults.omnigraph_schema)
+    ap.add_argument("--store", default=defaults.omnigraph_store)
+    ap.add_argument("--branch", default=defaults.omnigraph_branch)
+    ap.add_argument("--near-anchor", default=defaults.near_anchor)
+    ap.add_argument("--account", default=defaults.near_account)
+    ap.add_argument("--contract", default=defaults.near_contract)
+    ap.add_argument("--claim", default=defaults.claim)
+    try:
+        a = ap.parse_args(rest)
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 2
+
+    script = DM.near_omnigraph_script(DM.NearOmnigraphDemoOptions(
+        journal=a.journal,
+        receipt=a.receipt,
+        receipt_html=not a.no_html,
+        omnigraph_jsonl=a.omnigraph_jsonl,
+        omnigraph_schema=a.omnigraph_schema,
+        omnigraph_store=a.store,
+        omnigraph_branch=a.branch,
+        near_anchor=a.near_anchor,
+        near_account=a.account,
+        near_contract=a.contract,
+        claim=a.claim,
+    ))
+    if a.write:
+        try:
+            Path(a.write).parent.mkdir(parents=True, exist_ok=True)
+            Path(a.write).write_text(script, encoding="utf-8")
+            os.chmod(a.write, 0o755)
+        except OSError as exc:
+            print(f"  could not write {a.write}: {exc}")
+            return 1
+        print(f"  ✓ demo script written: {a.write}")
+        print(f"    run it with: {a.write}")
+        return 0
+    print(script, end="")
+    return 0
+
+
+
 def cmd_scan():
     """`korgex scan [path]` — verifiable security scan. Runs the best available
     scanner (trivy, else pip-audit/bandit), prints the findings, and records a
@@ -1545,6 +1772,9 @@ SUBCOMMANDS = {
     "why":               cmd_why,
     "recall":            cmd_recall,              # lean, verified context retrieved from the ledger
     "receipt":           cmd_receipt,             # mint/verify a portable, signed, self-verifying proof of a run
+    "near":              cmd_near,                # prepare a NEAR on-chain anchor payload for a ledger/receipt
+    "omnigraph":         cmd_omnigraph,           # export/write ledger receipts into an Omnigraph dev graph
+    "demo":              cmd_demo,                # print/write runnable product demo workflows
     "scan":              cmd_scan,                # verifiable security scan (wraps trivy/pip-audit/bandit)
     "review":            cmd_review,              # verifiable code review of a diff (adversarially verified)
     "cost":              cmd_cost,
@@ -1692,6 +1922,15 @@ def _build_subcommand_parser():
             sp.add_argument("--publish", action="store_true",
                             help="for 'share': publish the page to KORGEX_SHARE_PAGES_REPO and "
                                  "return a public URL")
+        elif name == "near":
+            sp.add_argument("args", nargs=argparse.REMAINDER,
+                            help="anchor [journal-or-receipt] --account you.testnet --contract c.testnet")
+        elif name == "omnigraph":
+            sp.add_argument("args", nargs=argparse.REMAINDER,
+                            help="export [journal-or-receipt] | write [journal-or-receipt] --store graph.omni")
+        elif name == "demo":
+            sp.add_argument("args", nargs=argparse.REMAINDER,
+                            help="near-omnigraph [--write demo.sh] [--account YOU.testnet]")
         elif name == "providers":
             sp.add_argument("args", nargs="*", help="add <name> | list | use <name> | remove <name>")
             sp.add_argument("--url", help="OpenAI-compatible base URL (e.g. http://localhost:8000/v1)")

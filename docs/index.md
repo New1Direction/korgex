@@ -10,6 +10,9 @@ Welcome to Korgex — an autonomous AI software engineer that integrates with yo
 - [Reviewing Plans & Feedback](/docs/review-plan) — How to steer Korgex in real time
 - [CLI Reference](/docs/cli-reference) — Command-line interface documentation
 - [Flow Runbook](/docs/flow-runbook) — Verifiable cognition end to end: audit → korg-ledger@v1 → verify → self-verifying report
+- [Korgex × NEAR](/docs/near) — Anchor verifiable coding-agent receipts on NEAR without leaking private logs
+- [Korgex × Omnigraph](/docs/omnigraph) — Export verified coding runs into a branchable agent memory graph
+- [NEAR + Omnigraph Demo](/docs/demo-near-omnigraph) — End-to-end proof: Korgex receipt → Omnigraph branch → NEAR anchor
 - [Tools Reference](/docs/tools-reference) — Complete tool surface documentation
 - [Korgex vs The Rest](/docs/comparison) — How Korgex compares to other coding agents
 - [Self-Coding Bench](/docs/self-coding-bench) — Live reliability data: can Korgex be trusted to edit its own code?
