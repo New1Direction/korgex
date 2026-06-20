@@ -72,6 +72,13 @@ def test_builtin_commands_load_and_are_well_formed():
         assert cmd.body, f"built-in command {name!r} has an empty body"
 
 
+def test_builtin_commands_are_in_package_data():
+    """Built-in commands must survive wheel/sdist packaging, not only source checkouts."""
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    pyproject = open(os.path.join(root, "pyproject.toml"), encoding="utf-8").read()
+    assert "commands_builtin/*.md" in pyproject
+
+
 # ── REPL + CLI wiring ─────────────────────────────────────────────────────────
 
 def test_repl_runs_custom_command(tmp_path, monkeypatch):

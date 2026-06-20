@@ -343,8 +343,8 @@ def tool_run_test_with_self_healing(test_command: str, target_file: str, context
     if result.get("status") == "failure":
         tb = extract_traceback_info(result.get("output", ""))
         result["traceback"] = tb
-    
-    
+
+    return result
 
 
 @register_tool("google_search", "Online Google search to retrieve up-to-date information.", [

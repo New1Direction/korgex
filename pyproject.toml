@@ -75,7 +75,7 @@ exclude = ["tests*", "korgex-vscode*", "sandbox*"]
 # Ship non-Python runtime assets: the in-browser ledger verifier (embedded by
 # `korgex audit --html`) and the bundled built-in skill library (SKILL.md files
 # discovered at runtime). Without these they're absent from the wheel.
-src = ["assets/*.js", "skills_builtin/*/SKILL.md"]
+src = ["assets/*.js", "skills_builtin/*/SKILL.md", "commands_builtin/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

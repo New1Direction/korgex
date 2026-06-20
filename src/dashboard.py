@@ -96,6 +96,14 @@ def create_app() -> Optional[object]:
     def health():
         return {"status": "ok", "service": "korgex-dashboard"}
 
+    @app.get("/api/sandbox")
+    def sandbox_status():
+        try:
+            from src.tools_impl import tool_sandbox_status
+            return tool_sandbox_status()
+        except Exception as e:
+            return {"mode": "unknown", "status": "error", "error": f"{type(e).__name__}: {e}"}
+
     # ── Swarm endpoints (VS Code extension entry points) ─────────────────
     # Sync defs → FastAPI runs them in a thread pool, so the agent's blocking
     # API calls don't starve the event loop.

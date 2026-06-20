@@ -55,8 +55,16 @@ target/
 .DS_Store
 Thumbs.db
 
-# Audit reports (transient, regenerated)
+# Audit reports / generated launch-demo media (transient, regenerated)
 ecosystem_audit_*.html
+korg-demo-filming-runbook-*.html
+korg-ecosystem-*.html
+korg-investor-*.html
+korg-investor-*.mp4
+korg-investor-*.webm
+korg-investor-*.txt
+korg-investor-demo-assets-*/
+make-korg-investor-demo-*.sh
 # korg ledger blob store / local journal (must never enter the tree)
 .korg/
 

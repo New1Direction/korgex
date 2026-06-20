@@ -5,6 +5,7 @@ which is how a regression in the Edit handler slipped past ruff + the full suite
 during a dogfood run. These pin the primitives the agent leans on every turn:
 the happy path and the error path.
 """
+from src import tools_impl
 from src.tools_impl import (
     tool_delete_file,
     tool_list_files,
@@ -68,3 +69,57 @@ class TestBashSession:
     def test_runs_a_foreground_command(self, tmp_path):
         res = tool_run_in_bash_session("echo korgex_bash_ok", context=_ctx(tmp_path))
         assert "korgex_bash_ok" in str(res)
+
+
+class TestSelfHealingTool:
+    def test_returns_healer_result(self, monkeypatch):
+        class FakeSandbox:
+            pass
+
+        class FakeHealer:
+            def __init__(self, **kwargs):
+                pass
+
+            def heal(self, test_command, target_file, context_files):
+                return {
+                    "status": "success",
+                    "test_command": test_command,
+                    "target_file": target_file,
+                    "context_files": context_files,
+                }
+
+        monkeypatch.setattr(tools_impl, "SANDBOX", FakeSandbox())
+        monkeypatch.setattr(tools_impl, "TDDHealer", FakeHealer)
+        monkeypatch.setenv("KORGEX_API_KEY", "test-key")
+
+        res = tools_impl.tool_run_test_with_self_healing(
+            "pytest tests/test_x.py", "src/x.py", ["tests/test_x.py"]
+        )
+
+        assert res == {
+            "status": "success",
+            "test_command": "pytest tests/test_x.py",
+            "target_file": "src/x.py",
+            "context_files": ["tests/test_x.py"],
+        }
+
+    def test_failure_result_includes_traceback(self, monkeypatch):
+        class FakeSandbox:
+            pass
+
+        class FakeHealer:
+            def __init__(self, **kwargs):
+                pass
+
+            def heal(self, test_command, target_file, context_files):
+                return {"status": "failure", "output": "Traceback (most recent call last):\nboom"}
+
+        monkeypatch.setattr(tools_impl, "SANDBOX", FakeSandbox())
+        monkeypatch.setattr(tools_impl, "TDDHealer", FakeHealer)
+        monkeypatch.setattr(tools_impl, "extract_traceback_info", lambda output: {"summary": output})
+        monkeypatch.setenv("KORGEX_API_KEY", "test-key")
+
+        res = tools_impl.tool_run_test_with_self_healing("pytest", "src/x.py")
+
+        assert res["status"] == "failure"
+        assert res["traceback"] == {"summary": "Traceback (most recent call last):\nboom"}

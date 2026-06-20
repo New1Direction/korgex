@@ -407,6 +407,13 @@ def test_dashboard_health(client):
     assert r.json()["status"] == "ok"
 
 
+def test_dashboard_sandbox_status(client):
+    r = client.get("/api/sandbox")
+    assert r.status_code == 200
+    body = r.json()
+    assert "mode" in body and "status" in body
+
+
 def test_swarm_refactor_rejects_missing_filepath(client):
     r = client.post("/api/swarm/refactor", json={})
     assert r.status_code == 400
