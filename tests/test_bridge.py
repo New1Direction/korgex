@@ -414,6 +414,23 @@ def test_dashboard_sandbox_status(client):
     assert "mode" in body and "status" in body
 
 
+def test_dashboard_host_defaults_to_localhost(monkeypatch):
+    from src import dashboard as D
+    monkeypatch.delenv("KORGEX_DASHBOARD_HOST", raising=False)
+
+    assert D.resolve_dashboard_host() == "127.0.0.1"
+    assert D.dashboard_exposure_warning("127.0.0.1") is None
+
+
+def test_dashboard_host_allows_explicit_exposed_mode(monkeypatch):
+    from src import dashboard as D
+    monkeypatch.setenv("KORGEX_DASHBOARD_HOST", "0.0.0.0")
+
+    assert D.resolve_dashboard_host() == "0.0.0.0"
+    assert "authentication is not implemented" in D.dashboard_exposure_warning("0.0.0.0")
+    assert D.resolve_dashboard_host("192.0.2.10") == "192.0.2.10"
+
+
 def test_swarm_refactor_rejects_missing_filepath(client):
     r = client.post("/api/swarm/refactor", json={})
     assert r.status_code == 400

@@ -9,6 +9,7 @@ FastAPI server + HTML interface for:
 - Subagent swarm dashboard
 """
 
+import os
 import threading
 from typing import Optional
 
@@ -33,6 +34,29 @@ _dashboard_state = {
     "subagent_results": [],
     "pending_input_request": None,
 }
+
+
+_DASHBOARD_DEFAULT_HOST = "127.0.0.1"
+_LOCAL_DASHBOARD_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def resolve_dashboard_host(host: str | None = None, env: dict | None = None) -> str:
+    """Resolve dashboard bind host. Default is localhost; exposed mode is explicit."""
+    if host:
+        return host
+    env = os.environ if env is None else env
+    return env.get("KORGEX_DASHBOARD_HOST") or _DASHBOARD_DEFAULT_HOST
+
+
+def dashboard_exposure_warning(host: str) -> str | None:
+    """Return a warning when the unauthenticated dashboard is bound off-localhost."""
+    if host in _LOCAL_DASHBOARD_HOSTS:
+        return None
+    return (
+        "WARNING: Korgex dashboard authentication is not implemented. "
+        f"Binding to {host!r} may expose task/approval endpoints; put it behind "
+        "an auth-terminating proxy or use KORGEX_DASHBOARD_HOST=127.0.0.1."
+    )
 
 
 def create_app() -> Optional[object]:
@@ -218,13 +242,18 @@ def _run_task_background(description: str):
     _dashboard_state["current_task"] = None
 
 
-def start_dashboard(host: str = "0.0.0.0", port: int = 8090):
+def start_dashboard(host: str | None = None, port: int = 8090):
     """Start the Korgex dashboard server."""
     app = create_app()
     if app is None:
         print("Install FastAPI: pip install fastapi uvicorn")
         return
-    
+
+    host = resolve_dashboard_host(host)
+    warning = dashboard_exposure_warning(host)
+    if warning:
+        print(f"⚠️  {warning}")
+
     print(f"🌐 Korgex Dashboard: http://{host}:{port}")
     print(f"📋 Approve plans: http://{host}:{port}/api/approve-plan")
     uvicorn.run(app, host=host, port=port, log_level="info")
@@ -377,12 +406,14 @@ from src.tool_base import register_tool, ToolParam  # noqa: E402 (registered aft
 
 @register_tool("start_dashboard", "Starts the Korgex web steering dashboard.", [
     ToolParam("port", "STRING", "Port to run the dashboard on (default: 8090)."),
+    ToolParam("host", "STRING", "Bind host. Defaults to 127.0.0.1; use 0.0.0.0 only behind auth."),
 ])
-def tool_start_dashboard(port: str = "8090", context: dict = None):
+def tool_start_dashboard(port: str = "8090", host: str = None, context: dict = None):
+    resolved_host = resolve_dashboard_host(host)
     thread = threading.Thread(
         target=start_dashboard,
-        args=("0.0.0.0", int(port)),
+        args=(resolved_host, int(port)),
         daemon=True
     )
     thread.start()
-    return {"dashboard_url": f"http://localhost:{port}", "status": "started"}
+    return {"dashboard_url": f"http://{resolved_host}:{port}", "status": "started"}

@@ -23,6 +23,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_PORT = 8090
+DASHBOARD_DEFAULT_HOST = "127.0.0.1"
 PID_FILE = Path(tempfile.gettempdir()) / "korgex.pid"
 
 
@@ -34,6 +35,14 @@ def _resolve(rel: str) -> Path:
 
 def _log(msg: str):
     print(f"  ⚡ {msg}")
+
+
+def _dashboard_host() -> str:
+    return os.environ.get("KORGEX_DASHBOARD_HOST") or DASHBOARD_DEFAULT_HOST
+
+
+def _dashboard_url() -> str:
+    return f"http://{_dashboard_host()}:{DASHBOARD_PORT}"
 
 
 def _find_vscode() -> str:
@@ -104,7 +113,7 @@ def _start_background_server():
         sys.exit(1)
 
     PID_FILE.write_text(str(proc.pid))
-    _log(f"Backend started (PID {proc.pid}) on http://localhost:{DASHBOARD_PORT}")
+    _log(f"Backend started (PID {proc.pid}) on {_dashboard_url()}")
 
 
 # ── Subcommands ──────────────────────────────────────────────────────────
@@ -301,7 +310,7 @@ def cmd_default():
     print("  ┌─────────────────────────────────────────────┐")
     print("  │  Korgex is live                           │")
     print("  │                                             │")
-    print(f"  │  Dashboard  → http://localhost:{DASHBOARD_PORT:<4}           │")
+    print(f"  │  Dashboard  → {_dashboard_url():<28} │")
     print("  │  VS Code    → Press F5 in the new window    │")
     print("  │  Commands   → Cmd+Shift+P → 'Korgex:'     │")
     print("  │                                             │")
@@ -334,7 +343,7 @@ def cmd_init():
 def cmd_dashboard():
     """Start just the web dashboard."""
     _start_background_server()
-    print(f"  Dashboard: http://localhost:{DASHBOARD_PORT}")
+    print(f"  Dashboard: {_dashboard_url()}")
     print("  Press Ctrl+C to stop.")
 
 
@@ -343,7 +352,7 @@ def cmd_status():
     if _is_running():
         pid = PID_FILE.read_text().strip()
         print(f"  Korgex is running (PID {pid})")
-        print(f"  Dashboard: http://localhost:{DASHBOARD_PORT}")
+        print(f"  Dashboard: {_dashboard_url()}")
     else:
         print("  Korgex is not running.")
         print("  Run `korgex` to start.")

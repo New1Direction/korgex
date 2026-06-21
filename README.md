@@ -380,6 +380,7 @@ By default korgex acts freely. To have the **editor approve edits** (a `session/
 | `KORGEX_MAX_ITERATIONS` | Max agent-loop iterations before giving up. | `30` |
 | `KORGEX_MCP` | `1` to auto-load MCP servers from `mcp.json`. | unset |
 | `KORGEX_SANDBOX` | `modal`\|`docker`\|`direct`\|`auto` — bash isolation. | `auto` |
+| `KORGEX_DASHBOARD_HOST` | Dashboard bind host. Defaults to localhost; set `0.0.0.0` only behind an auth-terminating proxy. | `127.0.0.1` |
 
 **Capabilities (opt-in)**
 
@@ -600,7 +601,7 @@ To build locally for inspection: `python -m build` then `python -m twine check d
 These exist today; PRs welcome.
 
 - **OpenAI streaming has fewer rendered events than Anthropic.** Anthropic emits thinking blocks and message-delta usage; OpenAI emits only text and tool-call chunks. Both render correctly, but the TUI is richer for Anthropic.
-- **Dashboard authentication is not implemented.** Don't expose port 8090 publicly without an auth-terminating reverse proxy in front.
+- **Dashboard authentication is not implemented.** It binds to `127.0.0.1` by default; don't set `KORGEX_DASHBOARD_HOST=0.0.0.0` without an auth-terminating reverse proxy in front.
 - **The VS Code sidecar is a legacy companion** to the dashboard; korgex's primary interface is the terminal REPL.
 
 ---
