@@ -9,11 +9,16 @@ git clone https://github.com/New1Direction/Korgex.git
 cd Korgex
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+pip install -e ".[dev]"
 
 # Enable the opsec pre-commit guard (one-time, per clone):
 git config core.hooksPath scripts/githooks
 ```
+
+`pyproject.toml` is the source of truth for package dependencies. `requirements.txt`
+is kept as a compatibility mirror for source checkouts and legacy automation; prefer
+`pip install -e ".[dev]"` for development.
 
 ### Opsec guard
 
@@ -24,7 +29,7 @@ active. A genuine false positive can bypass with `OPSEC_GUARD_OK=1 git commit ..
 
 ## Code Style
 
-- Python: Black + Ruff formatting
+- Python: Ruff linting/formatting conventions
 - Imports: sorted with `ruff check --fix`
 - Type hints: use them on all public functions
 
@@ -40,5 +45,5 @@ active. A genuine false positive can bypass with `OPSEC_GUARD_OK=1 git commit ..
 
 1. Define the tool in `src/tools_impl.py` using `@register_tool`
 2. Add the schema to the tool def with typed parameters
-3. Write a test in `tests/test_tools.py`
-4. Verify with: `python -m cli.main --schemas`
+3. Write a focused regression test under `tests/`
+4. Verify with: `korgex --introspect` and the relevant pytest target

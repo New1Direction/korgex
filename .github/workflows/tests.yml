@@ -42,3 +42,60 @@ jobs:
           pip install "ruff>=0.1.0,<1.0.0"
       - name: Lint src/ (ruff)
         run: ruff check src/
+
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Check requirements mirror
+        run: |
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text())
+          expected = set(pyproject["project"]["dependencies"])
+          expected |= set(pyproject["project"]["optional-dependencies"]["dev"])
+          actual = {
+              line.strip()
+              for line in Path("requirements.txt").read_text().splitlines()
+              if line.strip() and not line.lstrip().startswith("#")
+          }
+          if expected != actual:
+              print("missing from requirements.txt:", sorted(expected - actual))
+              print("extra in requirements.txt:", sorted(actual - expected))
+              raise SystemExit(1)
+          PY
+      - name: Build and verify artifacts
+        run: |
+          python -m pip install --upgrade pip
+          pip install "build>=1.0.0,<2.0.0" "twine>=5.0.0,<7.0.0"
+          python -m build
+          python -m twine check dist/*
+      - name: Check packaged runtime assets
+        run: |
+          unzip -l dist/korgex-*.whl | grep 'src/commands_builtin/code-review.md'
+          unzip -l dist/korgex-*.whl | grep 'src/assets/korg_verify.js'
+          unzip -l dist/korgex-*.whl | grep 'src/skills_builtin/verify-before-done/SKILL.md'
+          tar -tzf dist/korgex-*.tar.gz | grep 'src/commands_builtin/code-review.md'
+      - name: Install wheel in a clean venv
+        run: |
+          python -m venv /tmp/korgex-wheel-smoke
+          /tmp/korgex-wheel-smoke/bin/python -m pip install --upgrade pip
+          /tmp/korgex-wheel-smoke/bin/pip install dist/korgex-*.whl
+          /tmp/korgex-wheel-smoke/bin/python - <<'PY'
+          from importlib.resources import files
+
+          from src import commands as C
+          from src import skills as S
+
+          commands = C.load_commands([C.builtin_commands_root()])
+          assert {"build-fix", "checkpoint", "code-review"} <= set(commands.names())
+          assert (files("src") / "assets" / "korg_verify.js").is_file()
+          skills = S.load_skills([str(files("src") / "skills_builtin")])
+          assert "verify-before-done" in skills.names()
+          print("wheel-smoke-ok")
+          PY

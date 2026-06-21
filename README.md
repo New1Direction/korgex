@@ -566,7 +566,11 @@ ruff check src/                                   # lint
 pytest -q                                         # the full suite
 ```
 
-The suite is **~1,586 tests** with no live LLM calls (everything is unit-tested) and runs on Linux CI across **Python 3.10, 3.11, 3.12, 3.13** on every push and PR. Major areas: the agent loop (routing, provider schemas, mode/model resolution, loop guards, the stall classifier, compaction), tools (fuzzy Edit, edit-freshness, background Bash, web), the verifiable ledger (hash-chain + causal DAG, redaction, the Ed25519 signed bus), CodeAct (kernel isolation, fuel, the tool bridge), MCP (namespaced multi-server router, OAuth refresh, full round-trip), prompt caching, skills (trust tiers, self-learning, the curator), and the REPL.
+`pyproject.toml` is the package dependency source of truth. `requirements.txt` is
+kept as a compatibility mirror for source checkouts and legacy automation; prefer
+editable installs with extras for development.
+
+The suite is **1,600+ tests** with no live LLM calls (everything is unit-tested) and runs on Linux CI across **Python 3.10, 3.11, 3.12, 3.13** on every push and PR. Major areas: the agent loop (routing, provider schemas, mode/model resolution, loop guards, the stall classifier, compaction), tools (fuzzy Edit, edit-freshness, background Bash, web), the verifiable ledger (hash-chain + causal DAG, redaction, the Ed25519 signed bus), CodeAct (kernel isolation, fuel, the tool bridge), MCP (namespaced multi-server router, OAuth refresh, full round-trip), prompt caching, skills (trust tiers, self-learning, the curator), and the REPL.
 
 ---
 
