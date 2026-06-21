@@ -115,6 +115,45 @@ def test_best_of_n_records_a_verifiable_trail(tmp_path):
     assert S.verify_chain(events) == []                    # …and the whole trail's chain is intact
 
 
+def test_best_of_n_records_setup_failures_as_attempts(tmp_path, monkeypatch):
+    from src import korg_ledger as KL
+    from src import workspace as W
+    repo = _git_repo(tmp_path)
+    jp = str(tmp_path / "j.jsonl")
+    led = KL.LocalJournalClient(journal_path=jp)
+
+    real_remove = W.remove_worktree
+
+    def create_worktree(repo_root, branch, worktree_path=None, base="HEAD"):
+        if branch.endswith("-1"):
+            raise RuntimeError("simulated worktree metadata race")
+        wt = worktree_path or str(tmp_path / branch.replace("/", "_"))
+        Path(wt).mkdir(parents=True, exist_ok=True)
+        return wt
+
+    monkeypatch.setattr(W, "create_worktree", create_worktree)
+    monkeypatch.setattr(W, "changed_paths", lambda wt: ["notes.txt"])
+    monkeypatch.setattr(W, "remove_worktree", lambda repo_root, wt: real_remove(repo_root, wt))
+
+    def runner(prompt, wt):
+        (Path(wt) / "notes.txt").write_text("did it")
+        return {"success": True, "root_seq": 1}
+
+    out = run_best_of_n("ship X", runner, str(repo), n=3, worktree_base=str(tmp_path / "w"),
+                        ledger=led)
+
+    assert len(out["attempts"]) == 3
+    assert out["passed_count"] == 2
+    failed = [a for a in out["attempts"] if not a["passed"]]
+    assert len(failed) == 1
+    assert "worktree setup failed" in failed[0]["result"]["error"]
+    events = KL.load_journal_raw(jp)
+    attempt_events = [e for e in events if e.get("tool_name") == "best_of_n.attempt"]
+    assert len(attempt_events) == 3
+    assert any("simulated worktree metadata race" in (e.get("result", {}).get("error") or "")
+               for e in attempt_events)
+
+
 def test_best_of_n_without_ledger_is_unchanged(tmp_path):
     repo = _git_repo(tmp_path)
 

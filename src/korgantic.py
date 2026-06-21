@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -194,18 +195,38 @@ def run_best_of_n(prompt, agent_runner, repo_root: str, n: int = 3,
     from src import workspace as W
     from src.guardrails import classify_diff
 
+    worktree_lock = threading.Lock()
+
+    def _failed_attempt(i: int, branch: str, error: str) -> dict:
+        return {"attempt": i, "branch": branch, "passed": False,
+                "result": {"success": False, "error": error},
+                "merge_gate": {"auto_mergeable": False, "requires_human_review": True}}
+
     def attempt(i: int) -> dict:
         branch = f"{branch_prefix}-{i}"
         wt_path = os.path.join(worktree_base, f"bon_{i}") if worktree_base else None
-        wt = W.create_worktree(repo_root, branch, worktree_path=wt_path)
+        wt = None
+        # Git stores worktree metadata under the source repo's .git/worktrees;
+        # concurrent add/remove/prune can race there on Linux CI. Serialize only
+        # metadata mutations while keeping the agent work itself parallel.
         try:
-            result = agent_runner(prompt, wt) or {}
-            merge_gate = classify_diff(W.changed_paths(wt))
-            return {"attempt": i, "branch": branch,
-                    "passed": bool(result.get("success")),
-                    "result": result, "merge_gate": merge_gate}
+            with worktree_lock:
+                wt = W.create_worktree(repo_root, branch, worktree_path=wt_path)
+        except Exception as exc:
+            return _failed_attempt(i, branch, f"worktree setup failed: {type(exc).__name__}: {exc}")
+        try:
+            try:
+                result = agent_runner(prompt, wt) or {}
+                merge_gate = classify_diff(W.changed_paths(wt))
+                return {"attempt": i, "branch": branch,
+                        "passed": bool(result.get("success")),
+                        "result": result, "merge_gate": merge_gate}
+            except Exception as exc:
+                return _failed_attempt(i, branch, f"runner failed: {type(exc).__name__}: {exc}")
         finally:
-            W.remove_worktree(repo_root, wt)  # branch persists; worktree dir removed
+            if wt:
+                with worktree_lock:
+                    W.remove_worktree(repo_root, wt)  # branch persists; worktree dir removed
 
     attempts = [a for a in parallel([(lambda i=i: attempt(i)) for i in range(n)]) if a]
     winners = [a for a in attempts if a["passed"]]
@@ -225,12 +246,14 @@ def _record_best_of_n(ledger, prompt, attempts, winner, parent_seq) -> int:
     for a in attempts:
         gate = a.get("merge_gate") or {}
         try:
+            res = a.get("result") or {}
             ledger.record_tool_call(
                 tool_name="best_of_n.attempt",
                 args={"attempt": a.get("attempt"), "branch": a.get("branch")},
                 result={"passed": a.get("passed", False),
                         "auto_mergeable": gate.get("auto_mergeable", False),
-                        "requires_human_review": gate.get("requires_human_review", False)},
+                        "requires_human_review": gate.get("requires_human_review", False),
+                        **({"error": res.get("error")} if res.get("error") else {})},
                 success=bool(a.get("passed")), duration_ms=0, triggered_by=root)
         except Exception:
             pass
