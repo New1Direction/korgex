@@ -69,29 +69,62 @@ jobs:
             exit 1
           fi
 
-      - name: Run Korgex on Issue
-        if: github.event_name == 'issues' && github.event.label.name == 'korgex'
+      - name: Build prompt from event payload
+        # Never interpolate untrusted issue/PR/comment text directly into shell.
+        # Read the checked-out webhook payload from GITHUB_EVENT_PATH and write a
+        # prompt file instead, so titles/bodies/comments cannot break shell quoting.
         run: |
-          korgex \
-            "Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
-             ${{ github.event.issue.body }}"
-        env:
-          KORGEX_SANDBOX: docker
-      
-      - name: Run Korgex on PR
-        if: github.event_name == 'pull_request'
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          event_name = os.environ["GITHUB_EVENT_NAME"]
+          event_path = Path(os.environ["GITHUB_EVENT_PATH"])
+          data = json.loads(event_path.read_text(encoding="utf-8"))
+
+          if event_name == "issues":
+              issue = data.get("issue", {})
+              prompt = f"Issue #{issue.get('number', 'unknown')}: {issue.get('title', '')}\n{issue.get('body') or ''}"
+          elif event_name == "pull_request":
+              pr = data.get("pull_request", {})
+              prompt = f"PR #{pr.get('number', 'unknown')}: {pr.get('title', '')}\n{pr.get('body') or ''}"
+          elif event_name == "issue_comment":
+              issue = data.get("issue", {})
+              comment = data.get("comment", {})
+              prompt = (
+                  f"Address feedback on issue/PR #{issue.get('number', 'unknown')} "
+                  f"({issue.get('title', '')}):\n{comment.get('body') or ''}"
+              )
+          elif event_name == "pull_request_review_comment":
+              pr = data.get("pull_request", {})
+              comment = data.get("comment", {})
+              path = comment.get("path")
+              line = comment.get("line") or comment.get("original_line")
+              location = f" on {path}:{line}" if path and line else (f" on {path}" if path else "")
+              prompt = (
+                  f"Address PR review feedback for PR #{pr.get('number', 'unknown')}{location}:\n"
+                  f"{comment.get('body') or ''}"
+              )
+          else:
+              raise SystemExit(f"Unsupported event: {event_name}")
+
+          out = Path(os.environ["RUNNER_TEMP"]) / "korgex-prompt.txt"
+          out.write_text(prompt, encoding="utf-8")
+          print(f"Wrote Korgex prompt to {out} ({len(prompt)} chars)")
+          PY
+
+      - name: Run Korgex
+        # Execute with subprocess argv, not shell interpolation of prompt content.
         run: |
-          korgex \
-            "PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
-             ${{ github.event.pull_request.body }}"
-        env:
-          KORGEX_SANDBOX: docker
-      
-      - name: Run Korgex on Comment
-        if: contains(github.event.comment.body, '/korgex')
-        run: |
-          korgex \
-            "Address feedback: ${{ github.event.comment.body }}"
+          python - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          prompt = (Path(os.environ["RUNNER_TEMP"]) / "korgex-prompt.txt").read_text(encoding="utf-8")
+          subprocess.run(["korgex", prompt], check=True)
+          PY
         env:
           KORGEX_SANDBOX: docker
       
