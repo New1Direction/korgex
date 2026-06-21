@@ -81,10 +81,10 @@ korgex --mcp "create a GitHub issue for the bug we just fixed"
 
 ```bash
 korgex init     # install deps + compile the VS Code extension
-korgex serve    # start dashboard on :8090 and open VS Code
+korgex serve    # start dashboard on 127.0.0.1:8090 and open VS Code
 ```
 
-The dashboard exposes `/api/swarm/refactor`, `/api/swarm/heal`, and `/api/swarm/profile` which the VS Code extension calls directly.
+The dashboard binds to localhost by default. It exposes `/api/swarm/refactor`, `/api/swarm/heal`, `/api/swarm/profile`, and `/api/sandbox`, which the VS Code extension and dashboard frontend call directly. Only set `KORGEX_DASHBOARD_HOST=0.0.0.0` behind an auth-terminating proxy.
 
 ## Next steps
 

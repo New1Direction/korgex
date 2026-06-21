@@ -6,7 +6,7 @@
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/v/korgex?color=3fb950&label=pypi" alt="PyPI version"></a>
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/pyversions/korgex?color=2dd4bf" alt="Python versions"></a>
   <a href="https://github.com/New1Direction/korgex/actions/workflows/tests.yml"><img src="https://github.com/New1Direction/korgex/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/tests-1%2C586%20passing-3fb950" alt="tests">
+  <img src="https://img.shields.io/badge/tests-1%2C608%20passing-3fb950" alt="tests">
   <a href="https://registry.modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-registry-2dd4bf" alt="MCP registry"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT"></a>
 </p>
@@ -338,7 +338,7 @@ Any non-subcommand argument is treated as a prompt: `korgex "create hello.txt wi
 | `korgex diag <path>` | Report language-server diagnostics (errors/types) for a file — best-effort. |
 | **Dashboard / editor** | |
 | `korgex acp` | Run korgex as an [Agent Client Protocol](https://agentclientprotocol.com) agent over stdio, so an ACP editor (Zed et al.) can drive it — streams tool-call activity + reply text live. |
-| `korgex serve` · `dashboard` | Start the FastAPI dashboard (`:8090`) with/without opening the VS Code sidecar. |
+| `korgex serve` · `dashboard` | Start the FastAPI dashboard (`127.0.0.1:8090` by default) with/without opening the VS Code sidecar. |
 | `korgex status` · `stop` | Report / terminate the background backend. |
 | `korgex install-extension` | Install the compiled `.vsix` into your local VS Code. |
 
@@ -547,7 +547,7 @@ korgex/
 │   └── ...
 ├── docs/                     # CLI reference, comparison, getting-started, tools-reference, …
 ├── spec/korg-ledger-v1/      # the ledger spec (SPEC.md, EVENTS.md)
-├── tests/                    # ~1,586 tests
+├── tests/                    # ~1,608 passing tests
 ├── .github/workflows/        # Linux CI (3.10–3.13) + PyPI publisher (OIDC)
 ├── pyproject.toml
 └── README.md

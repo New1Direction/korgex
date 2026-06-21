@@ -2,7 +2,7 @@
 
 > ⚠️ **HISTORICAL — kept for reference; do not treat as current.**
 > This roadmap predates korgex's v0.x pivot. It describes a pre-pivot plan (korg-bridge / PyO3
-> → KorgChat, "27 tests"). korgex has since shipped through **v0.35.0** (~1,571 tests) as a
+> → KorgChat, "27 tests"). korgex has since shipped through **v0.36.0** (1,608 passing tests) as a
 > provider-agnostic, MCP-native coding agent. For the current state see
 > [`CHANGELOG.md`](CHANGELOG.md) and [`README.md`](README.md). (The AlphaEvolve appendix below
 > is still useful.)

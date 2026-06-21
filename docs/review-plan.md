@@ -23,15 +23,16 @@ Suppresses the TUI entirely. The final result text is printed to stdout on exit.
 
 ## Using the dashboard
 
-`korgex serve` starts a FastAPI dashboard at `http://localhost:8090` with:
+`korgex serve` starts a FastAPI dashboard at `http://127.0.0.1:8090` by default with:
 
 - **Current task and plan** — what the agent is working on
 - **Live log stream** — `/ws/logs` WebSocket
 - **Approve plan** — POST `/api/approve-plan`
 - **Send feedback** — POST `/api/send-feedback` with `{"feedback": "..."}` to inject a steering message mid-task
 - **Start a new task** — POST `/api/new-task` with `{"description": "..."}`
+- **Sandbox status** — GET `/api/sandbox`
 
-The VS Code sidecar extension uses the same API — commands like "Korgex: Refactor Current File" POST to `/api/swarm/refactor`.
+The VS Code sidecar extension uses the same API — commands like "Korgex: Refactor Current File" POST to `/api/swarm/refactor`. The dashboard is not authenticated; set `KORGEX_DASHBOARD_HOST=0.0.0.0` only behind an auth-terminating proxy.
 
 ## When to intervene
 

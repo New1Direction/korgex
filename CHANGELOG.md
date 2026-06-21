@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Refreshed README/docs after the 0.36.0 launch: current test count, localhost dashboard guidance, `/api/sandbox`, PyPI-first MCP Registry instructions, and `server.json` manifest version.
+- `korgex mcp-server` now advertises the installed package version in its MCP `serverInfo` instead of a stale internal value.
+
 ## [0.36.0] — 2026-06-21
 
 ### Security

@@ -21,12 +21,17 @@ import json
 import os
 import sys
 import tempfile
+from importlib.metadata import PackageNotFoundError, version
 
 from src import import_adapters as IA
 from src import ledger_spec as S
 
 PROTOCOL_VERSION = "2024-11-05"
-SERVER_INFO = {"name": "korg-ledger", "version": "0.1.0"}
+try:
+    _PACKAGE_VERSION = version("korgex")
+except PackageNotFoundError:  # pragma: no cover - source tree without installed dist metadata
+    _PACKAGE_VERSION = "0.0.0+dev"
+SERVER_INFO = {"name": "korg-ledger", "version": _PACKAGE_VERSION}
 
 
 def _read_jsonl(path: str) -> list:

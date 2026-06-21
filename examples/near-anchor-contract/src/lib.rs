@@ -127,7 +127,7 @@ mod tests {
             Some(receipt.clone()),
             Some("https://example.com/proof".to_string()),
             Some("fixed issue #123".to_string()),
-            Some("0.35.0".to_string()),
+            Some("0.36.0".to_string()),
         );
         assert_eq!(record.ledger_root, root);
         assert_eq!(record.event_count, 7);

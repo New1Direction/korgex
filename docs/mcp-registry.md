@@ -7,22 +7,25 @@ published there via a `server.json` manifest + the `mcp-publisher` CLI. A README
 PR would be rejected; this is the current path.
 
 `server.json` (repo root) is the publish-ready manifest for **`io.github.New1Direction/korg-ledger`**
-(`korgex mcp-server`, stdio).
+(`korgex mcp-server`, stdio). Keep both manifest version fields aligned with the
+current `pyproject.toml` package version before publishing.
 
 ## Prerequisite: korgex on PyPI
 
 The registry references an installable package; the manifest points at
-`pypi:korgex`. korgex currently ships as a GitHub Release wheel, so publish to
-PyPI first (one-time):
+`pypi:korgex`. korgex is published to PyPI from GitHub Releases via
+`.github/workflows/publish.yml` using PyPI Trusted Publishing (OIDC), so there is
+no manual API token or `twine upload` step for normal releases.
+
+Before updating the registry for a new version:
 
 ```bash
-pip install build twine
 python -m build
-twine upload dist/korgex-0.6.0*        # needs a PyPI API token (yours)
+python -m twine check dist/*
+python -m venv /tmp/korgex-pypi-smoke
+/tmp/korgex-pypi-smoke/bin/pip install -U korgex==<version>
+/tmp/korgex-pypi-smoke/bin/korgex --version
 ```
-
-(If the `korgex` name is taken on PyPI, pick a distinct dist name and update
-`packages[0].identifier` in `server.json`.)
 
 ## Publish to the registry
 
@@ -38,10 +41,9 @@ mcp-publisher login github
 mcp-publisher publish ./server.json
 ```
 
-The namespace auth and the PyPI upload both require **your** credentials
-(GitHub OAuth in a browser + a PyPI token), so the final publish is a step you
-run — everything up to it (the manifest, the install path, the runtime args) is
-prepared here. Re-run `mcp-publisher publish` on each `version` bump.
+The namespace auth requires **your** GitHub credentials. Re-run
+`mcp-publisher publish` on each korgex version bump after the PyPI release is
+available and `server.json` has been updated.
 
 ## Validate before publishing
 

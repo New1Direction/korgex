@@ -48,8 +48,8 @@ korgex --quiet "list all functions exported from src/utils.py"
 | `korgex setup` | Connect a model provider (OpenRouter / Anthropic / OpenAI / Ollama) — saves the key + default model to `~/.korgex/config.json`. |
 | `korgex skills` | List every available skill (built-in, project, and learned) with its description. |
 | `korgex init` | Scaffold a starter `AGENTS.md` for the current repo (detects stack + test/build commands; never clobbers an existing one). |
-| `korgex serve` | Start the FastAPI dashboard on `:8090` and open VS Code with the sidecar extension. |
-| `korgex dashboard` | Start the dashboard only (no editor). |
+| `korgex serve` | Start the FastAPI dashboard on `127.0.0.1:8090` by default and open VS Code with the sidecar extension. |
+| `korgex dashboard` | Start the localhost dashboard only (no editor). Set `KORGEX_DASHBOARD_HOST` explicitly only behind an auth-terminating proxy. |
 | `korgex status` | Report whether the background backend is running and its PID. |
 | `korgex stop` | Send SIGTERM (then SIGKILL) to the background backend. |
 | `korgex install-extension` | Install the compiled `.vsix` into your local VS Code. |
@@ -119,7 +119,7 @@ echo "$result"
 # Load GitHub MCP server tools at runtime
 korgex --mcp "create a GitHub issue summarising today's bug"
 
-# Start the dashboard and VS Code sidecar
+# Start the localhost dashboard and VS Code sidecar
 korgex serve
 
 # Check backend status

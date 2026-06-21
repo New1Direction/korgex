@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.New1Direction/korg-ledger",
   "description": "Verifiable cognition: prove a session ledger is tamper-evident; audit & import any agent's logs.",
-  "version": "0.6.3",
+  "version": "0.36.0",
   "repository": {
     "url": "https://github.com/New1Direction/korgex",
     "source": "github"
@@ -11,7 +11,7 @@
     {
       "registryType": "pypi",
       "identifier": "korgex",
-      "version": "0.6.3",
+      "version": "0.36.0",
       "transport": { "type": "stdio" },
       "runtimeArguments": [
         { "type": "positional", "value": "mcp-server", "isRequired": true,
