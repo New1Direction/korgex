@@ -25,7 +25,7 @@ The NEAR anchor payload intentionally contains only hashes and metadata:
   "receipt_sha256": "<hash of signed receipt, optional>",
   "artifact_uri": "<optional encrypted receipt/proof URL>",
   "memo": "fixed issue #123",
-  "korgex_version": "0.35.0"
+  "korgex_version": "0.36.0"
 }
 ```
 

@@ -10,7 +10,7 @@ korgex is an autonomous coding agent that fixes bugs, writes tests, builds featu
 ## Install
 
 ```bash
-pip install https://github.com/New1Direction/korgex/releases/download/v0.2.2/korgex-0.2.2-py3-none-any.whl
+pip install -U korgex
 ```
 
 Verify:

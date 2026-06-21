@@ -47,7 +47,7 @@ jobs:
         run: |
           # Pin to a release tag — never install whatever happens to be on the
           # default branch when CI runs, since that's a supply-chain hole.
-          git clone --depth 1 --branch v0.2.2 https://github.com/New1Direction/Korgex.git /opt/korgex
+          git clone --depth 1 --branch v0.36.0 https://github.com/New1Direction/Korgex.git /opt/korgex
           pip install -r /opt/korgex/requirements.txt
           # Install the package itself so the `korgex` console script becomes available.
           pip install /opt/korgex

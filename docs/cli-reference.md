@@ -5,8 +5,8 @@ korgex is a single binary installed via `pip`. It has two modes: naked-prompt in
 ## Installation
 
 ```bash
-# From the latest GitHub Release
-pip install https://github.com/New1Direction/korgex/releases/download/v0.2.2/korgex-0.2.2-py3-none-any.whl
+# From PyPI
+pip install -U korgex
 
 # From source (editable, reflects live changes)
 git clone https://github.com/New1Direction/korgex.git

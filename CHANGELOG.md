@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-06-21
+
+### Security
+- **Autonomous GitHub workflow prompt handling is shell-safe.** Issue, PR, and comment text is now read from `GITHUB_EVENT_PATH`, written to a prompt file, and passed to `korgex` as argv data via Python `subprocess.run()` instead of being interpolated into shell strings.
+- **Webhook receivers now require GitHub HMAC signatures by default.** Unsigned webhooks fail closed unless local/dev mode explicitly sets `KORGEX_WEBHOOK_ALLOW_UNSIGNED=1`; valid `sha256=` signatures are verified with `KORGEX_WEBHOOK_SECRET`.
+- **Dashboard exposure is localhost-first.** The FastAPI dashboard binds to `127.0.0.1` by default, supports explicit `KORGEX_DASHBOARD_HOST` exposed mode, and warns when bound off-localhost without built-in auth.
+
+### Added
+- **Package smoke CI.** The Linux test workflow now builds wheel/sdist, runs `twine check`, verifies packaged runtime assets (built-in commands, skills, verifier JS), installs the wheel in a clean venv, and checks built-in commands/skills/assets load from the installed artifact.
+- **Requirements mirror check.** CI now verifies `requirements.txt` stays synchronized with `pyproject.toml` runtime dependencies plus dev extras.
+
+### Fixed
+- **Built-in slash commands are included in wheels/sdists.** `commands_builtin/*.md` is now package data, so installed packages keep `/code-review`, `/build-fix`, and `/checkpoint`.
+- **Self-healing test tool returns structured results.** `tool_run_test_with_self_healing()` no longer silently returns `None` after the healer finishes.
+- **Dashboard sandbox status route restored.** `/api/sandbox` now matches the existing dashboard frontend.
+- **Best-of-N worktree attempts are stable and auditable.** Git worktree metadata mutations are serialized to avoid Linux CI races, setup/runner failures become explicit failed attempts instead of disappearing, and attempt errors are recorded in the ledger.
+
+### Changed
+- **Development setup docs now use editable dev extras.** `CONTRIBUTING.md` and README clarify that `pyproject.toml` is authoritative and `requirements.txt` is a compatibility mirror.
+- **Generated launch/demo media stays out of git.** `.gitignore` now covers regenerated Korgex launch/demo artifacts.
+
 ## [0.35.0] — 2026-06-06
 
 ### Added
