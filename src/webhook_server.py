@@ -27,16 +27,31 @@ except ImportError:
     WEBHOOK_AVAILABLE = False
 
 
-SECRET = os.environ.get("KORGEX_WEBHOOK_SECRET", "")
 KORGEX_PATH = os.environ.get("KORGEX_PATH", os.path.expanduser("~/Korgex"))
 
 
-def verify_signature(payload_body: bytes, signature_header: str) -> bool:
-    """Verify GitHub webhook signature."""
-    if not SECRET:
-        return True  # No secret configured — accept all
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _webhook_secret() -> str:
+    return os.environ.get("KORGEX_WEBHOOK_SECRET", "")
+
+
+def verify_signature(payload_body: bytes, signature_header: str, secret: str | None = None) -> bool:
+    """Verify GitHub webhook signature.
+
+    Production default is fail-closed: unsigned webhooks are rejected unless a
+    shared secret is configured. Local/dev deployments that intentionally run
+    without a GitHub secret must opt in with KORGEX_WEBHOOK_ALLOW_UNSIGNED=1.
+    """
+    secret = _webhook_secret() if secret is None else secret
+    if not secret:
+        return _truthy_env("KORGEX_WEBHOOK_ALLOW_UNSIGNED")
+    if not signature_header.startswith("sha256="):
+        return False
     expected = "sha256=" + hmac.new(
-        SECRET.encode(), payload_body, hashlib.sha256
+        secret.encode(), payload_body, hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(expected, signature_header)
 

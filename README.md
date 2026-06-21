@@ -393,6 +393,7 @@ By default korgex acts freely. To have the **editor approve edits** (a `session/
 | `KORGEX_BROWSER_STEALTH` · `KORGEX_BROWSER_EVAL` | Browser stealth mode; allow in-page `evaluate`. |
 | `KORGEX_COMMAND_GUARD` | Toggle the destructive-command guard (on by default). |
 | `KORGEX_EDIT_POLICY` | Edit confirmation policy. |
+| `KORGEX_WEBHOOK_SECRET` · `KORGEX_WEBHOOK_ALLOW_UNSIGNED` | GitHub webhook HMAC secret; unsigned webhooks are rejected unless `KORGEX_WEBHOOK_ALLOW_UNSIGNED=1` is explicitly set for local/dev use. |
 
 **Ledger & bus**
 
