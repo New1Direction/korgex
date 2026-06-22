@@ -794,6 +794,52 @@ class LocalJournalClient:
 
 
 # ---------------------------------------------------------------------------
+# In-memory chain-faithful ledger (no I/O — canonical test double)
+# ---------------------------------------------------------------------------
+
+
+class InMemoryLedgerClient:
+    """Chain-faithful in-memory ledger: same redact/content-ref/body/hash-chain as
+    LocalJournalClient, but appends to a list instead of a file. `.events` passes
+    verify_chain (byte-integrity) AND verify_dag (causal structure) with no I/O.
+    The canonical test double — record an event, then verify the chain. Atomic
+    (locked), so it is NOT a stand-in for the deliberately-racy mock in
+    tests/test_concurrency.py."""
+
+    def __init__(self, source_agent: str | None = None, key: bytes | None = None) -> None:
+        self.events: list[dict] = []
+        self.source_agent = source_agent or _agent_identity()
+        self._key = key
+        self._seq = 0
+        self._last_hash = GENESIS_HASH
+        self._lock = threading.Lock()
+
+    def _append(self, tool_name, args, result, success, duration_ms, triggered_by) -> int:
+        with self._lock:
+            self._seq += 1
+            event, _refs = _build_body(tool_name, args, result, success,
+                                       int(duration_ms), triggered_by, self.source_agent)
+            event["seq_id"] = self._seq
+            event["prev_hash"] = self._last_hash
+            event["entry_hash"] = chain_hash(event, key=self._key)
+            self._last_hash = event["entry_hash"]
+            self.events.append(event)
+            return self._seq
+
+    def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int:
+        return self._append("user_prompt", {"prompt": prompt}, {}, True, 0, triggered_by)
+
+    def record_llm_call(self, model="", prompt_tokens=0, completion_tokens=0, duration_ms=0,
+                        triggered_by=None, **kw) -> int:
+        return self._append("llm_inference", {"model": model, "prompt_tokens": prompt_tokens},
+                            {"completion_tokens": completion_tokens}, True, duration_ms, triggered_by)
+
+    def record_tool_call(self, tool_name, args, result, success, duration_ms,
+                         triggered_by=None) -> int:
+        return self._append(tool_name, args, result, success, duration_ms, triggered_by)
+
+
+# ---------------------------------------------------------------------------
 # Module-level default client (lazily initialised)
 # ---------------------------------------------------------------------------
 
