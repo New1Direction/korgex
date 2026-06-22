@@ -132,7 +132,8 @@ def test_gate_blocks_destructive_bash_and_records_verdict(monkeypatch):
     assert out.blocked and out.block_result["verdict"] == "DESTRUCTIVE_BLOCKED"
     assert out.block_result["category"] == "filesystem"
     # Record via the sink to verify ledger emission
-    _led_sink(led)(out.record)
+    if out.record:
+        _led_sink(led)(out.record)
     assert any(e["tool_name"] == "command_guard.block" for e in led.events)
 
     # safe command passes; non-Bash tool is ignored

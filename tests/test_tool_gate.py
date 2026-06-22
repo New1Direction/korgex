@@ -251,6 +251,8 @@ def test_gate_context_builder_snapshots_agent(tmp_path):
     ctx = a._gate_context()
     assert ctx.repo_root == str(tmp_path)
     assert callable(ctx.checkpoint) and callable(ctx.classify_edit)
+    assert ctx.edit_policy == a.edit_policy
+    assert ctx.interactive == a.interactive
 
 
 def test_sink_forwards_intent_to_korg():
