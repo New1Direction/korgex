@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/v/korgex?color=3fb950&label=pypi" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/dm/korgex?color=3fb950&label=downloads" alt="PyPI downloads"></a>
   <a href="https://pypi.org/project/korgex/"><img src="https://img.shields.io/pypi/pyversions/korgex?color=2dd4bf" alt="Python versions"></a>
   <a href="https://github.com/New1Direction/korgex/actions/workflows/tests.yml"><img src="https://github.com/New1Direction/korgex/actions/workflows/tests.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/tests-1%2C608%20passing-3fb950" alt="tests">
@@ -495,6 +496,41 @@ When stdout is a TTY, the agent streams output live via [Rich](https://rich.read
 ---
 
 ## Architecture
+
+### System overview
+
+```mermaid
+flowchart TD
+    U["You — CLI / REPL / ACP editor<br/>(src/cli.py · repl.py · acp.py)"] --> AG
+
+    subgraph core["KorgexAgent loop — src/agent.py (plan, act, verify)"]
+        AG["Agent loop: run_task()<br/>system prompt + memory + task list"]
+        GATE["Per-call gates<br/>plan-mode · edit-policy · command / egress guard · hooks"]
+        AG --> GATE
+    end
+
+    AG -->|"normalize tool-use shape"| PROV{"Provider<br/>(model id / KORGEX_PROVIDER)"}
+    PROV -->|"claude family"| ANT["Anthropic SDK"]
+    PROV -->|"everything else"| OAI["OpenAI-compatible SDK<br/>OpenAI · OpenRouter · Ollama · Grok · Nous · Venice · Gemini"]
+    ANT --> GATE
+    OAI --> GATE
+
+    GATE --> TR["Tool router<br/>src/tool_abstraction.py"]
+    TR --> BT["Built-in handlers<br/>file · Bash · search · git · GitHub · browser"]
+    TR --> CA["CodeAct kernel<br/>Python-as-action, fuel/mem-metered (opt-in)"]
+    TR --> MCP["MCP servers<br/>src/mcp_client.py"]
+
+    BT --> LED
+    CA --> LED
+    MCP --> LED
+    GATE -. "every decision + result" .-> LED
+
+    LED[("korg-ledger · src/korg_ledger.py<br/>append-only · hash-chained · causal DAG")]
+    LED --> HEAL["Test gate + self-heal<br/>src/test_gate.py · self_healing.py"]
+    HEAL -->|"red, retry"| AG
+    LED --> VERIFY["verify · trace · why · audit · receipt<br/>Ed25519 signing"]
+    VERIFY --> U
+```
 
 ### Tool routing — stable model-facing names → internal handlers
 
