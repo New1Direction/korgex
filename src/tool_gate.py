@@ -18,6 +18,7 @@ from src import command_guard as _cmd_guard
 from src import edit_policy as _EP
 from src import egress_guard as _egress
 from src import plan_mode as _PM
+from src.hooks import run_event
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ class GateContext:
     checkpoint: Callable[[str], "str | None"]
     confirmer: Callable | None
     classify_edit: Callable[[dict, str], tuple]
+    hooks: object = None
 
 
 class Gate(Protocol):
@@ -251,7 +253,39 @@ class EditPolicyGate:
         return GateOutcome(record=rec)
 
 
-GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate(), EgressGate(), PlanModeGate(), EditPolicyGate())  # safety order; extended by later tasks
+class PreToolUseHookGate:
+    """Gate H: PreToolUse hook — deterministic, ledger-native, can block.
+    Runs LAST (7th) so all structural gates fire first. ALLOW when no hooks
+    are configured. Records hook.PreToolUse on ran (success = APPROVED)."""
+    name = "pre_tool_hook"
+
+    def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome:
+        hooks = getattr(ctx, "hooks", None)
+        if not hooks:
+            return ALLOW
+        name = call.get("name")
+        pre = run_event("PreToolUse", name,
+                        {"event": "PreToolUse", "tool_name": name,
+                         "tool_input": call.get("args") or {}, "cwd": ctx.repo_root},
+                        hooks, cwd=ctx.repo_root)
+        rec = None
+        if pre["ran"]:
+            verdict = "BLOCKED" if pre["decision"] == "block" else "APPROVED"
+            rec = LedgerIntent(
+                "hook.PreToolUse", {"tool": name},
+                {"verdict": verdict, "reason": pre["reason"], "policy_hash": pre["policy_hash"]},
+                verdict == "APPROVED")
+        if pre["decision"] == "block":
+            return GateOutcome(
+                blocked=True,
+                block_result={"error": "blocked by PreToolUse hook",
+                              "reason": pre["reason"] or "policy denied this tool call"},
+                record=rec)
+        return GateOutcome(record=rec)
+
+
+GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate(),
+                           EgressGate(), PlanModeGate(), EditPolicyGate(), PreToolUseHookGate())
 
 
 def evaluate(

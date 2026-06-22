@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from src import tool_gate as tg
-from src.tool_gate import GateOutcome, LedgerIntent, ALLOW, EgressGate, EditPolicyGate
+from src.tool_gate import GateOutcome, LedgerIntent, ALLOW, EgressGate, EditPolicyGate, PreToolUseHookGate
 
 
 @dataclass
@@ -253,6 +253,38 @@ def test_gate_context_builder_snapshots_agent(tmp_path):
     assert callable(ctx.checkpoint) and callable(ctx.classify_edit)
     assert ctx.edit_policy == a.edit_policy
     assert ctx.interactive == a.interactive
+
+
+def _ctx_hooks(hooks):
+    return tg.GateContext(**{**_ctx().__dict__, "hooks": hooks})
+
+
+def test_hook_blocks_and_records(monkeypatch):
+    import src.tool_gate as m
+    monkeypatch.setattr(m, "run_event", lambda *a, **k: {
+        "decision": "block", "reason": "nope", "ran": True, "policy_hash": "abc"})
+    out = PreToolUseHookGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "x"}}, _ctx_hooks({"PreToolUse": [1]}))
+    assert out.blocked is True
+    assert out.record.tool_name == "hook.PreToolUse"
+    assert out.record.success is False
+
+
+def test_hook_allow_records_when_ran(monkeypatch):
+    import src.tool_gate as m
+    monkeypatch.setattr(m, "run_event", lambda *a, **k: {
+        "decision": "allow", "reason": "", "ran": True, "policy_hash": "abc"})
+    out = PreToolUseHookGate().evaluate(
+        {"id": "1", "name": "Read", "args": {}}, _ctx_hooks({"PreToolUse": [1]}))
+    assert out.blocked is False
+    assert out.record.tool_name == "hook.PreToolUse"
+    assert out.record.success is True
+
+
+def test_hook_noop_when_no_hooks():
+    out = PreToolUseHookGate().evaluate(
+        {"id": "1", "name": "Read", "args": {}}, _ctx_hooks(None))
+    assert out is tg.ALLOW
 
 
 def test_sink_forwards_intent_to_korg():

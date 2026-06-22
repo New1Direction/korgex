@@ -1242,27 +1242,6 @@ class KorgexAgent:
                         if outcome.blocked:
                             blocks[call["id"]] = outcome.block_result
                             continue
-                        if hooks:
-                            pre = run_event(
-                                "PreToolUse", call["name"],
-                                {"event": "PreToolUse", "tool_name": call["name"],
-                                 "tool_input": call["args"], "cwd": self.repo_root},
-                                hooks, cwd=self.repo_root,
-                            )
-                            if pre["ran"]:
-                                verdict = "BLOCKED" if pre["decision"] == "block" else "APPROVED"
-                                korg.record_tool_call(
-                                    tool_name="hook.PreToolUse",
-                                    args={"tool": call["name"]},
-                                    result={"verdict": verdict, "reason": pre["reason"],
-                                            "policy_hash": pre["policy_hash"]},
-                                    success=(verdict == "APPROVED"),
-                                    duration_ms=0, triggered_by=llm_seq)
-                            if pre["decision"] == "block":
-                                blocks[call["id"]] = {
-                                    "error": "blocked by PreToolUse hook",
-                                    "reason": pre["reason"] or "policy denied this tool call"}
-                                continue
                         self.plugins.invoke("pre_tool", call)
                         to_run.append(call)
 
@@ -1319,35 +1298,6 @@ class KorgexAgent:
                     if outcome.blocked:
                         messages.append(self._tool_result_turn(call["id"], outcome.block_result))
                         continue
-
-                    # ── PreToolUse gate: deterministic, ledger-native ────────
-                    # A matching hook can block the call. Every verdict (allow or
-                    # deny) is recorded as its own causal event carrying the
-                    # policy_hash of the rule that fired — so governance over tool
-                    # calls is rewindable and auditable, not fire-and-forget.
-                    if hooks:
-                        pre = run_event(
-                            "PreToolUse", call["name"],
-                            {"event": "PreToolUse", "tool_name": call["name"],
-                             "tool_input": call["args"], "cwd": self.repo_root},
-                            hooks, cwd=self.repo_root,
-                        )
-                        if pre["ran"]:
-                            verdict = "BLOCKED" if pre["decision"] == "block" else "APPROVED"
-                            korg.record_tool_call(
-                                tool_name="hook.PreToolUse",
-                                args={"tool": call["name"]},
-                                result={"verdict": verdict, "reason": pre["reason"],
-                                        "policy_hash": pre["policy_hash"]},
-                                success=(verdict == "APPROVED"),
-                                duration_ms=0,
-                                triggered_by=llm_seq,
-                            )
-                        if pre["decision"] == "block":
-                            blocked = {"error": "blocked by PreToolUse hook",
-                                       "reason": pre["reason"] or "policy denied this tool call"}
-                            messages.append(self._tool_result_turn(call["id"], blocked))
-                            continue  # the tool never runs
 
                     self.plugins.invoke("pre_tool", call)
                     # Snapshot the file's pre-edit bytes so LSP enforcement (Gate L)
@@ -1756,29 +1706,7 @@ class KorgexAgent:
         # Thread the effective (possibly egress-redacted) name + args downstream.
         name = call["name"]
         args = call["args"]
-        # PreToolUse hook — deterministic, ledger-native, can block.
         hooks = self.hooks if self.hooks is not None else load_hooks(self.repo_root)
-        if hooks:
-            pre = run_event(
-                "PreToolUse", name,
-                {"event": "PreToolUse", "tool_name": name,
-                 "tool_input": args, "cwd": self.repo_root},
-                hooks, cwd=self.repo_root,
-            )
-            if pre["ran"]:
-                verdict = "BLOCKED" if pre["decision"] == "block" else "APPROVED"
-                korg.record_tool_call(
-                    tool_name="hook.PreToolUse",
-                    args={"tool": name},
-                    result={"verdict": verdict, "reason": pre["reason"],
-                            "policy_hash": pre["policy_hash"]},
-                    success=(verdict == "APPROVED"), duration_ms=0,
-                    triggered_by=code_action_seq)
-            if pre["decision"] == "block":
-                blocked = {"error": "blocked by PreToolUse hook",
-                           "reason": pre["reason"] or "policy denied this tool call"}
-                return blocked
-
         self.plugins.invoke("pre_tool", call)
 
         # Rewind parity (Ctrl-R): a file mutated from INSIDE a python action must be
@@ -1885,6 +1813,7 @@ class KorgexAgent:
             checkpoint=self._checkpoint_before_mutation,
             confirmer=self._edit_confirmer,
             classify_edit=self._classify_edit,
+            hooks=self.hooks if self.hooks is not None else load_hooks(self.repo_root),
         )
 
     def _gate_sink(self, korg, llm_seq):
