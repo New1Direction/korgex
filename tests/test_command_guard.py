@@ -90,7 +90,20 @@ def test_empty_and_whitespace_are_safe():
     assert assess_command("   \n  ") is None
 
 
-# ── the agent gate: blocks Bash + records a tamper-evident ledger verdict ─────
+# ── the pipeline gate: blocks Bash + records a tamper-evident ledger verdict ──
+# Migrated from agent._command_guard_block to CommandGuardGate.evaluate + pipeline.
+
+from src.tool_gate import CommandGuardGate, evaluate as tg_evaluate, GateContext
+
+
+def _cg_ctx(edit_policy="free"):
+    return GateContext(
+        workspace_root=None, protected_paths=None, edit_policy=edit_policy,
+        plan_mode_active=False, plan_path=None, repo_root="/tmp",
+        interactive=False, mcp_tools=None,
+        checkpoint=lambda p: None, confirmer=None,
+        classify_edit=lambda c, p: (True, "allow", ""))
+
 
 class _Led:
     def __init__(self):
@@ -101,43 +114,49 @@ class _Led:
         return len(self.events)
 
 
-def test_gate_blocks_destructive_bash_and_records_verdict(tmp_path, monkeypatch):
-    monkeypatch.delenv("KORGEX_EDIT_POLICY", raising=False)   # default FREE → guard active
+def _led_sink(led):
+    def sink(intent):
+        led.record_tool_call(
+            tool_name=intent.tool_name, args=intent.args, result=intent.result,
+            success=intent.success, duration_ms=0, triggered_by=1)
+    return sink
+
+
+def test_gate_blocks_destructive_bash_and_records_verdict(monkeypatch):
     monkeypatch.delenv("KORGEX_COMMAND_GUARD", raising=False)
-    from src.agent import KorgexAgent
-    agent = KorgexAgent(repo_root=str(tmp_path), interactive=False)
+    ctx = _cg_ctx(edit_policy="free")
     led = _Led()
 
-    block = agent._command_guard_block(
-        {"id": "c1", "name": "Bash", "args": {"command": "rm -rf /"}}, led, llm_seq=1)
-    assert block is not None and block["verdict"] == "DESTRUCTIVE_BLOCKED"
-    assert block["category"] == "filesystem"
-    # a tamper-evident ledger verdict was recorded (korgex why/verify-native)
+    out = CommandGuardGate().evaluate(
+        {"id": "c1", "name": "Bash", "args": {"command": "rm -rf /"}}, ctx)
+    assert out.blocked and out.block_result["verdict"] == "DESTRUCTIVE_BLOCKED"
+    assert out.block_result["category"] == "filesystem"
+    # Record via the sink to verify ledger emission
+    if out.record:
+        _led_sink(led)(out.record)
     assert any(e["tool_name"] == "command_guard.block" for e in led.events)
 
     # safe command passes; non-Bash tool is ignored
-    assert agent._command_guard_block(
-        {"id": "c2", "name": "Bash", "args": {"command": "ls -la"}}, led, llm_seq=1) is None
-    assert agent._command_guard_block(
-        {"id": "c3", "name": "Read", "args": {"file_path": "x"}}, led, llm_seq=1) is None
+    assert CommandGuardGate().evaluate(
+        {"id": "c2", "name": "Bash", "args": {"command": "ls -la"}}, ctx).blocked is False
+    assert CommandGuardGate().evaluate(
+        {"id": "c3", "name": "Read", "args": {"file_path": "x"}}, ctx).blocked is False
 
 
-def test_gate_off_under_bypass(tmp_path, monkeypatch):
-    monkeypatch.setenv("KORGEX_EDIT_POLICY", "bypass")  # read at construction
-    from src.agent import KorgexAgent
-    agent = KorgexAgent(repo_root=str(tmp_path), interactive=False)
-    assert agent.edit_policy == "bypass"
+def test_gate_off_under_bypass(monkeypatch):
+    from src import tool_gate as tg
+    ctx = _cg_ctx(edit_policy="bypass")
     led = _Led()
-    assert agent._command_guard_block(
-        {"id": "c1", "name": "Bash", "args": {"command": "rm -rf /"}}, led, llm_seq=1) is None
+    out = CommandGuardGate().evaluate(
+        {"id": "c1", "name": "Bash", "args": {"command": "rm -rf /"}}, ctx)
+    assert out is tg.ALLOW
     assert led.events == []  # BYPASS = no gate, nothing recorded
 
 
-def test_gate_env_optout(tmp_path, monkeypatch):
-    monkeypatch.delenv("KORGEX_EDIT_POLICY", raising=False)
+def test_gate_env_optout(monkeypatch):
     monkeypatch.setenv("KORGEX_COMMAND_GUARD", "off")
-    from src.agent import KorgexAgent
-    agent = KorgexAgent(repo_root=str(tmp_path), interactive=False)
-    led = _Led()
-    assert agent._command_guard_block(
-        {"id": "c1", "name": "Bash", "args": {"command": "rm -rf /"}}, led, llm_seq=1) is None
+    from src import tool_gate as tg
+    ctx = _cg_ctx()
+    out = CommandGuardGate().evaluate(
+        {"id": "c1", "name": "Bash", "args": {"command": "rm -rf /"}}, ctx)
+    assert out is tg.ALLOW
