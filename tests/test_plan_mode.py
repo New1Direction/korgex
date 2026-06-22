@@ -93,30 +93,58 @@ class _Led:
     def record_llm_call(self, **kw): return 1
 
 
+def _pm_ctx(plan_mode_active, plan_path="/tmp/PLAN.md"):
+    from src.tool_gate import GateContext
+    return GateContext(
+        workspace_root=None, protected_paths=None, edit_policy="free",
+        plan_mode_active=plan_mode_active, plan_path=plan_path,
+        repo_root="/tmp", interactive=False, mcp_tools=None,
+        checkpoint=lambda p: None, confirmer=None,
+        classify_edit=lambda c, p: (True, "allow", ""))
+
+
 def test_agent_plan_mode_blocks_edit_but_allows_plan_write(tmp_path):
     from src.agent import KorgexAgent
+    from src.tool_gate import PlanModeGate
     a = KorgexAgent(repo_root=str(tmp_path), interactive=False, mode="plan")
     assert a.plan_mode_active is True  # mode="plan" turns it on
 
     led = _Led()
+    ctx = a._gate_context()
+
     # an Edit to source is blocked while planning
-    edit_block = a._plan_mode_block({"name": "Edit", "args": {"file_path": str(tmp_path / "foo.py")}}, led, 1)
-    assert edit_block is not None and "plan mode" in edit_block["error"].lower()
+    out = PlanModeGate().evaluate(
+        {"id": "1", "name": "Edit", "args": {"file_path": str(tmp_path / "foo.py")}}, ctx)
+    assert out.blocked and "plan mode" in out.block_result["error"].lower()
+    # forward the intent to the led for the assertion
+    if out.record:
+        led.record_tool_call(
+            tool_name=out.record.tool_name, args=out.record.args,
+            result=out.record.result, success=out.record.success,
+            duration_ms=0, triggered_by=1)
     assert any(e["tool_name"] == "plan_mode.block" for e in led.events)
 
     # writing the plan file is allowed
-    plan_ok = a._plan_mode_block({"name": "Write", "args": {"file_path": a.plan_path}}, _Led(), 1)
-    assert plan_ok is None
+    out2 = PlanModeGate().evaluate(
+        {"id": "2", "name": "Write", "args": {"file_path": a.plan_path}}, ctx)
+    assert not out2.blocked
 
     # after approval, the edit goes through the plan gate
     a.approve_plan()
     assert a.plan_mode_active is False
-    assert a._plan_mode_block({"name": "Edit", "args": {"file_path": str(tmp_path / "foo.py")}}, _Led(), 1) is None
+    ctx3 = a._gate_context()
+    out3 = PlanModeGate().evaluate(
+        {"id": "3", "name": "Edit", "args": {"file_path": str(tmp_path / "foo.py")}}, ctx3)
+    assert not out3.blocked
 
 
 def test_agent_not_in_plan_mode_by_default(tmp_path):
     from src.agent import KorgexAgent
+    from src.tool_gate import PlanModeGate
     a = KorgexAgent(repo_root=str(tmp_path), interactive=False)
     assert a.plan_mode_active is False
     # nothing blocked when plan mode is off
-    assert a._plan_mode_block({"name": "Bash", "args": {"command": "ls"}}, _Led(), 1) is None
+    ctx = a._gate_context()
+    out = PlanModeGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "ls"}}, ctx)
+    assert not out.blocked

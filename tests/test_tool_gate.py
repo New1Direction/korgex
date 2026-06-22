@@ -243,3 +243,27 @@ def test_edit_policy_auto_uses_classifier():
     assert calls == [("Edit", "/work/x.py")]
     assert out.blocked is False
     assert out.record.tool_name == "edit_policy"
+
+
+def test_gate_context_builder_snapshots_agent(tmp_path):
+    from src.agent import KorgexAgent
+    a = KorgexAgent(model="gpt-4o", repo_root=str(tmp_path))
+    ctx = a._gate_context()
+    assert ctx.repo_root == str(tmp_path)
+    assert callable(ctx.checkpoint) and callable(ctx.classify_edit)
+
+
+def test_sink_forwards_intent_to_korg():
+    from src.tool_gate import LedgerIntent
+    recorded = []
+
+    class _Korg:
+        def record_tool_call(self, **kw): recorded.append(kw); return 7
+
+    from src.agent import KorgexAgent
+    a = KorgexAgent.__new__(KorgexAgent)            # no __init__ needed for this unit
+    sink = a._gate_sink(_Korg(), llm_seq=42)
+    sink(LedgerIntent("edit_policy", {"a": 1}, {"r": 2}, True))
+    assert recorded[0]["tool_name"] == "edit_policy"
+    assert recorded[0]["triggered_by"] == 42
+    assert recorded[0]["duration_ms"] == 0

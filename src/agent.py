@@ -25,12 +25,9 @@ from src import cache_compaction as _cc
 from src.korg_ledger import get_default_client as _korg
 from src.sanitize import redact as _redact
 from src import edit_policy as _EP
-from src import command_guard as _cmd_guard
-from src import egress_guard as _egress
 from src.plugins import PluginRegistry, default_plugin_dirs, load_plugins
 from src.hooks import load_hooks, run_event
-from src.workspace import path_within
-from src.guardrails import is_protected
+from src import tool_gate as _tg
 
 
 SYSTEM_PROMPT = """You are Korgex — an elite, autonomous, terminal-native coding agent. You take software tasks all the way to done: exploring code, fixing bugs, building features, writing tests, refactoring, shipping. You work with confidence and initiative, and you finish what you start.
@@ -1240,39 +1237,10 @@ class KorgexAgent:
                     blocks: dict = {}
                     to_run = []
                     for call in agent_batch:
-                        ws_block = self._workspace_block(call)
-                        if ws_block is not None:
-                            korg.record_tool_call(
-                                tool_name="workspace.guard",
-                                args={"tool": call["name"], "path": call["args"].get("file_path")},
-                                result=ws_block, success=False, duration_ms=0,
-                                triggered_by=llm_seq)
-                            blocks[call["id"]] = ws_block
-                            continue
-                        gr_block = self._guardrail_block(call)
-                        if gr_block is not None:
-                            korg.record_tool_call(
-                                tool_name="guardrail.block",
-                                args={"tool": call["name"], "path": call["args"].get("file_path")},
-                                result=gr_block, success=False, duration_ms=0,
-                                triggered_by=llm_seq)
-                            blocks[call["id"]] = gr_block
-                            continue
-                        cg_block = self._command_guard_block(call, korg, llm_seq)
-                        if cg_block is not None:
-                            blocks[call["id"]] = cg_block
-                            continue
-                        eg_block = self._egress_guard(call, korg, llm_seq)
-                        if eg_block is not None:
-                            blocks[call["id"]] = eg_block
-                            continue
-                        pm_block = self._plan_mode_block(call, korg, llm_seq)
-                        if pm_block is not None:
-                            blocks[call["id"]] = pm_block
-                            continue
-                        ep_block = self._edit_policy_block(call, korg, llm_seq)
-                        if ep_block is not None:
-                            blocks[call["id"]] = ep_block
+                        outcome, call = _tg.evaluate(
+                            call, self._gate_context(), self._gate_sink(korg, llm_seq))
+                        if outcome.blocked:
+                            blocks[call["id"]] = outcome.block_result
                             continue
                         if hooks:
                             pre = run_event(
@@ -1342,68 +1310,15 @@ class KorgexAgent:
                         messages.append(self._tool_result_turn(call["id"], tool_result))
 
                 for call in serial_calls:
-                    # ── Workspace boundary guard (Gate A): hard safety ───────
-                    # When isolated, a Write/Edit whose resolved path escapes the
-                    # workspace root is blocked outright and recorded as a
-                    # WORKSPACE_VIOLATION verdict — a self-edit can't corrupt
-                    # anything outside its worktree.
-                    ws_block = self._workspace_block(call)
-                    if ws_block is not None:
-                        korg.record_tool_call(
-                            tool_name="workspace.guard",
-                            args={"tool": call["name"], "path": call["args"].get("file_path")},
-                            result=ws_block,
-                            success=False, duration_ms=0, triggered_by=llm_seq,
-                        )
-                        messages.append(self._tool_result_turn(call["id"], ws_block))
-                        continue  # the write never happens
-
-                    # ── Guardrail fence (Gate G): protect gate-enforcing code ─
-                    gr_block = self._guardrail_block(call)
-                    if gr_block is not None:
-                        korg.record_tool_call(
-                            tool_name="guardrail.block",
-                            args={"tool": call["name"], "path": call["args"].get("file_path")},
-                            result=gr_block,
-                            success=False, duration_ms=0, triggered_by=llm_seq,
-                        )
-                        messages.append(self._tool_result_turn(call["id"], gr_block))
-                        continue  # the agent can't edit its own guardrails
-
-                    # ── Destructive-command floor (Bash) ─────────────────────
-                    # Path gates never inspect command strings; this blocks a
-                    # clearly-catastrophic shell command (rm -rf /, dd, curl|sh…).
-                    cg_block = self._command_guard_block(call, korg, llm_seq)
-                    if cg_block is not None:
-                        messages.append(self._tool_result_turn(call["id"], cg_block))
+                    # ── ToolGate pipeline (Gates A/G/C/E/P/EP) ──────────────
+                    # All six native gates run in a single pipeline call. The
+                    # returned `call` carries egress-redacted args when Gate E
+                    # fires in redact mode — use it for all downstream dispatch.
+                    outcome, call = _tg.evaluate(
+                        call, self._gate_context(), self._gate_sink(korg, llm_seq))
+                    if outcome.blocked:
+                        messages.append(self._tool_result_turn(call["id"], outcome.block_result))
                         continue
-
-                    # ── Egress floor: secret/exfil shapes leaving the box ────
-                    # Inspect the OUTBOUND payload of transmitting tools; flag (+
-                    # ledger), redact, or block per KORGEX_EGRESS. Additive: flag
-                    # mode (default) never alters or blocks.
-                    eg_block = self._egress_guard(call, korg, llm_seq)
-                    if eg_block is not None:
-                        messages.append(self._tool_result_turn(call["id"], eg_block))
-                        continue
-
-                    # ── Plan mode (read-only until approved) ─────────────────
-                    # While planning, only reads/searches + writing the plan file
-                    # are allowed; everything side-effecting is blocked so the
-                    # approach gets approved before any costly/irreversible work.
-                    pm_block = self._plan_mode_block(call, korg, llm_seq)
-                    if pm_block is not None:
-                        messages.append(self._tool_result_turn(call["id"], pm_block))
-                        continue  # blocked: read-only plan mode
-
-                    # ── Edit-approval policy + checkpoint-before-mutation ────
-                    # Consult the policy before any file-mutating tool; the gate
-                    # records its own verdict event and snapshots the workspace
-                    # before an approved edit (in an isolated worktree).
-                    ep_block = self._edit_policy_block(call, korg, llm_seq)
-                    if ep_block is not None:
-                        messages.append(self._tool_result_turn(call["id"], ep_block))
-                        continue  # the edit was refused by the approval policy
 
                     # ── PreToolUse gate: deterministic, ledger-native ────────
                     # A matching hook can block the call. Every verdict (allow or
@@ -1831,42 +1746,16 @@ class KorgexAgent:
         # apply unchanged.
         call = {"id": f"codeact:{_new_codeact_id()}", "name": name, "args": args}
 
-        # ── Run the SAME gate stack the serial loop runs ──────────────────────
-        # Workspace boundary (Gate A) — block writes outside the worktree.
-        ws_block = self._workspace_block(call)
-        if ws_block is not None:
-            korg.record_tool_call(
-                tool_name="workspace.guard",
-                args={"tool": name, "path": args.get("file_path")},
-                result=ws_block, success=False, duration_ms=0,
-                triggered_by=code_action_seq)
-            return ws_block
-        # Guardrail fence (Gate G) — protect gate-enforcing files.
-        gr_block = self._guardrail_block(call)
-        if gr_block is not None:
-            korg.record_tool_call(
-                tool_name="guardrail.block",
-                args={"tool": name, "path": args.get("file_path")},
-                result=gr_block, success=False, duration_ms=0,
-                triggered_by=code_action_seq)
-            return gr_block
-        # Destructive-command floor — a Bash run from inside a python action is gated
-        # for catastrophic commands identically to a top-level Bash call.
-        cg_block = self._command_guard_block(call, korg, code_action_seq)
-        if cg_block is not None:
-            return cg_block
-        # Egress floor — secret/exfil shapes leaving via this tool (records its own event).
-        eg_block = self._egress_guard(call, korg, code_action_seq)
-        if eg_block is not None:
-            return eg_block
-        # Plan mode (read-only until approved) — records its own block event.
-        pm_block = self._plan_mode_block(call, korg, code_action_seq)
-        if pm_block is not None:
-            return pm_block
-        # Edit-approval policy + checkpoint-before-mutation — records its own event.
-        ep_block = self._edit_policy_block(call, korg, code_action_seq)
-        if ep_block is not None:
-            return ep_block
+        # ── ToolGate pipeline (Gates A/G/C/E/P/EP) ───────────────────────────
+        # Run the same gate stack as the serial loop. The returned `call` carries
+        # egress-redacted args; use it for all downstream dispatch.
+        outcome, call = _tg.evaluate(
+            call, self._gate_context(), self._gate_sink(korg, code_action_seq))
+        if outcome.blocked:
+            return outcome.block_result
+        # Thread the effective (possibly egress-redacted) name + args downstream.
+        name = call["name"]
+        args = call["args"]
         # PreToolUse hook — deterministic, ledger-native, can block.
         hooks = self.hooks if self.hooks is not None else load_hooks(self.repo_root)
         if hooks:
@@ -1981,56 +1870,30 @@ class KorgexAgent:
         except Exception:
             pass
 
-    def _workspace_block(self, call: dict):
-        """Return a blocked-result dict if `call` would write outside the
-        workspace root, else None. Only active when workspace_root is set."""
-        if not self.workspace_root:
-            return None
-        if call.get("name") not in ("Write", "Edit"):
-            return None
-        path = (call.get("args") or {}).get("file_path")
-        if path and not path_within(self.workspace_root, path):
-            return {
-                "error": "blocked: write outside the isolated workspace",
-                "verdict": "WORKSPACE_VIOLATION",
-                "reason": f"{path} resolves outside workspace_root {self.workspace_root}",
-            }
-        return None
-
-    def _guardrail_block(self, call: dict):
-        """Return a blocked-result dict if `call` would edit a guardrail-critical
-        file, else None. Only active when protected_paths is set (Gate G)."""
-        if not self.protected_paths:
-            return None
-        if call.get("name") not in ("Write", "Edit"):
-            return None
-        path = (call.get("args") or {}).get("file_path")
-        if path and is_protected(path, self.protected_paths):
-            return {
-                "error": "blocked: editing a guardrail-critical file requires human approval",
-                "verdict": "PROTECTED_PATH",
-                "reason": f"{path} is a protected guardrail file (Gate G)",
-            }
-        return None
-
-    def _plan_mode_block(self, call: dict, korg, llm_seq):
-        """Plan-mode read-only gate. When `self.plan_mode_active`, block any
-        side-effecting tool except writing the plan file, recording the refusal to
-        the ledger. Returns a block-result dict if refused, else None (inactive or
-        read-only tool → passes straight through)."""
-        if not self.plan_mode_active:
-            return None
-        from src import plan_mode as _PM
-        block = _PM.is_blocked(call.get("name"), call.get("args") or {}, self.plan_path)
-        if block is None:
-            return None
-        korg.record_tool_call(
-            tool_name="plan_mode.block",
-            args={"tool": call.get("name")},
-            result={"verdict": "PLAN_MODE_READONLY", "reason": block["reason"]},
-            success=False, duration_ms=0, triggered_by=llm_seq,
+    def _gate_context(self):
+        """Snapshot the current agent state into a frozen GateContext for the
+        ToolGate pipeline. Called once per tool-dispatch site."""
+        return _tg.GateContext(
+            workspace_root=self.workspace_root,
+            protected_paths=self.protected_paths,
+            edit_policy=self.edit_policy,
+            plan_mode_active=self.plan_mode_active,
+            plan_path=self.plan_path,
+            repo_root=self.repo_root,
+            interactive=self.interactive,
+            mcp_tools=getattr(_TA, "_MCP_TOOLS", None),
+            checkpoint=self._checkpoint_before_mutation,
+            confirmer=self._edit_confirmer,
+            classify_edit=self._classify_edit,
         )
-        return block
+
+    def _gate_sink(self, korg, llm_seq):
+        """Return a sink callable that forwards a LedgerIntent to korg.record_tool_call."""
+        def _sink(intent):
+            korg.record_tool_call(
+                tool_name=intent.tool_name, args=intent.args, result=intent.result,
+                success=intent.success, duration_ms=0, triggered_by=llm_seq)
+        return _sink
 
     def approve_plan(self):
         """Exit plan mode → execution is now allowed (the user approved the plan)."""
@@ -2171,134 +2034,6 @@ class KorgexAgent:
         except (TypeError, ValueError):
             return 1024
 
-    def _command_guard_block(self, call: dict, korg, llm_seq):
-        """Semantic destructive-command FLOOR for Bash (the path-based gates never
-        inspect command strings). Returns a block dict — and records a tamper-evident
-        ledger verdict — for a clearly-catastrophic command (rm -rf /, dd of=/dev/…,
-        fork bomb, curl|sh, git push --force, …), else None.
-
-        On by default; OFF under BYPASS and via KORGEX_COMMAND_GUARD=off. A floor
-        against ACCIDENTS, not a sandbox (obfuscation evades it). Fails OPEN."""
-        if call.get("name") != "Bash" or self.edit_policy == _EP.BYPASS:
-            return None
-        if os.environ.get("KORGEX_COMMAND_GUARD", "on").strip().lower() in (
-                "0", "false", "no", "off"):
-            return None
-        command = (call.get("args") or {}).get("command", "") or ""
-        try:
-            verdict = _cmd_guard.assess_command(command)
-        except Exception:
-            return None  # fail-open — the guard must never break the loop
-        if not verdict:
-            return None
-        block = {
-            "error": f"blocked: {verdict['category']} — {verdict['reason']}",
-            "verdict": "DESTRUCTIVE_BLOCKED",
-            "category": verdict["category"],
-            "reason": verdict["reason"],
-            "hint": "safety floor against accidental destruction — scope the path, "
-                    "rephrase, or run it yourself if intended "
-                    "(KORGEX_COMMAND_GUARD=off, or BYPASS policy, disables this).",
-        }
-        korg.record_tool_call(
-            tool_name="command_guard.block",
-            args={"tool": "Bash", "command": command[:200], "category": verdict["category"]},
-            result={"verdict": "DESTRUCTIVE_BLOCKED", "category": verdict["category"],
-                    "reason": verdict["reason"], "matched": verdict["matched"],
-                    "severity": verdict["severity"]},
-            success=False, duration_ms=0, triggered_by=llm_seq)
-        return block
-
-    def _egress_guard(self, call: dict, korg, llm_seq):
-        """Shape-based egress FLOOR. Inspects the OUTBOUND payload of a transmitting
-        tool (web/bus/browser/MCP/network-Bash) for secret shapes + large encoded
-        blobs and records a tamper-evident verdict. Acts per ``KORGEX_EGRESS``:
-
-          flag   (default, ON) → record `egress.flag`, warn, proceed unchanged.
-          redact               → record `egress.redact`, mask the secret in
-                                  ``call['args']``, proceed with the masked payload.
-          block                → record `egress.block`, return a refusal dict.
-          off                  → disabled.
-
-        OFF under BYPASS. Fails OPEN — the guard must never break the loop. The
-        recorded verdict carries finding SHAPES only (never the raw secret), so the
-        shareable ledger can't itself become the exfil channel."""
-        if self.edit_policy == _EP.BYPASS:
-            return None
-        try:
-            mode = _egress.mode_from_env(os.environ)
-            if mode == "off":
-                return None
-            name = call.get("name")
-            args = call.get("args") or {}
-            mcp = getattr(_TA, "_MCP_TOOLS", None)
-            if not _egress.is_outbound(name, args, mcp_tools=mcp):
-                return None
-            allow = _egress.split_env_list("KORGEX_EGRESS_ALLOW")
-            deny = _egress.split_env_list("KORGEX_EGRESS_DENY")
-            verdict = _egress.inspect(name, args, allow=allow, deny=deny, mcp_tools=mcp)
-            if not verdict["findings"] and not verdict["denied_by_list"]:
-                return None  # nothing risky leaving — stay out of the way
-            new_args, action = _egress.apply(verdict, name, args, mode)
-            event = {"allow": "egress.flag", "redacted": "egress.redact",
-                     "blocked": "egress.block"}.get(action, "egress.flag")
-            korg.record_tool_call(
-                tool_name=event,
-                args={"tool": name, "destination": verdict.get("destination")},
-                result=_egress.verdict_payload(name, verdict, mode=mode, action=action,
-                                               allow=allow, deny=deny),
-                success=(action != "blocked"), duration_ms=0, triggered_by=llm_seq)
-            shapes = ", ".join(sorted({f["label"] for f in verdict["findings"]})) or "denied destination"
-            if action == "blocked":
-                return {
-                    "error": f"blocked: egress guard — outbound payload contains {shapes} "
-                             f"bound for {verdict.get('destination') or 'an external destination'}",
-                    "verdict": "EGRESS_BLOCKED",
-                    "hint": "a secret/exfil shape was detected leaving the box. Remove it, or set "
-                            "KORGEX_EGRESS=flag (warn only) or off if this is intended.",
-                }
-            if action == "redacted":
-                call["args"] = new_args  # the masked payload is what actually leaves
-            try:
-                sys.stderr.write(f"  ⚠ egress[{mode}]: {shapes} → "
-                                 f"{verdict.get('destination') or '?'}\n")
-            except Exception:
-                pass
-            return None
-        except Exception:
-            return None  # fail-open
-
-    def _edit_policy_block(self, call: dict, korg, llm_seq):
-        """Edit-approval gate. For a file-mutating tool: consult the policy, record
-        the decision to the ledger, and checkpoint the workspace BEFORE an approved
-        mutation. Returns a blocked-result dict if the edit is refused, else None.
-        Non-file-mutating calls pass straight through (returns None, records nothing)."""
-        args = call.get("args") or {}
-        path = _EP.mutating_path(call.get("name"), args)
-        if path is None:
-            return None
-        # 'auto' policy: an LLM classifies the action against the user's rules
-        # (4 buckets). The hard-block floor still applies first — a classifier can
-        # never re-allow a protected path (.git/.ssh/.gnupg).
-        if self.edit_policy == "auto" and not _EP.is_hard_blocked(path):
-            proceed, action, reason = self._classify_edit(call, path)
-        else:
-            proceed, action, reason = _EP.guard_decision(
-                path, policy=self.edit_policy, cwd=self.repo_root,
-                interactive=self.interactive, confirmer=self._edit_confirmer,
-            )
-        sha = self._checkpoint_before_mutation(path) if proceed else None
-        korg.record_tool_call(
-            tool_name="edit_policy",
-            args={"tool": call.get("name"), "path": path, "policy": self.edit_policy},
-            result={"action": action, "reason": reason, "allowed": proceed, "checkpoint": sha},
-            success=proceed, duration_ms=0, triggered_by=llm_seq,
-        )
-        if not proceed:
-            return {"error": "edit refused by approval policy",
-                    "verdict": action.upper().replace("-", "_"), "reason": reason}
-        return None
-
     def _classify_edit(self, call: dict, path: str) -> tuple:
         """Run the 'auto' classifier policy for one edit. Loads the user's permission
         rules (from ~/.korgex/config.json under "permission_rules"), asks a cheap
@@ -2350,8 +2085,8 @@ class KorgexAgent:
         On a veto it REVERTS the file to `pre_content` (or deletes it if the edit
         created it: `pre_content is None`), records a verifiable `lsp.enforce`
         policy event, and returns a fix-or-revert block dict for the tool result.
-        Otherwise returns None (advisory behavior is unchanged). Mirrors
-        `_edit_policy_block`: pure decision + one ledger event + a block dict."""
+        Otherwise returns None (advisory behavior is unchanged). Mirrors the
+        edit gate pattern: pure decision + one ledger event + a block dict."""
         if not self.lsp_enforce:
             return None
         path = _EP.mutating_path(call.get("name"), call.get("args") or {})
