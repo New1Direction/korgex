@@ -117,10 +117,11 @@ def test_auto_policy_blocks_via_classifier(tmp_path, monkeypatch):
     monkeypatch.setattr(a, "_policy_judge",
                         lambda desc, intent, rules, env: {"bucket": "hard_deny", "reason": "billing is off-limits"})
 
-    led = _Led()
-    block = a._edit_policy_block({"name": "Edit", "args": {"file_path": str(tmp_path / "billing.py")}}, led, 1)
-    assert block is not None and "refused" in block["error"]
-    assert any(e.get("tool_name") == "edit_policy" for e in led.events)
+    from src.tool_gate import EditPolicyGate
+    outcome = EditPolicyGate().evaluate(
+        {"name": "Edit", "args": {"file_path": str(tmp_path / "billing.py")}}, a._gate_context())
+    assert outcome.blocked and "refused" in outcome.block_result["error"]
+    assert outcome.record is not None and outcome.record.tool_name == "edit_policy"
 
 
 def test_auto_policy_allows_via_classifier(tmp_path, monkeypatch):
@@ -133,8 +134,10 @@ def test_auto_policy_allows_via_classifier(tmp_path, monkeypatch):
     a.edit_policy = "auto"
     monkeypatch.setattr(a, "_policy_judge",
                         lambda *args, **k: {"bucket": "allow", "reason": "source edit"})
-    block = a._edit_policy_block({"name": "Edit", "args": {"file_path": str(tmp_path / "src.py")}}, _Led(), 1)
-    assert block is None  # allowed → no block
+    from src.tool_gate import EditPolicyGate
+    outcome = EditPolicyGate().evaluate(
+        {"name": "Edit", "args": {"file_path": str(tmp_path / "src.py")}}, a._gate_context())
+    assert not outcome.blocked  # allowed → no block
 
 
 def test_auto_policy_hardblock_floor_still_wins(tmp_path, monkeypatch):
@@ -147,8 +150,10 @@ def test_auto_policy_hardblock_floor_still_wins(tmp_path, monkeypatch):
     monkeypatch.setattr(a, "_policy_judge",
                         lambda *args, **k: {"bucket": "allow", "reason": "yolo"})
     gitpath = str(tmp_path / ".git" / "config")
-    block = a._edit_policy_block({"name": "Edit", "args": {"file_path": gitpath}}, _Led(), 1)
-    assert block is not None  # hard-block floor blocked it regardless of the judge
+    from src.tool_gate import EditPolicyGate
+    outcome = EditPolicyGate().evaluate(
+        {"name": "Edit", "args": {"file_path": gitpath}}, a._gate_context())
+    assert outcome.blocked  # hard-block floor blocked it regardless of the judge
 
 
 def test_auto_policy_no_rules_falls_back_safely(tmp_path, monkeypatch):
@@ -161,6 +166,8 @@ def test_auto_policy_no_rules_falls_back_safely(tmp_path, monkeypatch):
     # judge would allow, but with no rules we must fall back to deterministic policy,
     # which for an in-workspace path under tmp auto-approves → no block.
     f = tmp_path / "x.py"
-    block = a._edit_policy_block({"name": "Edit", "args": {"file_path": str(f)}}, _Led(), 1)
+    from src.tool_gate import EditPolicyGate
+    outcome = EditPolicyGate().evaluate(
+        {"name": "Edit", "args": {"file_path": str(f)}}, a._gate_context())
     # workspace policy on a tmp path → allowed; just assert it didn't crash + returned a decision
-    assert block is None or "refused" in block.get("error", "")
+    assert not outcome.blocked or "refused" in (outcome.block_result or {}).get("error", "")
