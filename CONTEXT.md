@@ -37,11 +37,12 @@ rewritten payload (egress redact) — applied immutably by the pipeline, not mut
 in place.
 
 **GateContext** — a frozen snapshot of the read-only agent state a gate needs
-(`workspace_root`, `protected_paths`, `plan_mode_active`, `plan_path`,
-`edit_policy`, `repo_root`, `interactive`, `active_intent`) plus injected
+(`workspace_root`, `protected_paths`, `edit_policy`, `plan_mode_active`,
+`plan_path`, `repo_root`, `interactive`, `mcp_tools`, `hooks`) plus injected
 **capability callables** for the effectful/model-dependent bits
 (`checkpoint(path) -> sha`, `confirmer`, `classify_edit`). Built per turn. It is
-the seam that makes gates testable without an agent.
+the seam that makes gates testable without an agent. (`classify_edit` closes over
+the agent's active intent, so the gate needs no separate intent field.)
 
 **LedgerIntent** — the *data* a gate wants recorded (`tool_name, args, result,
 success`); `triggered_by` is supplied by the sink, not the gate. The pipeline's
