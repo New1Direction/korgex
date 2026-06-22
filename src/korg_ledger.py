@@ -829,10 +829,15 @@ class InMemoryLedgerClient:
     def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int:
         return self._append("user_prompt", {"prompt": prompt}, {}, True, 0, triggered_by)
 
-    def record_llm_call(self, model="", prompt_tokens=0, completion_tokens=0, duration_ms=0,
-                        triggered_by=None, **kw) -> int:
-        return self._append("llm_inference", {"model": model, "prompt_tokens": prompt_tokens},
-                            {"completion_tokens": completion_tokens}, True, duration_ms, triggered_by)
+    def record_llm_call(self, model, prompt_tokens, completion_tokens, duration_ms,
+                        triggered_by, assistant_text=None, cache_read_tokens=0,
+                        cache_creation_tokens=0, uncached_input_tokens=None) -> int:
+        result: dict[str, Any] = {"completion_tokens": completion_tokens}
+        if assistant_text is not None:
+            result["text"] = assistant_text
+        args = _llm_call_args(model, prompt_tokens, cache_read_tokens,
+                              cache_creation_tokens, uncached_input_tokens)
+        return self._append("llm_inference", args, result, True, duration_ms, triggered_by)
 
     def record_tool_call(self, tool_name, args, result, success, duration_ms,
                          triggered_by=None) -> int:

@@ -30,6 +30,30 @@ def test_conformance_with_local_journal(tmp_path):
     disk = [json.loads(l) for l in (tmp_path / "j.jsonl").read_text().splitlines() if l.strip()]
     assert mem.events[0] == disk[0]   # identical: same redact/content-ref/body/chain
 
+def test_conformance_llm_call_with_local_journal(tmp_path):
+    # same input + same key + same source_agent => byte-identical llm_inference event
+    key = b"k" * 32
+    mem = KL.InMemoryLedgerClient(source_agent="tester", key=key)
+    loc = KL.LocalJournalClient(journal_path=str(tmp_path / "j.jsonl"), source_agent="tester")
+    loc._key = key  # pin the key so hashes match
+    kwargs = dict(
+        model="gpt-4",
+        prompt_tokens=20,
+        completion_tokens=10,
+        duration_ms=250,
+        triggered_by=None,
+        assistant_text="hello",
+        cache_read_tokens=5,
+        cache_creation_tokens=3,
+        uncached_input_tokens=12,
+    )
+    mem.record_llm_call(**kwargs)
+    loc.record_llm_call(**kwargs)
+    import json
+    disk = [json.loads(l) for l in (tmp_path / "j.jsonl").read_text().splitlines() if l.strip()]
+    assert mem.events[0] == disk[0]   # cache fields must not be dropped
+
+
 def test_seq_return():
     c = KL.InMemoryLedgerClient(source_agent="tester")
     s1 = c.record_user_prompt("prompt")
