@@ -27,37 +27,8 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from src.korg_ledger import ThreadSafeLedger, verify_dag  # noqa: E402
-
-
-# ── in-memory ledger with a non-atomic seq counter (the race point) ────────
-
-class _MemLedger:
-    def __init__(self):
-        self.events = []
-        self._seq = 0
-
-    def _append(self, kind, triggered_by, tool_name=None, args=None, result=None):
-        self._seq += 1
-        ev = {"seq_id": self._seq, "kind": kind, "triggered_by": triggered_by}
-        if tool_name is not None:
-            ev["tool_name"] = tool_name
-        if args is not None:
-            ev["args"] = args
-        if result is not None:
-            ev["result"] = result
-        self.events.append(ev)
-        return self._seq
-
-    def record_user_prompt(self, prompt, triggered_by=None):
-        return self._append("user_prompt", triggered_by)
-
-    def record_llm_call(self, **kw):
-        return self._append("llm", kw.get("triggered_by"))
-
-    def record_tool_call(self, **kw):
-        return self._append("tool", kw.get("triggered_by"),
-                            tool_name=kw.get("tool_name"), args=kw.get("args"),
-                            result=kw.get("result"))
+from src import korg_ledger as KL  # noqa: E402
+from src.ledger_spec import verify_chain  # noqa: E402
 
 
 def _stub_runner(ledger):
@@ -82,7 +53,7 @@ def _stub_runner(ledger):
 def test_run_orchestration_builds_one_connected_verifiable_dag():
     from src.orchestrate import run_orchestration
 
-    inner = _MemLedger()
+    inner = KL.InMemoryLedgerClient(source_agent="orch-test")
     runner, seen = _stub_runner(inner)
     spec = {"nodes": [
         {"id": "a", "prompt": "do a", "subagent_type": "explore", "deps": []},
@@ -93,8 +64,8 @@ def test_run_orchestration_builds_one_connected_verifiable_dag():
     out = run_orchestration(spec, runner, inner, parent_seq=None)
 
     # exactly ONE orchestrate root user_prompt was recorded.
-    roots = [e for e in inner.events if e["kind"] == "user_prompt"]
-    orchestrate_roots = [e for e in roots if e["triggered_by"] is None]
+    roots = [e for e in inner.events if e["tool_name"] == "user_prompt"]
+    orchestrate_roots = [e for e in roots if e.get("triggered_by") is None]
     assert len(orchestrate_roots) == 1
     root_seq = orchestrate_roots[0]["seq_id"]
     assert out["root_seq"] == root_seq
@@ -105,11 +76,12 @@ def test_run_orchestration_builds_one_connected_verifiable_dag():
 
     # … and every node root traces back to the orchestrate root (one connected
     # subtree): node roots chain under root_seq.
-    node_roots = [e for e in roots if e["triggered_by"] == root_seq]
+    node_roots = [e for e in roots if e.get("triggered_by") == root_seq]
     assert len(node_roots) == 3
 
     # the whole concurrently-written DAG is well-formed.
     assert verify_dag(inner.events) == []
+    assert verify_chain(inner.events) == []   # the orchestration DAG is now byte-verifiable too
     assert set(out["completed"]) == {"a", "b", "c"}
     assert out["failed"] == {}
     assert out["skipped"] == []
@@ -120,7 +92,7 @@ def test_run_orchestration_builds_one_connected_verifiable_dag():
 def test_failed_node_skips_dependents_and_records_typed_events():
     from src.orchestrate import run_orchestration
 
-    inner = _MemLedger()
+    inner = KL.InMemoryLedgerClient(source_agent="orch-test")
 
     def runner(node, parent_seq):
         if node.id == "a":
@@ -152,7 +124,7 @@ def test_failed_node_skips_dependents_and_records_typed_events():
 
     # each is chained under the one orchestrate root.
     root = [e for e in inner.events
-            if e["kind"] == "user_prompt" and e["triggered_by"] is None][0]
+            if e["tool_name"] == "user_prompt" and e.get("triggered_by") is None][0]
     for e in failed_ev + skipped_ev:
         assert e["triggered_by"] == root["seq_id"]
 
@@ -195,13 +167,13 @@ def _scripted_agent(ledger):
 def test_run_orchestration_task_wraps_thread_safe_and_one_root():
     captured = {}
 
-    class _SpyMem(_MemLedger):
+    class _SpyMem(KL.InMemoryLedgerClient):
         def record_user_prompt(self, prompt, triggered_by=None):
             # capture the agent's live ledger TYPE at the first root write
             captured.setdefault("ledger_type_during", type(agent.ledger).__name__)
             return super().record_user_prompt(prompt, triggered_by=triggered_by)
 
-    inner = _SpyMem()
+    inner = _SpyMem(source_agent="orch-test")
     agent = _scripted_agent(inner)
     prev = agent.ledger
 
@@ -218,8 +190,8 @@ def test_run_orchestration_task_wraps_thread_safe_and_one_root():
     assert agent.ledger is prev
 
     # exactly ONE orchestrate root recorded.
-    roots = [e for e in inner.events if e["kind"] == "user_prompt"]
-    orchestrate_roots = [e for e in roots if e["triggered_by"] is None]
+    roots = [e for e in inner.events if e["tool_name"] == "user_prompt"]
+    orchestrate_roots = [e for e in roots if e.get("triggered_by") is None]
     assert len(orchestrate_roots) == 1
     assert out["root_seq"] == orchestrate_roots[0]["seq_id"]
 
@@ -231,14 +203,14 @@ def test_run_orchestration_task_wraps_thread_safe_and_one_root():
 
 
 def test_run_orchestration_task_does_not_double_wrap_thread_safe():
-    inner = _MemLedger()
+    inner = KL.InMemoryLedgerClient(source_agent="orch-test")
     agent = _scripted_agent(ThreadSafeLedger(inner))
     pre_wrapped = agent.ledger
 
     spec = {"nodes": [{"id": "a", "prompt": "do a", "subagent_type": "explore", "deps": []}]}
     agent.run_orchestration_task(spec)
 
-    # the inner client is the original _MemLedger, not a nested ThreadSafeLedger.
+    # the inner client is the original InMemoryLedgerClient, not a nested ThreadSafeLedger.
     assert agent.ledger is pre_wrapped
     assert getattr(pre_wrapped, "_inner", None) is inner
     assert verify_dag(inner.events) == []
@@ -306,13 +278,13 @@ def test_orchestrate_tool_path_wraps_thread_safe_and_chains_root():
     read self.ledger — raced seq_ids; and the root was orphaned with triggered_by=None.)"""
     captured = {}
 
-    class _SpyMem(_MemLedger):
+    class _SpyMem(KL.InMemoryLedgerClient):
         def record_user_prompt(self, prompt, triggered_by=None):
             if str(prompt).startswith("[orchestrate]"):
                 captured["ledger_type_during"] = type(agent.ledger).__name__
             return super().record_user_prompt(prompt, triggered_by=triggered_by)
 
-    inner = _SpyMem()
+    inner = _SpyMem(source_agent="orch-test")
     agent = _scripted_agent(inner)
     parent_seq = inner.record_user_prompt("parent turn")  # the spawning turn
 
@@ -367,7 +339,7 @@ def test_orchestration_seed_anchors_run_under_immutable_spec():
     # can trace + prove any edit against the spec.
     from src.orchestrate import run_orchestration
 
-    inner = _MemLedger()
+    inner = KL.InMemoryLedgerClient(source_agent="orch-test")
     runner, _ = _stub_runner(inner)
     spec = {"seed": {"goal": "Build a login form",
                      "acceptance_criteria": ["email + password", "validates input"]},
@@ -387,7 +359,7 @@ def test_orchestration_seed_anchors_run_under_immutable_spec():
 def test_orchestration_without_seed_is_unchanged():
     from src.orchestrate import run_orchestration
 
-    inner = _MemLedger()
+    inner = KL.InMemoryLedgerClient(source_agent="orch-test")
     runner, _ = _stub_runner(inner)
     out = run_orchestration(
         {"nodes": [{"id": "a", "prompt": "x", "subagent_type": "code", "deps": []}]},
@@ -402,7 +374,7 @@ def test_dispatch_hard_blocks_delegation_for_restricted_subagent():
     that nonetheless emits one — hallucination / injection — is blocked, never spawns."""
     from src.agent import subagent_tools
 
-    agent = _scripted_agent(_MemLedger())
+    agent = _scripted_agent(KL.InMemoryLedgerClient(source_agent="orch-test"))
     explore = subagent_tools("explore")
     assert "Agent" not in explore and "Orchestrate" not in explore   # the soft layer
     for name in ("Agent", "Orchestrate"):
