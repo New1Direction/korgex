@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Redaction now applies on the HTTP ledger transport's tool-call path.** `KorgLedgerClient.record_tool_call` (the HTTP transport) previously assembled and enqueued the event body **without** running `redact()` first — so a tool call's args/result containing a secret could reach the blob store and the remote ledger unredacted. Secret-scrubbing is now centralized in a shared `_build_body()` that every record-tool-call path uses, closing the gap. The scrub is idempotent on already-masked values, so it is safe even where a server also redacts. (The local-journal and bridge transports already redacted; only the HTTP `record_tool_call` path was affected.)
+- **CodeAct python actions now enforce egress redaction, not just record it.** When a tool call ran inside a CodeAct python action, the egress guard recorded its `egress.redact` verdict but the action dispatched the *original, unredacted* args — the redacted payload was computed and then dropped. The new tool-call gate returns the redacted call as the one that actually runs, so redaction inside python actions matches the serial tool loop.
+
+### Added
+- **`InMemoryLedgerClient` — a chain-faithful, file-free ledger client.** Implements the same three-method protocol as the other transports and produces **byte-identical** events to `LocalJournalClient` (verified by conformance tests, including the cache-accounting fields on `llm_inference`), but appends to an in-memory list instead of a file. Its `.events` pass both `verify_chain` (hash integrity) and `verify_dag` (causal structure), so tests can record events and verify the chain with no I/O. Replaces hand-rolled in-memory mocks.
+
 ### Changed
+- **Tool-call gating is now one pipeline.** The gate sequence (workspace → guardrail → command-guard → egress → plan-mode → edit-policy → `PreToolUse` hook) that was copy-pasted across three call sites in the agent loop — the parallel-agent pre-pass, the serial loop, and the CodeAct bridge — is now a single `tool_gate` pipeline every tool call crosses, with each gate a small adapter behind one `evaluate(call, ctx) -> GateOutcome` interface and ledger recording done in one place. Behavior is unchanged except the two redaction fixes above; the agent module shed ~430 lines and six gate methods.
+- **Ledger event-body construction is centralized.** A shared `_build_body()` assembles the event body (redact → content-ref → fields) for the HTTP, local-journal, and in-memory clients, so adding an event field touches one place instead of each transport.
 - Refreshed README/docs after the 0.36.0 launch: current test count, localhost dashboard guidance, `/api/sandbox`, PyPI-first MCP Registry instructions, and `server.json` manifest version.
 - `korgex mcp-server` now advertises the installed package version in its MCP `serverInfo` instead of a stale internal value.
 
