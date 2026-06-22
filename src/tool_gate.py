@@ -16,6 +16,7 @@ from src.workspace import path_within
 from src.guardrails import is_protected
 from src import command_guard as _cmd_guard
 from src import edit_policy as _EP
+from src import egress_guard as _egress
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,56 @@ class CommandGuardGate:
         return GateOutcome(blocked=True, block_result=result, record=rec)
 
 
-GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate())  # populated by later tasks, in safety order
+class EgressGate:
+    """Gate E: shape-based guard over data leaving the box. Records egress.flag
+    (advisory, always allows), egress.redact (redacts, allows), or egress.block
+    (blocks). OFF under BYPASS; fails open (any exception → ALLOW)."""
+    name = "egress"
+
+    def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome:
+        if ctx.edit_policy == _EP.BYPASS:
+            return ALLOW
+        try:
+            mode = _egress.mode_from_env(os.environ)
+            if mode == "off":
+                return ALLOW
+            name = call.get("name")
+            args = call.get("args") or {}
+            if not _egress.is_outbound(name, args, mcp_tools=ctx.mcp_tools):
+                return ALLOW
+            allow = _egress.split_env_list("KORGEX_EGRESS_ALLOW")
+            deny = _egress.split_env_list("KORGEX_EGRESS_DENY")
+            verdict = _egress.inspect(name, args, allow=allow, deny=deny,
+                                      mcp_tools=ctx.mcp_tools)
+            if not verdict["findings"] and not verdict["denied_by_list"]:
+                return ALLOW
+            new_args, action = _egress.apply(verdict, name, args, mode)
+            event = {"allow": "egress.flag", "redacted": "egress.redact",
+                     "blocked": "egress.block"}.get(action, "egress.flag")
+            rec = LedgerIntent(
+                event, {"tool": name, "destination": verdict.get("destination")},
+                _egress.verdict_payload(name, verdict, mode=mode, action=action,
+                                        allow=allow, deny=deny),
+                action != "blocked")
+            shapes = ", ".join(sorted({f["label"] for f in verdict["findings"]})) \
+                or "denied destination"
+            if action == "blocked":
+                result = {
+                    "error": f"blocked: egress guard — outbound payload contains {shapes} "
+                             f"bound for {verdict.get('destination') or 'an external destination'}",
+                    "verdict": "EGRESS_BLOCKED",
+                    "hint": "a secret/exfil shape was detected leaving the box. Remove it, or "
+                            "set KORGEX_EGRESS=flag (warn only) or off if this is intended.",
+                }
+                return GateOutcome(blocked=True, block_result=result, record=rec)
+            if action == "redacted":
+                return GateOutcome(new_args=new_args, record=rec)
+            return GateOutcome(record=rec)  # flag: record, allow
+        except Exception:
+            return ALLOW  # fail-open
+
+
+GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate(), EgressGate())  # safety order; extended by later tasks
 
 
 def evaluate(
