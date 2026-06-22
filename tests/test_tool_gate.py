@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from src import tool_gate as tg
-from src.tool_gate import GateOutcome, LedgerIntent, ALLOW, EgressGate
+from src.tool_gate import GateOutcome, LedgerIntent, ALLOW, EgressGate, EditPolicyGate
 
 
 @dataclass
@@ -168,6 +168,13 @@ def test_egress_off_under_bypass():
     assert out is tg.ALLOW
 
 
+def _ctx_edit(policy="workspace", checkpoint=None, classify=None):
+    base = _ctx().__dict__
+    return tg.GateContext(**{**base, "edit_policy": policy, "repo_root": "/work",
+                             "checkpoint": checkpoint or (lambda p: "sha123"),
+                             "classify_edit": classify or (lambda c, p: (True, "allow", ""))})
+
+
 def _ctx_plan(active, plan_path="/work/PLAN.md"):
     return tg.GateContext(**{**_ctx().__dict__,
                              "plan_mode_active": active, "plan_path": plan_path})
@@ -192,3 +199,47 @@ def test_plan_mode_inactive_passthrough():
     out = tg.PlanModeGate().evaluate(
         {"id": "1", "name": "Bash", "args": {"command": "ls"}}, _ctx_plan(False))
     assert out is tg.ALLOW
+
+
+def test_edit_policy_ignores_non_mutating():
+    out = EditPolicyGate().evaluate(
+        {"id": "1", "name": "Read", "args": {"file_path": "x.py"}}, _ctx_edit())
+    assert out is tg.ALLOW
+
+
+def test_edit_policy_allows_and_checkpoints_and_records():
+    seen_paths = []
+    out = EditPolicyGate().evaluate(
+        {"id": "1", "name": "Write", "args": {"file_path": "/work/x.py"}},
+        _ctx_edit(policy="free", checkpoint=lambda p: seen_paths.append(p) or "sha9"))
+    assert out.blocked is False
+    assert seen_paths == ["/work/x.py"]                  # checkpoint ran
+    assert out.record.tool_name == "edit_policy"
+    assert out.record.success is True
+    assert out.record.result["checkpoint"] == "sha9"
+
+
+def test_edit_policy_blocks_and_records_failure():
+    # policy=auto routes to the injected classifier; force denial deterministically.
+    cp = []
+    out = EditPolicyGate().evaluate(
+        {"id": "1", "name": "Write", "args": {"file_path": "/work/x.py"}},
+        _ctx_edit(policy="auto", checkpoint=lambda p: cp.append(p) or "X",
+                  classify=lambda c, p: (False, "deny", "blocked by rule")))
+    assert out.blocked is True
+    assert out.block_result["verdict"] == "DENY"
+    assert out.block_result["reason"] == "blocked by rule"
+    assert out.record.tool_name == "edit_policy"
+    assert out.record.success is False
+    assert cp == []   # checkpoint must NOT run on a refused edit
+
+
+def test_edit_policy_auto_uses_classifier():
+    calls = []
+    out = EditPolicyGate().evaluate(
+        {"id": "1", "name": "Edit", "args": {"file_path": "/work/x.py"}},
+        _ctx_edit(policy="auto",
+                  classify=lambda c, p: calls.append((c["name"], p)) or (True, "allow", "ok")))
+    assert calls == [("Edit", "/work/x.py")]
+    assert out.blocked is False
+    assert out.record.tool_name == "edit_policy"

@@ -218,7 +218,40 @@ class PlanModeGate:
                 {"verdict": "PLAN_MODE_READONLY", "reason": block["reason"]}, False))
 
 
-GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate(), EgressGate(), PlanModeGate())  # safety order; extended by later tasks
+class EditPolicyGate:
+    """Gate E (edit): edit approval policy enforcement. Applies only to mutating
+    tools (Write/Edit); otherwise ALLOW. Routes to ctx.classify_edit for
+    policy=auto (unless hard-blocked), else ctx.guard_decision. Records
+    edit_policy on allow AND block. Calls ctx.checkpoint only when proceeding."""
+    name = "edit_policy"
+
+    def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome:
+        args = call.get("args") or {}
+        path = _EP.mutating_path(call.get("name"), args)
+        if path is None:
+            return ALLOW
+        if ctx.edit_policy == _EP.AUTO and not _EP.is_hard_blocked(path):
+            proceed, action, reason = ctx.classify_edit(call, path)
+        else:
+            proceed, action, reason = _EP.guard_decision(
+                path, policy=ctx.edit_policy, cwd=ctx.repo_root,
+                interactive=ctx.interactive, confirmer=ctx.confirmer)
+        sha = ctx.checkpoint(path) if proceed else None
+        rec = LedgerIntent(
+            "edit_policy",
+            {"tool": call.get("name"), "path": path, "policy": ctx.edit_policy},
+            {"action": action, "reason": reason, "allowed": proceed, "checkpoint": sha},
+            proceed)
+        if not proceed:
+            return GateOutcome(
+                blocked=True,
+                block_result={"error": "edit refused by approval policy",
+                              "verdict": action.upper().replace("-", "_"), "reason": reason},
+                record=rec)
+        return GateOutcome(record=rec)
+
+
+GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate(), EgressGate(), PlanModeGate(), EditPolicyGate())  # safety order; extended by later tasks
 
 
 def evaluate(
