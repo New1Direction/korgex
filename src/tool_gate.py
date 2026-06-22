@@ -8,11 +8,14 @@ an injected sink and applies redacted args immutably. First block wins.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
 from src.workspace import path_within
 from src.guardrails import is_protected
+from src import command_guard as _cmd_guard
+from src import edit_policy as _EP
 
 
 @dataclass(frozen=True)
@@ -107,7 +110,45 @@ class GuardrailGate:
                                 {"tool": call["name"], "path": path}, result, False))
 
 
-GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate())  # populated by later tasks, in safety order
+class CommandGuardGate:
+    """Gate C: destructive-command safety floor for Bash. Bash-only; OFF under
+    BYPASS and KORGEX_COMMAND_GUARD=off; fails open (any exception → ALLOW).
+    Records command_guard.block on block only."""
+    name = "command_guard"
+
+    def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome:
+        if call.get("name") != "Bash" or ctx.edit_policy == _EP.BYPASS:
+            return ALLOW
+        if os.environ.get("KORGEX_COMMAND_GUARD", "on").strip().lower() in (
+                "0", "false", "no", "off"):
+            return ALLOW
+        command = (call.get("args") or {}).get("command", "") or ""
+        try:
+            verdict = _cmd_guard.assess_command(command)
+        except Exception:
+            return ALLOW  # fail-open — a safety floor must never break the loop
+        if not verdict:
+            return ALLOW
+        result = {
+            "error": f"blocked: {verdict['category']} — {verdict['reason']}",
+            "verdict": "DESTRUCTIVE_BLOCKED",
+            "category": verdict["category"],
+            "reason": verdict["reason"],
+            "hint": "safety floor against accidental destruction — scope the path, "
+                    "rephrase, or run it yourself if intended "
+                    "(KORGEX_COMMAND_GUARD=off, or BYPASS policy, disables this).",
+        }
+        rec = LedgerIntent(
+            "command_guard.block",
+            {"tool": "Bash", "command": command[:200], "category": verdict["category"]},
+            {"verdict": "DESTRUCTIVE_BLOCKED", "category": verdict["category"],
+             "reason": verdict["reason"], "matched": verdict["matched"],
+             "severity": verdict["severity"]},
+            False)
+        return GateOutcome(blocked=True, block_result=result, record=rec)
+
+
+GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate())  # populated by later tasks, in safety order
 
 
 def evaluate(

@@ -95,3 +95,33 @@ def test_guardrail_blocks_protected_path():
     assert out.blocked is True
     assert out.block_result["verdict"] == "PROTECTED_PATH"
     assert out.record.tool_name == "guardrail.block"
+
+
+def test_command_guard_blocks_rm_rf_root(monkeypatch):
+    monkeypatch.delenv("KORGEX_COMMAND_GUARD", raising=False)
+    out = tg.CommandGuardGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "rm -rf /"}}, _ctx())
+    assert out.blocked is True
+    assert out.block_result["verdict"] == "DESTRUCTIVE_BLOCKED"
+    assert out.record.tool_name == "command_guard.block"
+
+
+def test_command_guard_off_via_env(monkeypatch):
+    monkeypatch.setenv("KORGEX_COMMAND_GUARD", "off")
+    out = tg.CommandGuardGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "rm -rf /"}}, _ctx())
+    assert out is tg.ALLOW
+
+
+def test_command_guard_skips_under_bypass():
+    ctx = tg.GateContext(**{**_ctx().__dict__, "edit_policy": "bypass"})
+    out = tg.CommandGuardGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "rm -rf /"}}, ctx)
+    assert out is tg.ALLOW
+
+
+def test_command_guard_allows_safe_bash(monkeypatch):
+    monkeypatch.delenv("KORGEX_COMMAND_GUARD", raising=False)
+    out = tg.CommandGuardGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "ls -la"}}, _ctx())
+    assert out is tg.ALLOW
