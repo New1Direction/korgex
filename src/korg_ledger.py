@@ -273,6 +273,40 @@ def _maybe_content_ref(
     return {"_ref": f"sha256:{sha256}", "size_bytes": size_bytes}
 
 
+def _build_body(
+    tool_name: str,
+    args: Any,
+    result: Any,
+    success: bool,
+    duration_ms: int,
+    triggered_by: "int | None",
+    source_agent: str,
+) -> "tuple[dict, list[dict]]":
+    """Assemble the common event body: redact (BEFORE blob-extraction — secrets
+    must never reach the shareable journal/blob store), apply the 1 KB
+    content-ref threshold, and return (body, payload_refs). Chain fields
+    (seq_id/prev_hash/entry_hash) are added by the locally-chaining clients,
+    not here."""
+    payload_refs: list[dict] = []
+    args = redact(args)
+    result = redact(result)
+    safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
+    safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
+    body: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "source_agent": source_agent,
+        "tool_name": tool_name,
+        "args": safe_args,
+        "result": safe_result,
+        "payload_refs": payload_refs,
+        "success": success,
+        "duration_ms": duration_ms,
+    }
+    if triggered_by is not None:
+        body["triggered_by"] = triggered_by
+    return body, payload_refs
+
+
 # ---------------------------------------------------------------------------
 # Background writer — spec §7.5
 # ---------------------------------------------------------------------------
@@ -415,25 +449,10 @@ class KorgLedgerClient:
         if not self._is_available():
             return
 
-        payload_refs: list[dict] = []
-
-        # Apply 1 KB content-ref threshold uniformly (spec §3 + §7.2)
-        safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
-        safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
-
-        body: dict[str, Any] = {
-            "schema_version": SCHEMA_VERSION,
-            "source_agent": self.source_agent,
-            "tool_name": tool_name,
-            "args": safe_args,
-            "result": safe_result,
-            "payload_refs": payload_refs,
-            "success": success,
-            "duration_ms": duration_ms,
-        }
-        if triggered_by is not None:
-            body["triggered_by"] = triggered_by
-
+        body, _refs = _build_body(
+            tool_name, args, result, success, duration_ms,
+            triggered_by, self.source_agent,
+        )
         self._get_writer().enqueue(body)
 
     def record_user_prompt(self, prompt: str, triggered_by: int | None = None) -> int | None:
@@ -743,26 +762,11 @@ class LocalJournalClient:
         with self._lock:
             self._seq += 1
             seq = self._seq
-            payload_refs: list[dict] = []
-            # Scrub secrets BEFORE blob-extraction + hashing: the journal (and the
-            # blob store) must never carry a credential — these proofs are shareable.
-            args = redact(args)
-            result = redact(result)
-            safe_args = _maybe_content_ref(args, f"{tool_name}.args", payload_refs)
-            safe_result = _maybe_content_ref(result, f"{tool_name}.result", payload_refs)
-            event: dict[str, Any] = {
-                "schema_version": SCHEMA_VERSION,
-                "seq_id": seq,
-                "source_agent": self.source_agent,
-                "tool_name": tool_name,
-                "args": safe_args,
-                "result": safe_result,
-                "payload_refs": payload_refs,
-                "success": success,
-                "duration_ms": duration_ms,
-            }
-            if triggered_by is not None:
-                event["triggered_by"] = triggered_by
+            event, _refs = _build_body(
+                tool_name, args, result, success,
+                int(duration_ms), triggered_by, self.source_agent,
+            )
+            event["seq_id"] = seq
             event["prev_hash"] = self._last_hash
             event["entry_hash"] = chain_hash(event, key=self._key)
             self._last_hash = event["entry_hash"]
