@@ -166,3 +166,29 @@ def test_egress_off_under_bypass():
     out = EgressGate().evaluate(
         {"id": "1", "name": "WebFetch", "args": {"url": "https://x.test"}}, ctx)
     assert out is tg.ALLOW
+
+
+def _ctx_plan(active, plan_path="/work/PLAN.md"):
+    return tg.GateContext(**{**_ctx().__dict__,
+                             "plan_mode_active": active, "plan_path": plan_path})
+
+
+def test_plan_mode_blocks_side_effect_when_active():
+    out = tg.PlanModeGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "ls"}}, _ctx_plan(True))
+    assert out.blocked is True
+    assert out.block_result["error"].startswith("blocked in plan mode")
+    assert out.record.tool_name == "plan_mode.block"
+
+
+def test_plan_mode_allows_plan_file_write():
+    out = tg.PlanModeGate().evaluate(
+        {"id": "1", "name": "Write", "args": {"file_path": "/work/PLAN.md"}},
+        _ctx_plan(True))
+    assert out is tg.ALLOW
+
+
+def test_plan_mode_inactive_passthrough():
+    out = tg.PlanModeGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "ls"}}, _ctx_plan(False))
+    assert out is tg.ALLOW

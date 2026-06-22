@@ -17,6 +17,7 @@ from src.guardrails import is_protected
 from src import command_guard as _cmd_guard
 from src import edit_policy as _EP
 from src import egress_guard as _egress
+from src import plan_mode as _PM
 
 
 @dataclass(frozen=True)
@@ -198,7 +199,26 @@ class EgressGate:
             return ALLOW  # fail-open
 
 
-GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate(), EgressGate())  # safety order; extended by later tasks
+class PlanModeGate:
+    """Gate P: plan-mode read-only enforcement. When plan_mode is active,
+    blocks all side-effecting tools except Write to the plan file itself.
+    Records plan_mode.block on block only."""
+    name = "plan_mode"
+
+    def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome:
+        if not ctx.plan_mode_active:
+            return ALLOW
+        block = _PM.is_blocked(call.get("name"), call.get("args") or {}, ctx.plan_path)
+        if block is None:
+            return ALLOW
+        return GateOutcome(
+            blocked=True, block_result=block,
+            record=LedgerIntent(
+                "plan_mode.block", {"tool": call.get("name")},
+                {"verdict": "PLAN_MODE_READONLY", "reason": block["reason"]}, False))
+
+
+GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate(), CommandGuardGate(), EgressGate(), PlanModeGate())  # safety order; extended by later tasks
 
 
 def evaluate(
