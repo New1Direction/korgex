@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-06-22
+
 ### Security
 - **Redaction now applies on the HTTP ledger transport's tool-call path.** `KorgLedgerClient.record_tool_call` (the HTTP transport) previously assembled and enqueued the event body **without** running `redact()` first — so a tool call's args/result containing a secret could reach the blob store and the remote ledger unredacted. Secret-scrubbing is now centralized in a shared `_build_body()` that every record-tool-call path uses, closing the gap. The scrub is idempotent on already-masked values, so it is safe even where a server also redacts. (The local-journal and bridge transports already redacted; only the HTTP `record_tool_call` path was affected.)
 - **CodeAct python actions now enforce egress redaction, not just record it.** When a tool call ran inside a CodeAct python action, the egress guard recorded its `egress.redact` verdict but the action dispatched the *original, unredacted* args — the redacted payload was computed and then dropped. The new tool-call gate returns the redacted call as the one that actually runs, so redaction inside python actions matches the serial tool loop.
