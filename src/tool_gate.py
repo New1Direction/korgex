@@ -11,6 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
+from src.workspace import path_within
+from src.guardrails import is_protected
+
 
 @dataclass(frozen=True)
 class LedgerIntent:
@@ -57,7 +60,54 @@ class Gate(Protocol):
     def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome: ...
 
 
-GATES: tuple[Gate, ...] = ()  # populated by later tasks, in safety order
+_WRITE_TOOLS = ("Write", "Edit")
+
+
+class WorkspaceGate:
+    """Gate A: enforce workspace isolation. Blocks Write/Edit outside the
+    workspace root, if one is set."""
+    name = "workspace"
+
+    def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome:
+        if not ctx.workspace_root or call.get("name") not in _WRITE_TOOLS:
+            return ALLOW
+        path = (call.get("args") or {}).get("file_path")
+        if not path or path_within(ctx.workspace_root, path):
+            return ALLOW
+        result = {
+            "error": "blocked: write outside the isolated workspace",
+            "verdict": "WORKSPACE_VIOLATION",
+            "reason": f"{path} resolves outside workspace_root {ctx.workspace_root}",
+        }
+        return GateOutcome(
+            blocked=True, block_result=result,
+            record=LedgerIntent("workspace.guard",
+                                {"tool": call["name"], "path": path}, result, False))
+
+
+class GuardrailGate:
+    """Gate G: protect guardrail-critical files. Blocks Write/Edit to paths
+    marked as protected."""
+    name = "guardrail"
+
+    def evaluate(self, call: dict, ctx: GateContext) -> GateOutcome:
+        if not ctx.protected_paths or call.get("name") not in _WRITE_TOOLS:
+            return ALLOW
+        path = (call.get("args") or {}).get("file_path")
+        if not path or not is_protected(path, ctx.protected_paths):
+            return ALLOW
+        result = {
+            "error": "blocked: editing a guardrail-critical file requires human approval",
+            "verdict": "PROTECTED_PATH",
+            "reason": f"{path} is a protected guardrail file (Gate G)",
+        }
+        return GateOutcome(
+            blocked=True, block_result=result,
+            record=LedgerIntent("guardrail.block",
+                                {"tool": call["name"], "path": path}, result, False))
+
+
+GATES: tuple[Gate, ...] = (WorkspaceGate(), GuardrailGate())  # populated by later tasks, in safety order
 
 
 def evaluate(

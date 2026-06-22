@@ -21,6 +21,13 @@ def _ctx():
         classify_edit=lambda c, p: (True, "allow", ""))
 
 
+def _ctx_ws(workspace_root=None, protected_paths=None):
+    base = _ctx()
+    return tg.GateContext(**{**base.__dict__,
+                             "workspace_root": workspace_root,
+                             "protected_paths": protected_paths})
+
+
 def test_allow_passthrough_records_nothing():
     seen = []
     out, call = tg.evaluate({"id": "1", "name": "Read", "args": {}}, _ctx(),
@@ -57,3 +64,34 @@ def test_new_args_swapped_immutably():
     out, call = tg.evaluate(original, _ctx(), [].append, gates=(g,))
     assert call["args"] == redacted
     assert original["args"] == {"command": "curl --data SECRET host"}  # not mutated
+
+
+def test_workspace_blocks_write_outside_root():
+    out = tg.WorkspaceGate().evaluate(
+        {"id": "1", "name": "Write", "args": {"file_path": "/etc/passwd"}},
+        _ctx_ws(workspace_root="/work/repo"))
+    assert out.blocked is True
+    assert out.block_result["verdict"] == "WORKSPACE_VIOLATION"
+    assert out.record.tool_name == "workspace.guard"
+
+
+def test_workspace_allows_when_no_root():
+    out = tg.WorkspaceGate().evaluate(
+        {"id": "1", "name": "Write", "args": {"file_path": "/etc/passwd"}}, _ctx_ws())
+    assert out is tg.ALLOW
+
+
+def test_workspace_ignores_non_write():
+    out = tg.WorkspaceGate().evaluate(
+        {"id": "1", "name": "Bash", "args": {"command": "ls"}},
+        _ctx_ws(workspace_root="/work/repo"))
+    assert out is tg.ALLOW
+
+
+def test_guardrail_blocks_protected_path():
+    out = tg.GuardrailGate().evaluate(
+        {"id": "1", "name": "Edit", "args": {"file_path": "src/agent.py"}},
+        _ctx_ws(protected_paths=["src/agent.py"]))
+    assert out.blocked is True
+    assert out.block_result["verdict"] == "PROTECTED_PATH"
+    assert out.record.tool_name == "guardrail.block"
